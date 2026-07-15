@@ -1,6 +1,7 @@
 #include "NsmbImitationAI.h"
 
 #include <cstdio>
+#include <fstream>
 #include <string>
 
 namespace {
@@ -29,12 +30,62 @@ void TestModelRuntime()
     runtime.Disable();
     CHECK(!runtime.IsEnabled());
 
+    const auto disabled = runtime.InitializeModel(false, "ignored.json");
+    CHECK(!disabled.RequestedEnabled);
+    CHECK(!disabled.ModelPathEmpty);
+    CHECK(!disabled.Loaded);
+    CHECK(!runtime.IsEnabled());
+
+    const auto empty = runtime.InitializeModel(true, "");
+    CHECK(empty.RequestedEnabled);
+    CHECK(empty.ModelPathEmpty);
+    CHECK(!empty.Loaded);
+    CHECK(!runtime.IsEnabled());
+
+    const auto missing = runtime.InitializeModel(
+        true, "missing-nsmb-imitation-model.json");
+    CHECK(missing.RequestedEnabled);
+    CHECK(!missing.ModelPathEmpty);
+    CHECK(!missing.Loaded);
+    CHECK(!missing.Errors.TorchCompact.empty());
+    CHECK(!missing.Errors.Compact.empty());
+    CHECK(!missing.Errors.Linear.empty());
+    CHECK(!runtime.IsEnabled());
+    CHECK(runtime.DescribeModel().Type == NsmbImitationAI::ModelType::None);
+
     NsmbImitationAI::ModelLoadErrors errors;
     CHECK(!runtime.LoadModel("missing-nsmb-imitation-model.json", errors));
     CHECK(!runtime.HasModel());
     CHECK(!errors.TorchCompact.empty());
     CHECK(!errors.Compact.empty());
     CHECK(!errors.Linear.empty());
+
+    const char* modelPath = "nsmb-imitation-ai-test-model.json";
+    {
+        std::ofstream modelFile(modelPath, std::ios::out | std::ios::trunc);
+        modelFile << R"({
+  "schema": "linear-test",
+  "feature_schema_id": "feature-test",
+  "feature_names": ["x"],
+  "buttons": ["A"],
+  "mean": [0],
+  "scale": [1],
+  "bias": [0],
+  "weights": [[0]]
+})";
+    }
+    const auto loaded = runtime.InitializeModel(true, modelPath);
+    CHECK(loaded.RequestedEnabled);
+    CHECK(!loaded.ModelPathEmpty);
+    CHECK(loaded.Loaded);
+    CHECK(runtime.IsEnabled());
+    const auto description = runtime.DescribeModel();
+    CHECK(description.Type == NsmbImitationAI::ModelType::Linear);
+    CHECK(description.FeatureCount == 1);
+    CHECK(description.OutputCount == 1);
+    CHECK(description.Schema == "linear-test");
+    CHECK(description.DetailSchema == "feature-test");
+    std::remove(modelPath);
 
     CHECK(!runtime.HasFeatureCoverage());
     runtime.RecordFeatureCoverage(12, 3);

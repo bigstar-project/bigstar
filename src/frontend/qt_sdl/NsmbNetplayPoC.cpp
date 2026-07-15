@@ -6879,29 +6879,13 @@ void InitFromEnvironment()
         std::printf("NSMB Test: invalid memory patch range list\n");
     }
     G.AI = Config::LoadAIConfig();
-    G.ImitationAI.SetEnabled(G.AI.Imitation.Enabled);
-    if (G.ImitationAI.IsEnabled())
-    {
-        if (G.AI.Imitation.ModelPath.empty())
-        {
-            std::printf("NSMB ImitationAI: enabled but MELONDS_NSML_IMITATION_AI_MODEL is empty\n");
-            G.ImitationAI.Disable();
-        }
-        else
-        {
-            NsmbImitationAI::ModelLoadErrors errors;
-            if (!G.ImitationAI.LoadModel(G.AI.Imitation.ModelPath, errors))
-            {
-                std::printf(
-                    "NSMB ImitationAI: failed to load model path=%s torchCompactError=%s compactError=%s linearError=%s\n",
-                    G.AI.Imitation.ModelPath.c_str(),
-                    errors.TorchCompact.c_str(),
-                    errors.Compact.c_str(),
-                    errors.Linear.c_str());
-                G.ImitationAI.Disable();
-            }
-        }
-    }
+    const NsmbImitationAI::ModelInitializationResult imitationModelResult =
+        G.ImitationAI.InitializeModel(
+            G.AI.Imitation.Enabled, G.AI.Imitation.ModelPath);
+    const std::string imitationModelReport =
+        Diagnostics::FormatImitationModelInitializationReport(
+            G.AI.Imitation.ModelPath, imitationModelResult);
+    std::fputs(imitationModelReport.c_str(), stdout);
     G.Rollback = Config::LoadRollbackConfig();
 
     if ((G.TestEnabled || G.Enabled) && !G.Diagnostics.GameStateTracePath.empty())
@@ -7000,91 +6984,9 @@ void InitFromEnvironment()
         RollbackBackendName(), G.Mvl, G.MvlCurrentStage,
         G.MvlCurrentStageSceneSettings);
     std::fputs(startupReport.c_str(), stdout);
-    if (G.AI.Rule.Enabled)
-    {
-        std::printf(
-            "NSMB RuleAI: enabled player=%s startFrame=%u deadzone=0x%X wrapWidth=0x%X closeRange=0x%X hazardRange=0x%X/0x%X jump=%d/%d trace=%d traceInterval=%d\n",
-            G.AI.Rule.PlayerSpec.c_str(),
-            G.AI.Rule.StartFrame,
-            G.AI.Rule.HorizontalDeadzone,
-            G.AI.Rule.HorizontalWrapWidth,
-            G.AI.Rule.CloseRange,
-            G.AI.Rule.HazardHorizontalRange,
-            G.AI.Rule.HazardVerticalRange,
-            G.AI.Rule.JumpFrames,
-            G.AI.Rule.JumpInterval,
-            G.AI.Rule.TraceEnabled ? 1 : 0,
-            G.AI.Rule.TraceInterval);
-        if (G.AI.Rule.HostOnly || G.AI.Rule.ClientOnly)
-        {
-            std::printf("NSMB RuleAI: roleFilter hostOnly=%d clientOnly=%d\n",
-                G.AI.Rule.HostOnly ? 1 : 0,
-                G.AI.Rule.ClientOnly ? 1 : 0);
-        }
-    }
-    if (G.ImitationAI.IsEnabled())
-    {
-        if (G.ImitationAI.HasTorchCompactModel())
-        {
-            std::printf(
-                "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=torchCompact allowedHeldMask=0x%03X trace=%d traceInterval=%d inferInterval=%d neutralHoldFrames=%d model=%s features=%zu heads=%zu schema=%s labelSchema=%s\n",
-                G.AI.Imitation.PlayerSpec.c_str(),
-                G.AI.Imitation.StartFrame,
-                G.AI.Imitation.AllowedHeldMask,
-                G.AI.Imitation.TraceEnabled ? 1 : 0,
-                G.AI.Imitation.TraceInterval,
-                G.AI.Imitation.InferInterval,
-                G.AI.Imitation.NeutralHoldFrames,
-                G.AI.Imitation.ModelPath.c_str(),
-                G.ImitationAI.TorchCompactModel().FeatureCount(),
-                G.ImitationAI.TorchCompactModel().Heads.size(),
-                G.ImitationAI.TorchCompactModel().Schema.c_str(),
-                G.ImitationAI.TorchCompactModel().LabelSchema.c_str());
-        }
-        else if (G.ImitationAI.HasCompactModel())
-        {
-            std::printf(
-                "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=compact allowedHeldMask=0x%03X trace=%d traceInterval=%d model=%s features=%zu heads=%zu schema=%s labelSchema=%s\n",
-                G.AI.Imitation.PlayerSpec.c_str(),
-                G.AI.Imitation.StartFrame,
-                G.AI.Imitation.AllowedHeldMask,
-                G.AI.Imitation.TraceEnabled ? 1 : 0,
-                G.AI.Imitation.TraceInterval,
-                G.AI.Imitation.ModelPath.c_str(),
-                G.ImitationAI.CompactModel().FeatureCount(),
-                G.ImitationAI.CompactModel().Heads.size(),
-                G.ImitationAI.CompactModel().Schema.c_str(),
-                G.ImitationAI.CompactModel().LabelSchema.c_str());
-        }
-        else
-        {
-            std::printf(
-                "NSMB ImitationAI: enabled player=%s startFrame=%u modelType=linear threshold=%.3f allowedHeldMask=0x%03X trace=%d traceInterval=%d model=%s features=%zu buttons=%zu schema=%s featureSchema=%s\n",
-                G.AI.Imitation.PlayerSpec.c_str(),
-                G.AI.Imitation.StartFrame,
-                G.AI.Imitation.Threshold,
-                G.AI.Imitation.AllowedHeldMask,
-                G.AI.Imitation.TraceEnabled ? 1 : 0,
-                G.AI.Imitation.TraceInterval,
-                G.AI.Imitation.ModelPath.c_str(),
-                G.ImitationAI.LinearModel().FeatureCount(),
-                G.ImitationAI.LinearModel().ButtonCount(),
-                G.ImitationAI.LinearModel().Schema.c_str(),
-                G.ImitationAI.LinearModel().FeatureSchemaID.c_str());
-        }
-        if (G.AI.Imitation.HostOnly || G.AI.Imitation.ClientOnly)
-        {
-            std::printf("NSMB ImitationAI: roleFilter hostOnly=%d clientOnly=%d\n",
-                G.AI.Imitation.HostOnly ? 1 : 0,
-                G.AI.Imitation.ClientOnly ? 1 : 0);
-        }
-        std::printf(
-            "NSMB ImitationAI: hazardGuard enabled=%d horizontalRange=0x%X verticalRange=0x%X closeRange=0x%X\n",
-            G.AI.Imitation.HazardGuardEnabled ? 1 : 0,
-            G.AI.Imitation.HazardGuardHorizontalRange,
-            G.AI.Imitation.HazardGuardVerticalRange,
-            G.AI.Imitation.HazardGuardCloseRange);
-    }
+    const std::string aiStartupReport = Diagnostics::FormatAIStartupReport(
+        G.AI, G.ImitationAI.IsEnabled(), G.ImitationAI.DescribeModel());
+    std::fputs(aiStartupReport.c_str(), stdout);
     std::fflush(stdout);
 }
 

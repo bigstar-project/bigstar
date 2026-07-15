@@ -1,4 +1,5 @@
 #include "NsmbNetplayDiagnostics.h"
+#include "NsmbImitationAI.h"
 
 #include <algorithm>
 #include <array>
@@ -474,6 +475,103 @@ std::string FormatNetplayStartupReport(
       mvl.DirectBootFrame, mvl.DirectBootScene, currentStage,
       mvl.DirectBootPlayerID, currentSceneSettings, mvl.CourseMode.c_str(),
       mvl.BigStarTarget);
+}
+
+std::string FormatImitationModelInitializationReport(
+    const std::string &modelPath,
+    const NsmbImitationAI::ModelInitializationResult &result) {
+  if (!result.RequestedEnabled || result.Loaded)
+    return {};
+  if (result.ModelPathEmpty) {
+    return "NSMB ImitationAI: enabled but "
+           "MELONDS_NSML_IMITATION_AI_MODEL is empty\n";
+  }
+  return FormatPrintf(
+      "NSMB ImitationAI: failed to load model path=%s "
+      "torchCompactError=%s compactError=%s linearError=%s\n",
+      modelPath.c_str(), result.Errors.TorchCompact.c_str(),
+      result.Errors.Compact.c_str(), result.Errors.Linear.c_str());
+}
+
+std::string FormatAIStartupReport(
+    const Config::AIConfig &ai, bool imitationEnabled,
+    const NsmbImitationAI::ModelDescription &model) {
+  std::string report;
+  if (ai.Rule.Enabled) {
+    report += FormatPrintf(
+        "NSMB RuleAI: enabled player=%s startFrame=%u deadzone=0x%X "
+        "wrapWidth=0x%X closeRange=0x%X hazardRange=0x%X/0x%X "
+        "jump=%d/%d trace=%d traceInterval=%d\n",
+        ai.Rule.PlayerSpec.c_str(), ai.Rule.StartFrame,
+        ai.Rule.HorizontalDeadzone, ai.Rule.HorizontalWrapWidth,
+        ai.Rule.CloseRange, ai.Rule.HazardHorizontalRange,
+        ai.Rule.HazardVerticalRange, ai.Rule.JumpFrames,
+        ai.Rule.JumpInterval, ai.Rule.TraceEnabled ? 1 : 0,
+        ai.Rule.TraceInterval);
+    if (ai.Rule.HostOnly || ai.Rule.ClientOnly) {
+      report += FormatPrintf(
+          "NSMB RuleAI: roleFilter hostOnly=%d clientOnly=%d\n",
+          ai.Rule.HostOnly ? 1 : 0, ai.Rule.ClientOnly ? 1 : 0);
+    }
+  }
+
+  if (!imitationEnabled || model.Type == NsmbImitationAI::ModelType::None)
+    return report;
+
+  switch (model.Type) {
+  case NsmbImitationAI::ModelType::TorchCompact:
+    report += FormatPrintf(
+        "NSMB ImitationAI: enabled player=%s startFrame=%u "
+        "modelType=torchCompact allowedHeldMask=0x%03X trace=%d "
+        "traceInterval=%d inferInterval=%d neutralHoldFrames=%d model=%s "
+        "features=%zu heads=%zu schema=%s labelSchema=%s\n",
+        ai.Imitation.PlayerSpec.c_str(), ai.Imitation.StartFrame,
+        ai.Imitation.AllowedHeldMask, ai.Imitation.TraceEnabled ? 1 : 0,
+        ai.Imitation.TraceInterval, ai.Imitation.InferInterval,
+        ai.Imitation.NeutralHoldFrames, ai.Imitation.ModelPath.c_str(),
+        model.FeatureCount, model.OutputCount, model.Schema.c_str(),
+        model.DetailSchema.c_str());
+    break;
+  case NsmbImitationAI::ModelType::Compact:
+    report += FormatPrintf(
+        "NSMB ImitationAI: enabled player=%s startFrame=%u "
+        "modelType=compact allowedHeldMask=0x%03X trace=%d "
+        "traceInterval=%d model=%s features=%zu heads=%zu schema=%s "
+        "labelSchema=%s\n",
+        ai.Imitation.PlayerSpec.c_str(), ai.Imitation.StartFrame,
+        ai.Imitation.AllowedHeldMask, ai.Imitation.TraceEnabled ? 1 : 0,
+        ai.Imitation.TraceInterval, ai.Imitation.ModelPath.c_str(),
+        model.FeatureCount, model.OutputCount, model.Schema.c_str(),
+        model.DetailSchema.c_str());
+    break;
+  case NsmbImitationAI::ModelType::Linear:
+    report += FormatPrintf(
+        "NSMB ImitationAI: enabled player=%s startFrame=%u "
+        "modelType=linear threshold=%.3f allowedHeldMask=0x%03X trace=%d "
+        "traceInterval=%d model=%s features=%zu buttons=%zu schema=%s "
+        "featureSchema=%s\n",
+        ai.Imitation.PlayerSpec.c_str(), ai.Imitation.StartFrame,
+        ai.Imitation.Threshold, ai.Imitation.AllowedHeldMask,
+        ai.Imitation.TraceEnabled ? 1 : 0, ai.Imitation.TraceInterval,
+        ai.Imitation.ModelPath.c_str(), model.FeatureCount,
+        model.OutputCount, model.Schema.c_str(), model.DetailSchema.c_str());
+    break;
+  case NsmbImitationAI::ModelType::None:
+    break;
+  }
+  if (ai.Imitation.HostOnly || ai.Imitation.ClientOnly) {
+    report += FormatPrintf(
+        "NSMB ImitationAI: roleFilter hostOnly=%d clientOnly=%d\n",
+        ai.Imitation.HostOnly ? 1 : 0, ai.Imitation.ClientOnly ? 1 : 0);
+  }
+  report += FormatPrintf(
+      "NSMB ImitationAI: hazardGuard enabled=%d horizontalRange=0x%X "
+      "verticalRange=0x%X closeRange=0x%X\n",
+      ai.Imitation.HazardGuardEnabled ? 1 : 0,
+      ai.Imitation.HazardGuardHorizontalRange,
+      ai.Imitation.HazardGuardVerticalRange,
+      ai.Imitation.HazardGuardCloseRange);
+  return report;
 }
 
 struct Runtime::Impl {

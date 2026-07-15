@@ -1,4 +1,5 @@
 #include "NsmbNetplayDiagnostics.h"
+#include "NsmbImitationAI.h"
 
 #include <chrono>
 #include <cstdio>
@@ -573,6 +574,114 @@ void TestStartupReportFormattingContract() {
   CHECK(Fnv1a64(netplayReport) == 12223666959346911241ull);
 }
 
+void TestAIStartupReportFormattingContract() {
+  using namespace NsmbNetplayPoC;
+  NsmbImitationAI::ModelInitializationResult disabled;
+  CHECK(Diagnostics::FormatImitationModelInitializationReport(
+            "ignored.json", disabled)
+            .empty());
+
+  NsmbImitationAI::ModelInitializationResult empty;
+  empty.RequestedEnabled = true;
+  empty.ModelPathEmpty = true;
+  CHECK(Diagnostics::FormatImitationModelInitializationReport("", empty) ==
+        "NSMB ImitationAI: enabled but MELONDS_NSML_IMITATION_AI_MODEL is "
+        "empty\n");
+
+  NsmbImitationAI::ModelInitializationResult failed;
+  failed.RequestedEnabled = true;
+  failed.Errors.TorchCompact = "torch error";
+  failed.Errors.Compact = "compact error";
+  failed.Errors.Linear = "linear error";
+  const std::string failedReport =
+      Diagnostics::FormatImitationModelInitializationReport("policy.json",
+                                                            failed);
+  CHECK(failedReport ==
+        "NSMB ImitationAI: failed to load model path=policy.json "
+        "torchCompactError=torch error compactError=compact error "
+        "linearError=linear error\n");
+  failed.Loaded = true;
+  CHECK(Diagnostics::FormatImitationModelInitializationReport("policy.json",
+                                                              failed)
+            .empty());
+
+  Config::AIConfig ai;
+  ai.Rule.Enabled = true;
+  ai.Rule.HostOnly = true;
+  ai.Rule.PlayerSpec = "local";
+  ai.Rule.StartFrame = 123;
+  ai.Rule.HorizontalDeadzone = 0x111;
+  ai.Rule.HorizontalWrapWidth = 0x222;
+  ai.Rule.CloseRange = 0x333;
+  ai.Rule.HazardHorizontalRange = 0x444;
+  ai.Rule.HazardVerticalRange = 0x555;
+  ai.Rule.JumpFrames = 6;
+  ai.Rule.JumpInterval = 17;
+  ai.Rule.TraceEnabled = true;
+  ai.Rule.TraceInterval = 19;
+  ai.Imitation.HostOnly = true;
+  ai.Imitation.PlayerSpec = "remote";
+  ai.Imitation.StartFrame = 456;
+  ai.Imitation.Threshold = 0.625;
+  ai.Imitation.AllowedHeldMask = 0x8A3;
+  ai.Imitation.TraceEnabled = true;
+  ai.Imitation.TraceInterval = 23;
+  ai.Imitation.InferInterval = 29;
+  ai.Imitation.NeutralHoldFrames = 31;
+  ai.Imitation.ModelPath = "model.json";
+  ai.Imitation.HazardGuardEnabled = true;
+  ai.Imitation.HazardGuardHorizontalRange = 0x666;
+  ai.Imitation.HazardGuardVerticalRange = 0x777;
+  ai.Imitation.HazardGuardCloseRange = 0x888;
+
+  NsmbImitationAI::ModelDescription model;
+  model.Type = NsmbImitationAI::ModelType::TorchCompact;
+  model.FeatureCount = 101;
+  model.OutputCount = 7;
+  model.Schema = "torch-schema";
+  model.DetailSchema = "torch-labels";
+  const std::string torchReport =
+      Diagnostics::FormatAIStartupReport(ai, true, model);
+  CHECK(torchReport.find("NSMB RuleAI: enabled player=local startFrame=123") ==
+        0);
+  CHECK(torchReport.find("modelType=torchCompact") != std::string::npos);
+  CHECK(torchReport.find("features=101 heads=7 schema=torch-schema "
+                         "labelSchema=torch-labels") != std::string::npos);
+  CHECK(torchReport.find("hazardGuard enabled=1 horizontalRange=0x666") !=
+        std::string::npos);
+
+  model.Type = NsmbImitationAI::ModelType::Compact;
+  model.FeatureCount = 202;
+  model.OutputCount = 8;
+  model.Schema = "compact-schema";
+  model.DetailSchema = "compact-labels";
+  const std::string compactReport =
+      Diagnostics::FormatAIStartupReport(ai, true, model);
+  CHECK(compactReport.find("modelType=compact") != std::string::npos);
+  CHECK(compactReport.find("features=202 heads=8 schema=compact-schema "
+                           "labelSchema=compact-labels") != std::string::npos);
+
+  model.Type = NsmbImitationAI::ModelType::Linear;
+  model.FeatureCount = 303;
+  model.OutputCount = 9;
+  model.Schema = "linear-schema";
+  model.DetailSchema = "linear-features";
+  const std::string linearReport =
+      Diagnostics::FormatAIStartupReport(ai, true, model);
+  CHECK(linearReport.find("modelType=linear threshold=0.625") !=
+        std::string::npos);
+  CHECK(linearReport.find("features=303 buttons=9 schema=linear-schema "
+                          "featureSchema=linear-features") !=
+        std::string::npos);
+
+  CHECK(Diagnostics::FormatAIStartupReport(ai, false, model).find(
+            "NSMB ImitationAI:") == std::string::npos);
+  CHECK(Fnv1a64(failedReport) == 11833481489812603706ull);
+  CHECK(Fnv1a64(torchReport) == 11100805931403676302ull);
+  CHECK(Fnv1a64(compactReport) == 8465431890678921053ull);
+  CHECK(Fnv1a64(linearReport) == 9194670781819015089ull);
+}
+
 } // namespace
 
 int main() {
@@ -587,6 +696,7 @@ int main() {
   TestRuntimePatchLogContract();
   TestDiagnosticJsonAndPositionContract();
   TestStartupReportFormattingContract();
+  TestAIStartupReportFormattingContract();
   if (Failures != 0) {
     std::printf("nsmb_netplay_diagnostics_tests: %d failure(s)\n", Failures);
     return 1;

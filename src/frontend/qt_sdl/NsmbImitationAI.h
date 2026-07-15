@@ -190,6 +190,23 @@ struct ModelLoadErrors
     std::string Linear;
 };
 
+struct ModelInitializationResult
+{
+    bool RequestedEnabled = false;
+    bool ModelPathEmpty = false;
+    bool Loaded = false;
+    ModelLoadErrors Errors;
+};
+
+struct ModelDescription
+{
+    ModelType Type = ModelType::None;
+    std::size_t FeatureCount = 0;
+    std::size_t OutputCount = 0;
+    std::string Schema;
+    std::string DetailSchema;
+};
+
 class Runtime
 {
 public:
@@ -203,7 +220,9 @@ public:
     void Disable() { Enabled = false; }
     bool IsEnabled() const { return Enabled; }
 
+    ModelInitializationResult InitializeModel(bool enabled, const std::string& path);
     bool LoadModel(const std::string& path, ModelLoadErrors& errors);
+    ModelDescription DescribeModel() const;
     bool HasModel() const { return LoadedModelType != ModelType::None; }
     ModelType LoadedType() const { return LoadedModelType; }
     bool HasCompactModel() const { return LoadedModelType == ModelType::Compact; }

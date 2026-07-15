@@ -13,6 +13,11 @@
 #include <string>
 #include <vector>
 
+namespace NsmbImitationAI {
+struct ModelDescription;
+struct ModelInitializationResult;
+} // namespace NsmbImitationAI
+
 namespace NsmbNetplayPoC::Diagnostics {
 
 constexpr std::size_t kDiagnosticRingCapacity = 720;
@@ -144,6 +149,12 @@ std::string FormatNetplayStartupReport(
     const Config::InputConfig &input, const Config::RollbackConfig &rollback,
     const char *rollbackBackend, const Config::MvlConfig &mvl,
     int currentStage, melonDS::u32 currentSceneSettings);
+std::string FormatImitationModelInitializationReport(
+    const std::string &modelPath,
+    const NsmbImitationAI::ModelInitializationResult &result);
+std::string FormatAIStartupReport(
+    const Config::AIConfig &ai, bool imitationEnabled,
+    const NsmbImitationAI::ModelDescription &model);
 
 enum class RuntimePatchLogKind : std::size_t {
   ForceDeathCounters,

@@ -969,6 +969,57 @@ bool Runtime::LoadModel(const std::string& path, ModelLoadErrors& errors)
     return false;
 }
 
+ModelInitializationResult Runtime::InitializeModel(bool enabled, const std::string& path)
+{
+    ModelInitializationResult result;
+    result.RequestedEnabled = enabled;
+    SetEnabled(enabled);
+    if (!IsEnabled())
+        return result;
+
+    if (path.empty())
+    {
+        result.ModelPathEmpty = true;
+        Disable();
+        return result;
+    }
+
+    result.Loaded = LoadModel(path, result.Errors);
+    if (!result.Loaded)
+        Disable();
+    return result;
+}
+
+ModelDescription Runtime::DescribeModel() const
+{
+    ModelDescription description;
+    description.Type = LoadedModelType;
+    switch (LoadedModelType)
+    {
+    case ModelType::TorchCompact:
+        description.FeatureCount = TorchCompact.FeatureCount();
+        description.OutputCount = TorchCompact.Heads.size();
+        description.Schema = TorchCompact.Schema;
+        description.DetailSchema = TorchCompact.LabelSchema;
+        break;
+    case ModelType::Compact:
+        description.FeatureCount = Compact.FeatureCount();
+        description.OutputCount = Compact.Heads.size();
+        description.Schema = Compact.Schema;
+        description.DetailSchema = Compact.LabelSchema;
+        break;
+    case ModelType::Linear:
+        description.FeatureCount = Linear.FeatureCount();
+        description.OutputCount = Linear.ButtonCount();
+        description.Schema = Linear.Schema;
+        description.DetailSchema = Linear.FeatureSchemaID;
+        break;
+    case ModelType::None:
+        break;
+    }
+    return description;
+}
+
 void Runtime::ResetPlayer(int instanceID, int player)
 {
     if (!ValidPlayer(instanceID, player))
