@@ -30,7 +30,6 @@ param(
     [int]$WorldStateSyncInterval = 2,
     [int]$WorldStateMaxPredictFrames = 1,
     [int]$WorldStateActorRescanInterval = 30,
-    [switch]$WorldStateSkipEffects,
     [switch]$WorldStateTraceObjectLifecycles,
     [switch]$WorldStateTraceActorInternals,
     [switch]$WorldStateTraceEffects,
@@ -351,7 +350,6 @@ if ($PlanDActorSnapshot) {
         "-WorldStateSync",
         "-WorldStateApply",
         "-WorldStateApplyMovingHazard",
-        "-WorldStateApplyEffects",
         "-WorldStateSyncInterval", "$WorldStateSyncInterval",
         "-WorldStateMaxPredictFrames", "$WorldStateMaxPredictFrames",
         "-WorldStateActorRescanInterval", "$WorldStateActorRescanInterval"
@@ -370,9 +368,6 @@ if ($WorldStateTraceActorInternals) {
 }
 if ($WorldStateTraceEffects) {
     $common += "-WorldStateTraceEffects"
-}
-if ($WorldStateSkipEffects) {
-    $common += "-WorldStateSkipEffects"
 }
 if ($NoFrameLimit) {
     $common += "-NoFrameLimit"

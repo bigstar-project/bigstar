@@ -167,9 +167,6 @@ void ApplyMovingHazardState(
     melonDS::NDS *nds, const WireProtocol::WireMovingHazardState &sample,
     GameStateModel::StateSyncRuntime &runtime,
     const MovingHazardApplyOptions &options);
-void ApplyWorldEffectState(
-    melonDS::NDS *nds,
-    const WireProtocol::WireWorldEffectState &sample);
 void ApplyPlayerState(melonDS::NDS *nds,
                       const WireProtocol::WirePlayerState &sample,
                       GameStateModel::StateSyncRuntime &runtime,

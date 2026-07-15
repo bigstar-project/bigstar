@@ -1089,8 +1089,6 @@ void TestStateSyncConfigReadsClampsAndSkipPriorities() {
       {"MELONDS_NSML_WORLD_STATE_SKIP_STAR", "1"},
       {"MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD", "1"},
       {"MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD", "1"},
-      {"MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS", "1"},
-      {"MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS", "1"},
       {"MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS", "1"},
       {"MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES", "1"},
       {"MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS", "1"},
@@ -1117,7 +1115,6 @@ void TestStateSyncConfigReadsClampsAndSkipPriorities() {
   CHECK(config.WorldApplyEnabled);
   CHECK(!config.WorldApplyStarActor);
   CHECK(!config.WorldApplyMovingHazard);
-  CHECK(!config.WorldApplyEffects);
   CHECK(config.WorldTraceMovingHazards);
   CHECK(config.WorldTraceObjectLifecycles);
   CHECK(config.WorldTraceActorInternals);

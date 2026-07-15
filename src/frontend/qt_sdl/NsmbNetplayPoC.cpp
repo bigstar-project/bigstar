@@ -79,18 +79,14 @@ using WireProtocol::WireMovingHazardState;
 using WireProtocol::WireNSMLPacket;
 using WireProtocol::WirePlayerState;
 using WireProtocol::WireWorldActorState;
-using WireProtocol::WireWorldEffectSlot;
-using WireProtocol::WireWorldEffectState;
 using WireProtocol::WireWorldState;
-using WireProtocol::kMaxWorldEffects;
 using WireProtocol::kMaxWorldMovingHazards;
 using WireProtocol::kWireKindMovingHazardState;
 using WireProtocol::kWireKindPacket;
 using WireProtocol::kWireKindPlayerState;
 using WireProtocol::kWireKindState;
-using WireProtocol::kWireKindWorldEffectState;
 using WireProtocol::kWireKindWorldState;
-using WireProtocol::kWorldEffectWordCount;
+using GameStateReader::WorldEffectSlotSample;
 using GameStateModel::AITerrainDerivedSummary;
 using GameStateModel::AITileGridSample;
 using GameStateModel::AITileProbeSample;
@@ -210,10 +206,6 @@ constexpr melonDS::u32 kEffectVTablePtr = 0x02126A2C;
 constexpr melonDS::u32 kWorldEffectSlotBase = 0x021C3268;
 constexpr melonDS::u32 kWorldEffectSlotStride = 0x1D4;
 constexpr melonDS::u32 kWorldEffectSlotCount = 32;
-constexpr melonDS::u32 kWorldEffectWordStart = 0x04;
-constexpr melonDS::u32 kWorldEffectWordEnd = 0xAC;
-static_assert(kWorldEffectWordCount ==
-    ((kWorldEffectWordEnd - kWorldEffectWordStart) / sizeof(melonDS::u32)) + 1);
 constexpr melonDS::u32 kFireballsHandlerAddr = 0x02129484;
 constexpr melonDS::u32 kProjectilesHandlerAddr = 0x0212A680;
 
@@ -1168,22 +1160,6 @@ ReceiveDisposition HandleReceivedMovingHazardStateLocked(const void* data, std::
     return ReceiveDisposition::CleanupPacket;
 }
 
-ReceiveDisposition HandleReceivedWorldEffectStateLocked(const void* data, std::size_t size)
-{
-    WireWorldEffectState packet;
-    std::memcpy(&packet, data, size);
-    if (packet.Magic != kMagic || packet.Version != kVersion
-        || packet.Kind != kWireKindWorldEffectState || packet.Count > kMaxWorldEffects)
-    {
-        return ReceiveDisposition::CleanupPacket;
-    }
-
-    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
-    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
-        return ReceiveDisposition::SkipPacketCleanup;
-    G.GameSync.RemoteState.StoreWorldEffectState(packet);
-    return ReceiveDisposition::CleanupPacket;
-}
 void HandleReceivedGameStateLocked(const void* data, std::size_t size)
 {
     WireGameState packet;
@@ -1250,7 +1226,6 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     sizeof(WirePlayerState),
                     sizeof(WireWorldState),
                     sizeof(WireMovingHazardState),
-                    sizeof(WireWorldEffectState),
                     sizeof(WireGameState),
                 });
             if (packetClass == PacketClassifier::PacketClass::Input)
@@ -1298,16 +1273,6 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
             else if (packetClass == PacketClassifier::PacketClass::MovingHazardState)
             {
                 if (HandleReceivedMovingHazardStateLocked(
-                        event.packet->data,
-                        event.packet->dataLength)
-                    == ReceiveDisposition::SkipPacketCleanup)
-                {
-                    break;
-                }
-            }
-            else if (packetClass == PacketClassifier::PacketClass::WorldEffectState)
-            {
-                if (HandleReceivedWorldEffectStateLocked(
                         event.packet->data,
                         event.packet->dataLength)
                     == ReceiveDisposition::SkipPacketCleanup)
@@ -3845,7 +3810,7 @@ void TraceWorldEffectsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS*
     for (melonDS::u32 slotIndex = 0; slotIndex < kWorldEffectSlotCount; slotIndex++)
     {
         const melonDS::u32 base = kWorldEffectSlotBase + slotIndex * kWorldEffectSlotStride;
-        WireWorldEffectSlot slot {};
+        WorldEffectSlotSample slot {};
         if (!GameStateReader::ReadWorldEffectSlot(nds, base, slot))
             continue;
 
@@ -5010,25 +4975,6 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
     GameStateWriter::ApplyMovingHazardState(nds, sample, G.GameSync, options);
 }
 
-void ApplyRemoteWorldEffectState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.Enabled || !G.StateSync.WorldApplyEffects || G.NetRole != Role::Client || !nds || !nds->MainRAM)
-        return;
-    if (instanceID < 0 || instanceID >= 16 || frame < G.Connection.StartFrame)
-        return;
-
-    WireWorldEffectState sample {};
-    {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        PumpNetworkLocked();
-        const WireWorldEffectState* stored = G.GameSync.RemoteState.WorldEffectState();
-        if (!stored)
-            return;
-        sample = *stored;
-    }
-    GameStateWriter::ApplyWorldEffectState(nds, sample);
-}
-
 void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool preferFreshSample = false)
 {
     if (!G.Enabled || !G.StateSync.PlayerApplyEnabled) return;
@@ -5526,29 +5472,6 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             packet.Star.Found);
     }
 
-    G.Transport.Send(&packet, sizeof(packet), 0, false);
-}
-
-void SyncWorldEffectState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.Enabled || !G.StateSync.WorldEnabled || !G.StateSync.WorldApplyEffects ||
-        G.NetRole != Role::Host || !nds || !nds->MainRAM)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    if (frame < G.Connection.StartFrame)
-        return;
-    if ((frame % static_cast<melonDS::u32>(G.StateSync.WorldInterval)) != 0)
-        return;
-
-    WireWorldEffectState packet {};
-    if (!GameStateReader::BuildWorldEffectStatePacket(
-            nds, static_cast<melonDS::u32>(instanceID), frame, packet))
-        return;
-
-    std::lock_guard<std::mutex> lock(G.Mutex);
-    if (!G.Transport.IsConnected())
-        return;
     G.Transport.Send(&packet, sizeof(packet), 0, false);
 }
 
@@ -6227,10 +6150,8 @@ void RunBeforeFrameActorStatePhase(int instanceID, melonDS::u32 frame, melonDS::
     ApplyRemoteGameState(instanceID, frame, nds);
     ApplyRemoteMovingHazardState(instanceID, frame, nds);
     ApplyRemoteWorldState(instanceID, frame, nds);
-    ApplyRemoteWorldEffectState(instanceID, frame, nds);
     ApplyRemotePlayerState(instanceID, frame, nds);
     SyncWorldState(instanceID, frame, nds);
-    SyncWorldEffectState(instanceID, frame, nds);
     SyncMovingHazardState(instanceID, frame, nds);
     SyncPlayerState(instanceID, frame, nds);
 }
@@ -6892,8 +6813,6 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         SyncWorldState(instanceID, logFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        SyncWorldEffectState(instanceID, logFrame, nds);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         SyncMovingHazardState(instanceID, logFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         SyncPlayerState(instanceID, logFrame, nds);
@@ -6904,8 +6823,6 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     TraceHangPhase("begin", "apply-world", instanceID, logFrame, logFrame, logFrame);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteWorldState(instanceID, logFrame, nds);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyRemoteWorldEffectState(instanceID, logFrame, nds);
     const auto afterApplyWorld = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "apply-player", instanceID, logFrame, logFrame, logFrame);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
@@ -6920,7 +6837,6 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     const auto afterSyncGame = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "sync-world-tail", instanceID, logFrame, logFrame, logFrame);
     SyncWorldState(instanceID, logFrame, nds);
-    SyncWorldEffectState(instanceID, logFrame, nds);
     const auto afterSyncWorld = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "sync-hazard-tail", instanceID, logFrame, logFrame, logFrame);
     SyncMovingHazardState(instanceID, logFrame, nds);

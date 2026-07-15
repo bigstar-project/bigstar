@@ -840,7 +840,6 @@ void RemoteStateStore::ResetForRestart() {
   PlayerStates_.clear();
   WorldState_.reset();
   MovingHazardState_.reset();
-  WorldEffectState_.reset();
 }
 
 void RemoteStateStore::StoreGameState(const DecodedGameState &state) {
@@ -866,11 +865,6 @@ bool RemoteStateStore::StoreWorldState(
 bool RemoteStateStore::StoreMovingHazardState(
     const WireProtocol::WireMovingHazardState &state) {
   return StoreLatest(MovingHazardState_, state);
-}
-
-bool RemoteStateStore::StoreWorldEffectState(
-    const WireProtocol::WireWorldEffectState &state) {
-  return StoreLatest(WorldEffectState_, state);
 }
 
 const GameStateSyncHashes *RemoteStateStore::FindGameStateHashes(
@@ -931,11 +925,6 @@ const WireProtocol::WireWorldState *RemoteStateStore::WorldState() const {
 const WireProtocol::WireMovingHazardState *
 RemoteStateStore::MovingHazardState() const {
   return MovingHazardState_ ? &*MovingHazardState_ : nullptr;
-}
-
-const WireProtocol::WireWorldEffectState *
-RemoteStateStore::WorldEffectState() const {
-  return WorldEffectState_ ? &*WorldEffectState_ : nullptr;
 }
 
 std::size_t RemoteStateStore::PlayerStateCount() const {

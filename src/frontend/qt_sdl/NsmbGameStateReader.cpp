@@ -95,9 +95,6 @@ constexpr melonDS::u32 kPlayerBaseTransitFuncOffset = 0x990;
 constexpr melonDS::u32 kPlayerBaseTransitArgOffset = 0x994;
 constexpr melonDS::u32 kEffectVTableStart = 0x02126A24;
 constexpr melonDS::u32 kEffectVTablePtr = 0x02126A2C;
-constexpr melonDS::u32 kWorldEffectSlotBase = 0x021C3268;
-constexpr melonDS::u32 kWorldEffectSlotStride = 0x1D4;
-constexpr melonDS::u32 kWorldEffectSlotCount = 32;
 constexpr melonDS::u32 kWorldEffectWordStart = 0x04;
 constexpr melonDS::u32 kWorldEffectWordEnd = 0xAC;
 constexpr melonDS::u32 kGamePlayerPowerupAddr = 0x0208B324;
@@ -2376,7 +2373,7 @@ WireProtocol::WireWorldState BuildWorldStatePacket(
 }
 
 bool ReadWorldEffectSlot(melonDS::NDS *nds, melonDS::u32 base,
-                         WireProtocol::WireWorldEffectSlot &slot) {
+                         WorldEffectSlotSample &slot) {
   if (base < 0x02100000u || !nds || !nds->MainRAM ||
       !IsValidMainRAMRange(nds, base,
                            kWorldEffectWordEnd + sizeof(melonDS::u32)))
@@ -2400,7 +2397,7 @@ bool ReadWorldEffectSlot(melonDS::NDS *nds, melonDS::u32 base,
     slot.Base = base;
     slot.VTable = vtable;
     for (std::size_t index = 0;
-         index < WireProtocol::kWorldEffectWordCount; index++) {
+         index < kWorldEffectWordCount; index++) {
       const melonDS::u32 wordOffset =
           kWorldEffectWordStart +
           static_cast<melonDS::u32>(index * sizeof(melonDS::u32));
@@ -2409,28 +2406,6 @@ bool ReadWorldEffectSlot(melonDS::NDS *nds, melonDS::u32 base,
     return true;
   }
   return false;
-}
-
-bool BuildWorldEffectStatePacket(
-    melonDS::NDS *nds, melonDS::u32 instance, melonDS::u32 frame,
-    WireProtocol::WireWorldEffectState &packet) {
-  packet = {};
-  packet.Magic = WireProtocol::kMagic;
-  packet.Version = WireProtocol::kVersion;
-  packet.Kind = WireProtocol::kWireKindWorldEffectState;
-  packet.Frame = frame;
-  packet.Instance = instance;
-  for (melonDS::u32 slotIndex = 0;
-       slotIndex < kWorldEffectSlotCount &&
-       packet.Count < WireProtocol::kMaxWorldEffects;
-       slotIndex++) {
-    const melonDS::u32 base =
-        kWorldEffectSlotBase + slotIndex * kWorldEffectSlotStride;
-    WireProtocol::WireWorldEffectSlot slot{};
-    if (ReadWorldEffectSlot(nds, base, slot))
-      packet.Effects[packet.Count++] = slot;
-  }
-  return packet.Count != 0;
 }
 
 WireProtocol::WireMovingHazardState BuildMovingHazardStatePacket(

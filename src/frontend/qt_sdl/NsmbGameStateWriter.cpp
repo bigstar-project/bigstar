@@ -52,10 +52,6 @@ constexpr melonDS::u32 kPlayerBasePowerupFormStateOffset = 0x7AC;
 constexpr melonDS::u32 kPlayerBasePowerupSubStateOffset = 0x7AD;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
-constexpr melonDS::u32 kEffectVTableStart = 0x02126A24;
-constexpr melonDS::u32 kEffectVTablePtr = 0x02126A2C;
-constexpr melonDS::u32 kWorldEffectWordStart = 0x04;
-constexpr melonDS::u32 kWorldEffectWordEnd = 0xAC;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
 constexpr melonDS::u16 kStageCameraObjectID = 0x013C;
 
@@ -884,35 +880,6 @@ void ApplyMovingHazardState(
       std::printf(" slot%zu=%u/%u", index, nextRemoteGUIDs[index],
                   nextLocalGUIDs[index]);
     std::printf("\n");
-  }
-}
-
-void ApplyWorldEffectState(
-    melonDS::NDS *nds,
-    const WireProtocol::WireWorldEffectState &sample) {
-  for (std::size_t index = 0;
-       index < std::min<std::size_t>(sample.Count,
-                                     WireProtocol::kMaxWorldEffects);
-       index++) {
-    const WireProtocol::WireWorldEffectSlot &remote = sample.Effects[index];
-    if (!remote.Found ||
-        !IsValidMainRAMRange(nds, remote.Base,
-                             kWorldEffectWordEnd + sizeof(melonDS::u32)))
-      continue;
-    melonDS::u32 localVTable = 0;
-    if (!ReadMainRAMAddressU32(nds, remote.Base, localVTable) ||
-        (localVTable != kEffectVTablePtr &&
-         localVTable != kEffectVTableStart))
-      continue;
-    for (std::size_t wordIndex = 0;
-         wordIndex < WireProtocol::kWorldEffectWordCount; wordIndex++) {
-      const melonDS::u32 relativeOffset =
-          kWorldEffectWordStart +
-          static_cast<melonDS::u32>(wordIndex * sizeof(melonDS::u32));
-      const melonDS::u32 address = remote.Base + relativeOffset;
-      if ((address & 3u) == 0)
-        nds->ARM9Write32(address, remote.Words[wordIndex]);
-    }
   }
 }
 

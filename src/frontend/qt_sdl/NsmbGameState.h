@@ -648,8 +648,6 @@ public:
   bool StoreWorldState(const WireProtocol::WireWorldState &state);
   bool StoreMovingHazardState(
       const WireProtocol::WireMovingHazardState &state);
-  bool StoreWorldEffectState(
-      const WireProtocol::WireWorldEffectState &state);
 
   const GameStateSyncHashes *FindGameStateHashes(int instanceID,
                                                  melonDS::u32 frame) const;
@@ -664,7 +662,6 @@ public:
 
   const WireProtocol::WireWorldState *WorldState() const;
   const WireProtocol::WireMovingHazardState *MovingHazardState() const;
-  const WireProtocol::WireWorldEffectState *WorldEffectState() const;
   std::size_t PlayerStateCount() const;
 
 private:
@@ -673,7 +670,6 @@ private:
   std::map<melonDS::u64, WireProtocol::WirePlayerState> PlayerStates_;
   std::optional<WireProtocol::WireWorldState> WorldState_;
   std::optional<WireProtocol::WireMovingHazardState> MovingHazardState_;
-  std::optional<WireProtocol::WireWorldEffectState> WorldEffectState_;
 };
 
 class StateSyncRuntime {

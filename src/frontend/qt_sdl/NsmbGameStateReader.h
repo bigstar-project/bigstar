@@ -88,6 +88,15 @@ struct GameStateObjectScanCache {
   ObjectLifecycleSummary Lifecycle;
 };
 
+constexpr std::size_t kWorldEffectWordCount = 43;
+
+struct WorldEffectSlotSample {
+  melonDS::u32 Found = 0;
+  melonDS::u32 Base = 0;
+  melonDS::u32 VTable = 0;
+  melonDS::u32 Words[kWorldEffectWordCount]{};
+};
+
 class ScopedGameStateObjectScanCache {
 public:
   explicit ScopedGameStateObjectScanCache(
@@ -160,10 +169,7 @@ WireProtocol::WireWorldState BuildWorldStatePacket(
     melonDS::NDS *nds, melonDS::u32 instance, melonDS::u32 frame,
     int actorRescanInterval, GameStateModel::StateSyncRuntime &runtime);
 bool ReadWorldEffectSlot(melonDS::NDS *nds, melonDS::u32 base,
-                         WireProtocol::WireWorldEffectSlot &slot);
-bool BuildWorldEffectStatePacket(
-    melonDS::NDS *nds, melonDS::u32 instance, melonDS::u32 frame,
-    WireProtocol::WireWorldEffectState &packet);
+                         WorldEffectSlotSample &slot);
 WireProtocol::WireMovingHazardState BuildMovingHazardStatePacket(
     melonDS::NDS *nds, melonDS::u32 instance, melonDS::u32 frame,
     int actorRescanInterval, GameStateModel::StateSyncRuntime &runtime);

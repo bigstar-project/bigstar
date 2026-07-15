@@ -21,11 +21,7 @@ constexpr melonDS::u32 kWireKindWorldState =
     0x41545357; // "WSTA", little endian
 constexpr melonDS::u32 kWireKindMovingHazardState =
     0x415A4148; // "HAZA", little endian
-constexpr melonDS::u32 kWireKindWorldEffectState =
-    0x54434645; // "EFCT", little endian
 constexpr std::size_t kMaxWorldMovingHazards = 4;
-constexpr std::size_t kMaxWorldEffects = 4;
-constexpr std::size_t kWorldEffectWordCount = 43;
 
 struct WireNSMLPacket {
   melonDS::u32 Magic;
@@ -238,26 +234,6 @@ struct WireMovingHazardState {
 
 static_assert(sizeof(WireMovingHazardState) == 424);
 
-struct WireWorldEffectSlot {
-  melonDS::u32 Found;
-  melonDS::u32 Base;
-  melonDS::u32 VTable;
-  melonDS::u32 Words[kWorldEffectWordCount];
-};
-
-struct WireWorldEffectState {
-  melonDS::u32 Magic;
-  melonDS::u32 Version;
-  melonDS::u32 Kind;
-  melonDS::u32 Frame;
-  melonDS::u32 Instance;
-  melonDS::u32 Count;
-  WireWorldEffectSlot Effects[kMaxWorldEffects];
-};
-
-static_assert(sizeof(WireWorldEffectSlot) == 184);
-static_assert(sizeof(WireWorldEffectState) == 760);
-
 } // namespace NsmbNetplayPoC::WireProtocol
 
 namespace NsmbNetplayPoC::SessionProtocol {
@@ -362,7 +338,6 @@ enum class PacketClass {
   PlayerState,
   WorldState,
   MovingHazardState,
-  WorldEffectState,
   GameState,
 };
 
@@ -373,7 +348,6 @@ struct KnownPacketSizes {
   std::size_t PlayerState = 0;
   std::size_t WorldState = 0;
   std::size_t MovingHazardState = 0;
-  std::size_t WorldEffectState = 0;
   std::size_t GameState = 0;
 };
 

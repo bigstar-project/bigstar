@@ -188,17 +188,12 @@ void TestRemoteStateStoreSelectionAndRestart() {
   WireProtocol::WireMovingHazardState hazard{};
   hazard.Frame = 30;
   CHECK(store.StoreMovingHazardState(hazard));
-  WireProtocol::WireWorldEffectState effects{};
-  effects.Frame = 50;
-  CHECK(store.StoreWorldEffectState(effects));
-
   store.ResetForRestart();
   CHECK(store.FindGameStateHashes(2, 20) == nullptr);
   CHECK(store.FindGameState(2, 20) == nullptr);
   CHECK(store.PlayerStateCount() == 0);
   CHECK(store.WorldState() == nullptr);
   CHECK(store.MovingHazardState() == nullptr);
-  CHECK(store.WorldEffectState() == nullptr);
 }
 
 void TestStateSyncHashComparisonContract() {
