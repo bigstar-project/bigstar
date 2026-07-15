@@ -3,9 +3,12 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace NsmbNetplayPoC::Config {
+
+using FrameRange = std::pair<std::uint32_t, std::uint32_t>;
 
 class Environment {
 public:
@@ -121,7 +124,8 @@ struct HarnessConfig {
   std::uint32_t MemPatchFrame = 0;
   bool MemPatchFrameSet = false;
   int MemPatchInstance = -1;
-  std::string MemPatchRanges;
+  std::vector<FrameRange> MemPatchRanges;
+  bool MemPatchRangesValid = true;
   std::string StateSaveDir;
   std::uint32_t StateSaveFrame = 0;
   std::string StateLoadDir;
@@ -376,6 +380,7 @@ int ParseInt(const char *value, int fallback);
 double ParseDouble(const char *value, double fallback);
 std::uint32_t ParseU32(const char *value, std::uint32_t fallback);
 std::vector<std::uint32_t> ParseU32List(const char *value);
+bool ParseFrameRanges(const char *value, std::vector<FrameRange> &ranges);
 bool HasValue(const char *value);
 
 bool ReadFlag(const Environment &environment, const char *name);

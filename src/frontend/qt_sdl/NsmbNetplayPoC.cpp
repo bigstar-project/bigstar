@@ -433,14 +433,12 @@ struct State
     Config::HarnessConfig Harness;
     GameStateTraceWriter GameStateTrace;
     AIObservation::Runtime AIObservationRuntime;
-    bool MemPatchApplied[16] {};
     Config::RollbackConfig Rollback;
     RollbackStorage::Store RollbackStore;
     RollbackStorage::Statistics RollbackStats;
     NsmbNetplayTransport::Transport Transport;
     StateSyncRuntime GameSync;
     std::vector<std::pair<melonDS::u32, melonDS::u32>> RamDumpRanges;
-    std::vector<std::pair<melonDS::u32, melonDS::u32>> MemPatchRanges;
     std::condition_variable InputCond;
     bool NetworkPumpThreadStarted = false;
     bool NetworkPumpStop = false;
@@ -687,23 +685,6 @@ InputState NeutralInputPreservingTouch(const InputState& source)
     return input;
 }
 
-std::string Trim(std::string value)
-{
-    const auto first = value.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return {};
-    const auto last = value.find_last_not_of(" \t\r\n");
-    return value.substr(first, last - first + 1);
-}
-
-bool ParseU32(const std::string& text, melonDS::u32& out)
-{
-    char* end = nullptr;
-    unsigned long value = std::strtoul(text.c_str(), &end, 0);
-    if (!end || *end != '\0') return false;
-    out = static_cast<melonDS::u32>(value);
-    return true;
-}
-
 bool LoadInputScriptFileLocked(
     const std::string& path,
     std::vector<InputTimeline::InputSpan>& spans)
@@ -745,40 +726,6 @@ bool LoadInputScriptFileLocked(
 bool LoadInputScriptLocked()
 {
     return LoadInputScriptFileLocked(G.Harness.InputScriptPath, GInputScript);
-}
-
-bool ParseFrameRanges(const char* value, std::vector<std::pair<melonDS::u32, melonDS::u32>>& out)
-{
-    if (!value || !value[0]) return true;
-
-    std::stringstream ss(value);
-    std::string token;
-    while (std::getline(ss, token, ','))
-    {
-        token = Trim(token);
-        if (token.empty()) continue;
-
-        melonDS::u32 start = 0;
-        melonDS::u32 end = 0;
-        const auto dash = token.find('-');
-        if (dash == std::string::npos)
-        {
-            if (!ParseU32(token, start))
-                return false;
-            end = start;
-        }
-        else
-        {
-            if (!ParseU32(token.substr(0, dash), start) ||
-                !ParseU32(token.substr(dash + 1), end) ||
-                end < start)
-                return false;
-        }
-
-        out.emplace_back(start, end);
-    }
-
-    return true;
 }
 
 std::string JsonEscape(const std::string& value)
@@ -6494,9 +6441,9 @@ void SaveRamDump(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 void ApplyMemPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!nds || !nds->MainRAM || G.Harness.MemPatchFile.empty() || !G.Harness.MemPatchFrameSet) return;
-    if (frame != G.Harness.MemPatchFrame || G.MemPatchApplied[instanceID]) return;
+    if (frame != G.Harness.MemPatchFrame || G.Coordinator.IsMemoryPatchApplied(instanceID)) return;
     if (G.Harness.MemPatchInstance >= 0 && G.Harness.MemPatchInstance != instanceID) return;
-    if (G.MemPatchRanges.empty()) return;
+    if (G.Harness.MemPatchRanges.empty()) return;
 
     std::string patchFile = G.Harness.MemPatchFile;
     const std::string instToken = "{inst}";
@@ -6520,7 +6467,7 @@ void ApplyMemPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     }
 
     const melonDS::u32 ramLen = std::min<melonDS::u32>(nds->MainRAMMask + 1, 0x400000);
-    for (const auto& [start, end] : G.MemPatchRanges)
+    for (const auto& [start, end] : G.Harness.MemPatchRanges)
     {
         if (end < start || start >= ramLen)
             continue;
@@ -6547,7 +6494,7 @@ void ApplyMemPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             patchFile.c_str());
     }
 
-    G.MemPatchApplied[instanceID] = true;
+    G.Coordinator.MarkMemoryPatchApplied(instanceID);
 }
 
 bool WriteNetAndGameRandomSeed(melonDS::NDS* nds, melonDS::u32 seed)
@@ -7174,7 +7121,7 @@ void InitFromEnvironment()
             G.MvlCurrentStage);
     }
 
-    if (!ParseFrameRanges(G.Diagnostics.RamDumpFrames.c_str(), G.RamDumpRanges))
+    if (!Config::ParseFrameRanges(G.Diagnostics.RamDumpFrames.c_str(), G.RamDumpRanges))
     {
         std::printf("NSMB Test: invalid RAM dump frame list\n");
         G.RamDumpRanges.clear();
@@ -7186,10 +7133,9 @@ void InitFromEnvironment()
     }
     G.StateSync = Config::LoadStateSyncConfig();
 
-    if (!ParseFrameRanges(G.Harness.MemPatchRanges.c_str(), G.MemPatchRanges))
+    if (!G.Harness.MemPatchRangesValid)
     {
         std::printf("NSMB Test: invalid memory patch range list\n");
-        G.MemPatchRanges.clear();
     }
     G.AI = Config::LoadAIConfig();
     G.ImitationAI.SetEnabled(G.AI.Imitation.Enabled);
@@ -7271,7 +7217,7 @@ void InitFromEnvironment()
             G.StateSync.PlayerMaxPredictFrames,
             G.Harness.MemPatchFile.empty() ? "<none>" : G.Harness.MemPatchFile.c_str(),
             G.Harness.MemPatchFrameSet ? G.Harness.MemPatchFrame : 0,
-            G.MemPatchRanges.size(),
+            G.Harness.MemPatchRanges.size(),
             G.Mvl.NetRandom.Enabled ? 1 : 0,
             G.Mvl.NetRandom.Auto ? 1 : 0,
             G.Mvl.NetRandom.Frame,

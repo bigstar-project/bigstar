@@ -393,6 +393,7 @@ void TestHarnessConfigDefaults() {
   CHECK(!config.MemPatchFrameSet);
   CHECK(config.MemPatchInstance == -1);
   CHECK(config.MemPatchRanges.empty());
+  CHECK(config.MemPatchRangesValid);
   CHECK(config.StateSaveDir.empty());
   CHECK(config.StateSaveFrame == 0u);
   CHECK(config.StateLoadDir.empty());
@@ -418,7 +419,7 @@ void TestHarnessConfigReadsClampsAndPreservesPresence() {
       {"MELONDS_NSML_MEM_PATCH_FILE", "patch.bin"},
       {"MELONDS_NSML_MEM_PATCH_FRAME", "invalid"},
       {"MELONDS_NSML_MEM_PATCH_INSTANCE", "-4"},
-      {"MELONDS_NSML_MEM_PATCH_RANGES", "10-20,30"},
+      {"MELONDS_NSML_MEM_PATCH_RANGES", "0x10-0x1f,30"},
       {"MELONDS_NSML_STATE_SAVE_DIR", "save-dir"},
       {"MELONDS_NSML_STATE_SAVE_FRAME", "-3"},
       {"MELONDS_NSML_STATE_LOAD_DIR", "load-dir"},
@@ -442,12 +443,20 @@ void TestHarnessConfigReadsClampsAndPreservesPresence() {
   CHECK(config.MemPatchFrameSet);
   CHECK(config.MemPatchFrame == 0u);
   CHECK(config.MemPatchInstance == -4);
-  CHECK(config.MemPatchRanges == "10-20,30");
+  CHECK(config.MemPatchRangesValid);
+  CHECK(config.MemPatchRanges.size() == 2);
+  CHECK(config.MemPatchRanges[0] == std::make_pair(16u, 31u));
+  CHECK(config.MemPatchRanges[1] == std::make_pair(30u, 30u));
   CHECK(config.StateSaveDir == "save-dir");
   CHECK(config.StateSaveFrame == 0u);
   CHECK(config.StateLoadDir == "load-dir");
   CHECK(config.StateLoadFrameSet);
   CHECK(config.StateLoadFrame == 0u);
+
+  environment.Values["MELONDS_NSML_MEM_PATCH_RANGES"] = "0x10-0x1f, 40, ,50-49";
+  config = NsmbNetplayPoC::Config::LoadHarnessConfig(environment);
+  CHECK(!config.MemPatchRangesValid);
+  CHECK(config.MemPatchRanges.empty());
 
   environment.Values["MELONDS_NSML_NET_PUMP_SLEEP_US"] = "99999";
   environment.Values["MELONDS_NSML_MEM_PATCH_FRAME"] = "42";

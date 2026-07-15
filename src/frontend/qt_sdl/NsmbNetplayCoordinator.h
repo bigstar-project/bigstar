@@ -62,6 +62,9 @@ public:
   void FinishLocalMPLoad(bool loaded);
   std::pair<bool, bool> LocalMPLoadStatus() const;
 
+  bool IsMemoryPatchApplied(int instanceID) const;
+  void MarkMemoryPatchApplied(int instanceID);
+
 private:
   struct Impl;
   std::unique_ptr<Impl> State;

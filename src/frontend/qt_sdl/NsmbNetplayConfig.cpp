@@ -85,6 +85,44 @@ std::vector<std::uint32_t> ParseU32List(const char *value) {
   return values;
 }
 
+bool ParseFrameRanges(const char *value, std::vector<FrameRange> &ranges) {
+  if (!value || !value[0])
+    return true;
+
+  std::stringstream stream(value);
+  std::string token;
+  while (std::getline(stream, token, ',')) {
+    const auto first = token.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos)
+      continue;
+    const auto last = token.find_last_not_of(" \t\r\n");
+    token = token.substr(first, last - first + 1);
+
+    const auto parse = [](const std::string &text, std::uint32_t &result) {
+      char *end = nullptr;
+      const unsigned long value = std::strtoul(text.c_str(), &end, 0);
+      if (!end || *end != '\0')
+        return false;
+      result = static_cast<std::uint32_t>(value);
+      return true;
+    };
+
+    std::uint32_t start = 0;
+    std::uint32_t end = 0;
+    const auto dash = token.find('-');
+    if (dash == std::string::npos) {
+      if (!parse(token, start))
+        return false;
+      end = start;
+    } else if (!parse(token.substr(0, dash), start) ||
+               !parse(token.substr(dash + 1), end) || end < start) {
+      return false;
+    }
+    ranges.emplace_back(start, end);
+  }
+  return true;
+}
+
 bool HasValue(const char *value) { return value && value[0]; }
 
 bool ReadFlag(const Environment &environment, const char *name) {
@@ -391,8 +429,10 @@ HarnessConfig LoadHarnessConfig(const Environment &environment) {
   }
   config.MemPatchInstance =
       ReadInt(environment, "MELONDS_NSML_MEM_PATCH_INSTANCE", -1);
-  config.MemPatchRanges =
-      ReadCString(environment, "MELONDS_NSML_MEM_PATCH_RANGES", "");
+  config.MemPatchRangesValid = ParseFrameRanges(
+      environment.Get("MELONDS_NSML_MEM_PATCH_RANGES"), config.MemPatchRanges);
+  if (!config.MemPatchRangesValid)
+    config.MemPatchRanges.clear();
 
   config.StateSaveDir =
       ReadCString(environment, "MELONDS_NSML_STATE_SAVE_DIR", "");

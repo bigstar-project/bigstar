@@ -110,6 +110,14 @@ void TestStateCoordination() {
   const auto [finished, loaded] = runtime.LocalMPLoadStatus();
   CHECK(finished);
   CHECK(loaded);
+
+  CHECK(!runtime.IsMemoryPatchApplied(-1));
+  CHECK(!runtime.IsMemoryPatchApplied(0));
+  runtime.MarkMemoryPatchApplied(-1);
+  CHECK(!runtime.IsMemoryPatchApplied(0));
+  runtime.MarkMemoryPatchApplied(0);
+  CHECK(runtime.IsMemoryPatchApplied(0));
+  CHECK(!runtime.IsMemoryPatchApplied(1));
 }
 
 void TestFrameAndLockstepBookkeeping() {

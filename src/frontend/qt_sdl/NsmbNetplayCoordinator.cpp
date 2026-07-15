@@ -45,6 +45,7 @@ struct Runtime::Impl {
   bool LocalMPLoadStarted = false;
   bool LocalMPLoadFinished = false;
   bool LocalMPLoaded = false;
+  std::array<bool, kMaxInstances> MemoryPatchApplied{};
 
   FrameBarrier &GetFrameBarrier(FrameBarrierKind kind) {
     return FrameBarriers[static_cast<std::size_t>(kind)];
@@ -362,6 +363,20 @@ void Runtime::FinishLocalMPLoad(bool loaded) {
 std::pair<bool, bool> Runtime::LocalMPLoadStatus() const {
   std::lock_guard<std::mutex> lock(State->Mutex);
   return {State->LocalMPLoadFinished, State->LocalMPLoaded};
+}
+
+bool Runtime::IsMemoryPatchApplied(int instanceID) const {
+  if (!IsValidInstance(instanceID))
+    return false;
+  std::lock_guard<std::mutex> lock(State->Mutex);
+  return State->MemoryPatchApplied[instanceID];
+}
+
+void Runtime::MarkMemoryPatchApplied(int instanceID) {
+  if (!IsValidInstance(instanceID))
+    return;
+  std::lock_guard<std::mutex> lock(State->Mutex);
+  State->MemoryPatchApplied[instanceID] = true;
 }
 
 } // namespace NsmbNetplayPoC::Coordination
