@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 namespace NsmbNetplayPoC::RollbackStorage {
@@ -31,6 +32,15 @@ enum class DeltaMode {
 };
 
 std::size_t CheckpointBytes(const StoredState &checkpoint);
+
+bool ShouldSaveCheckpoint(melonDS::u32 frame, int interval,
+                          melonDS::u32 netplayStartFrame);
+melonDS::u32 ClampResimulationMismatch(melonDS::u32 mismatchFrame,
+                                       melonDS::u32 currentFrame,
+                                       int maxResimFrames);
+bool IsResimulationDelayElapsed(melonDS::u32 currentFrame,
+                                std::optional<melonDS::u32> observedFrame,
+                                int delayFrames);
 
 struct StatisticsSnapshot {
   melonDS::u32 RestoreCount = 0;

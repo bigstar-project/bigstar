@@ -12,6 +12,33 @@ std::size_t CheckpointBytes(const StoredState &checkpoint) {
          checkpoint.MainRAMPreimage.size();
 }
 
+bool ShouldSaveCheckpoint(melonDS::u32 frame, int interval,
+                          melonDS::u32 netplayStartFrame) {
+  if (interval <= 1)
+    return true;
+  if (netplayStartFrame != kNoFrame && frame == netplayStartFrame)
+    return true;
+  return frame % static_cast<melonDS::u32>(interval) == 0;
+}
+
+melonDS::u32 ClampResimulationMismatch(melonDS::u32 mismatchFrame,
+                                       melonDS::u32 currentFrame,
+                                       int maxResimFrames) {
+  if (maxResimFrames <= 0 || mismatchFrame >= currentFrame)
+    return mismatchFrame;
+  const melonDS::u32 maximum = static_cast<melonDS::u32>(maxResimFrames);
+  return currentFrame - mismatchFrame > maximum ? currentFrame - maximum
+                                                : mismatchFrame;
+}
+
+bool IsResimulationDelayElapsed(melonDS::u32 currentFrame,
+                                std::optional<melonDS::u32> observedFrame,
+                                int delayFrames) {
+  return delayFrames <= 0 || !observedFrame ||
+         currentFrame >=
+             *observedFrame + static_cast<melonDS::u32>(delayFrames);
+}
+
 std::size_t StatisticsSnapshot::AverageCheckpointBytes() const {
   return CheckpointSaveCount == 0
              ? 0

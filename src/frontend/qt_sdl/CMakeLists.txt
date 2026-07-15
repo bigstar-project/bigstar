@@ -44,6 +44,8 @@ set(SOURCES_QT_SDL
     NsmbGameStateWriter.h
     NsmbRollbackStore.cpp
     NsmbRollbackStore.h
+    NsmbRollbackRuntime.cpp
+    NsmbRollbackRuntime.h
     NsmbAiObservation.cpp
     NsmbAiObservation.h
     NsmbImitationAI.cpp

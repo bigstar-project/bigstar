@@ -8,7 +8,10 @@
 namespace {
 
 using NsmbNetplayPoC::RollbackStorage::CheckpointBytes;
+using NsmbNetplayPoC::RollbackStorage::ClampResimulationMismatch;
 using NsmbNetplayPoC::RollbackStorage::DeltaMode;
+using NsmbNetplayPoC::RollbackStorage::IsResimulationDelayElapsed;
+using NsmbNetplayPoC::RollbackStorage::ShouldSaveCheckpoint;
 using NsmbNetplayPoC::RollbackStorage::Store;
 using NsmbNetplayPoC::RollbackStorage::StoredState;
 using NsmbNetplayPoC::RollbackStorage::Statistics;
@@ -52,6 +55,34 @@ void TestCheckpointBytes() {
   state.MainRAMShadowCopy.resize(200);
   Require(CheckpointBytes(state) == 5 + 3 * sizeof(melonDS::u32) + 7,
           "checkpoint byte accounting must preserve the production metric");
+}
+
+void TestRollbackPolicies() {
+  Require(ShouldSaveCheckpoint(7, 0, 100) &&
+              ShouldSaveCheckpoint(7, 1, 100),
+          "checkpoint intervals zero and one save every frame");
+  Require(ShouldSaveCheckpoint(101, 10, 101),
+          "netplay start frame forces a checkpoint");
+  Require(ShouldSaveCheckpoint(120, 10, 101) &&
+              !ShouldSaveCheckpoint(121, 10, 101),
+          "checkpoint interval follows frame modulo");
+
+  Require(ClampResimulationMismatch(90, 100, 0) == 90 &&
+              ClampResimulationMismatch(90, 100, -1) == 90,
+          "disabled resimulation cap preserves mismatch");
+  Require(ClampResimulationMismatch(95, 100, 10) == 95,
+          "mismatch inside cap is preserved");
+  Require(ClampResimulationMismatch(80, 100, 10) == 90,
+          "mismatch outside cap is clamped");
+  Require(ClampResimulationMismatch(100, 100, 10) == 100,
+          "current-frame mismatch is not rewritten");
+
+  Require(IsResimulationDelayElapsed(100, 90, 0) &&
+              IsResimulationDelayElapsed(100, std::nullopt, 5),
+          "disabled or unobserved delay is immediately elapsed");
+  Require(!IsResimulationDelayElapsed(104, 100, 5) &&
+              IsResimulationDelayElapsed(105, 100, 5),
+          "resimulation waits through the configured observed-frame delay");
 }
 
 void TestRestoreChain() {
@@ -231,6 +262,7 @@ void TestStatistics() {
 
 int main() {
   TestCheckpointBytes();
+  TestRollbackPolicies();
   TestRestoreChain();
   TestPrepareSaveModes();
   TestPreimageRestoreAndPrune();
