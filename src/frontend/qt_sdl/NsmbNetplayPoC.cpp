@@ -437,13 +437,10 @@ struct State
     Config::RollbackConfig Rollback;
     RollbackStorage::Store RollbackStore;
     RollbackStorage::Statistics RollbackStats;
-    bool NetplayAnyLockstepStarted = false;
-    bool NetplayLockstepStarted[16] {};
     NsmbNetplayTransport::Transport Transport;
     StateSyncRuntime GameSync;
     std::vector<std::pair<melonDS::u32, melonDS::u32>> RamDumpRanges;
     std::vector<std::pair<melonDS::u32, melonDS::u32>> MemPatchRanges;
-    melonDS::u32 TestFrameCount[16] {};
     std::condition_variable InputCond;
     bool NetworkPumpThreadStarted = false;
     bool NetworkPumpStop = false;
@@ -631,8 +628,7 @@ void ResetMvlAutoRestartStartupHookState(int instanceID)
     G.Session.ResetStartHandshake();
     G.InputRuntime.LastInputFrameLeadResendAt = {};
     G.InputRuntime.InputFrameLeadResendCount = 0;
-    G.NetplayLockstepStarted[instanceID] = false;
-    G.NetplayAnyLockstepStarted = false;
+    G.Coordinator.ResetNetplayLockstep(instanceID);
 }
 
 void ApplyMvlRuntimeConfigIfNeeded(melonDS::NDS* nds)
@@ -7748,7 +7744,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Init);
     melonDS::u32 inputFrame = frame;
     if (G.TestEnabled && instanceID >= 0 && instanceID < 16)
-        inputFrame = G.TestFrameCount[instanceID];
+        inputFrame = G.Coordinator.TestFrame(instanceID);
     phaseTrace.SetFrame(inputFrame);
 
     if (G.Enabled && G.Input.NetplayOnly && G.Harness.WaitForPeerBeforeStart && inputFrame == 0
@@ -7957,15 +7953,16 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if (G.Harness.NetplayFrameBarrierEnabled)
         WaitAtFrameBarrier(Coordination::FrameBarrierKind::Netplay, instanceID, targetFrame, "netplay");
 
-    if (G.TestEnabled && instanceID >= 0 && instanceID < 16 && !G.NetplayLockstepStarted[instanceID])
+    if (G.TestEnabled && instanceID >= 0 && instanceID < 16 &&
+        !G.Coordinator.IsNetplayLockstepStarted(instanceID))
     {
         bool needsInitialRemoteInput = false;
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
             PumpNetworkLocked(nds, targetFrame);
             ApplyPendingNSMLPacketsLocked(nds);
-            needsInitialRemoteInput =
-                !G.NetplayAnyLockstepStarted && G.InputRuntime.RemoteInputs.find(targetFrame) == G.InputRuntime.RemoteInputs.end();
+            needsInitialRemoteInput = G.Coordinator.NeedsInitialRemoteInput(
+                G.InputRuntime.RemoteInputs.find(targetFrame) != G.InputRuntime.RemoteInputs.end());
         }
 
         if (needsInitialRemoteInput)
@@ -7973,8 +7970,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
         std::lock_guard<std::mutex> lock(G.Mutex);
 
-        G.NetplayLockstepStarted[instanceID] = true;
-        G.NetplayAnyLockstepStarted = true;
+        G.Coordinator.MarkNetplayLockstepStarted(instanceID);
         std::printf("NSMB PoC: lockstep started inst=%d frame=%u\n", instanceID, targetFrame);
     }
 
@@ -8206,7 +8202,7 @@ melonDS::u32 PrepareAfterFrameLogFrame(int instanceID, melonDS::u32 frame)
     if (!G.TestEnabled)
         return frame;
 
-    const melonDS::u32 logFrame = ++G.TestFrameCount[instanceID];
+    const melonDS::u32 logFrame = G.Coordinator.AdvanceTestFrame(instanceID);
     if (logFrame == 1)
         G.DiagnosticsRuntime.StartTestTimer(std::chrono::steady_clock::now());
     const melonDS::u32 activeStartFrame = G.Diagnostics.ActiveFpsStartFrame != 0
@@ -8491,14 +8487,12 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
     InitFromEnvironment();
     if (!G.TestEnabled || G.Bootstrap.TestFrames == kNoFrameLimit) return false;
     if (instanceID != G.Bootstrap.TestInstanceCount - 1) return false;
-    if (G.TestFrameCount[instanceID] < G.Bootstrap.TestFrames) return false;
+    if (G.Coordinator.TestFrame(instanceID) < G.Bootstrap.TestFrames) return false;
 
     std::lock_guard<std::mutex> lock(G.Mutex);
-    for (int i = 0; i < G.Bootstrap.TestInstanceCount; i++)
-    {
-        if (G.TestFrameCount[i] < G.Bootstrap.TestFrames)
-            return false;
-    }
+    if (!G.Coordinator.AllTestFramesReached(
+            G.Bootstrap.TestInstanceCount, G.Bootstrap.TestFrames))
+        return false;
 
     if (!G.TestAnnouncedQuit)
     {

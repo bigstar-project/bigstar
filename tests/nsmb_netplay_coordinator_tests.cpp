@@ -112,6 +112,30 @@ void TestStateCoordination() {
   CHECK(loaded);
 }
 
+void TestFrameAndLockstepBookkeeping() {
+  Runtime runtime;
+  CHECK(runtime.TestFrame(-1) == 0);
+  CHECK(runtime.AdvanceTestFrame(-1) == 0);
+  CHECK(runtime.TestFrame(0) == 0);
+  CHECK(runtime.AdvanceTestFrame(0) == 1);
+  CHECK(runtime.AdvanceTestFrame(0) == 2);
+  CHECK(runtime.AdvanceTestFrame(1) == 1);
+  CHECK(!runtime.AllTestFramesReached(2, 2));
+  CHECK(runtime.AdvanceTestFrame(1) == 2);
+  CHECK(runtime.AllTestFramesReached(2, 2));
+
+  CHECK(!runtime.IsNetplayLockstepStarted(0));
+  CHECK(runtime.NeedsInitialRemoteInput(false));
+  CHECK(!runtime.NeedsInitialRemoteInput(true));
+  runtime.MarkNetplayLockstepStarted(0);
+  CHECK(runtime.IsNetplayLockstepStarted(0));
+  CHECK(!runtime.IsNetplayLockstepStarted(1));
+  CHECK(!runtime.NeedsInitialRemoteInput(false));
+  runtime.ResetNetplayLockstep(0);
+  CHECK(!runtime.IsNetplayLockstepStarted(0));
+  CHECK(runtime.NeedsInitialRemoteInput(false));
+}
+
 } // namespace
 
 int main() {
@@ -119,6 +143,7 @@ int main() {
   TestSerialTurn();
   TestNetplayStartBarrier();
   TestStateCoordination();
+  TestFrameAndLockstepBookkeeping();
   if (Failures != 0) {
     std::printf("nsmb_netplay_coordinator_tests: %d failure(s)\n", Failures);
     return 1;

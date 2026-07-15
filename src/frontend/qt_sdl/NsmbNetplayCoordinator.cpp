@@ -33,6 +33,9 @@ struct Runtime::Impl {
   std::condition_variable Condition;
   std::array<bool, kMaxInstances> NetplayStartArrived{};
   bool NetplayStartComplete = false;
+  std::array<bool, kMaxInstances> NetplayLockstepStarted{};
+  bool NetplayAnyLockstepStarted = false;
+  std::array<melonDS::u32, kMaxInstances> TestFrame{};
   std::array<FrameBarrier, 3> FrameBarriers{};
   melonDS::u32 SerialFrame = 0;
   int SerialInstance = 0;
@@ -138,6 +141,59 @@ void Runtime::CompleteNetplayStartWait() {
   std::lock_guard<std::mutex> lock(State->Mutex);
   State->NetplayStartComplete = true;
   State->Condition.notify_all();
+}
+
+bool Runtime::IsNetplayLockstepStarted(int instanceID) const {
+  if (!IsValidInstance(instanceID))
+    return false;
+  std::lock_guard<std::mutex> lock(State->Mutex);
+  return State->NetplayLockstepStarted[instanceID];
+}
+
+bool Runtime::NeedsInitialRemoteInput(bool remoteInputAvailable) const {
+  std::lock_guard<std::mutex> lock(State->Mutex);
+  return !State->NetplayAnyLockstepStarted && !remoteInputAvailable;
+}
+
+void Runtime::MarkNetplayLockstepStarted(int instanceID) {
+  if (!IsValidInstance(instanceID))
+    return;
+  std::lock_guard<std::mutex> lock(State->Mutex);
+  State->NetplayLockstepStarted[instanceID] = true;
+  State->NetplayAnyLockstepStarted = true;
+}
+
+void Runtime::ResetNetplayLockstep(int instanceID) {
+  if (!IsValidInstance(instanceID))
+    return;
+  std::lock_guard<std::mutex> lock(State->Mutex);
+  State->NetplayLockstepStarted[instanceID] = false;
+  State->NetplayAnyLockstepStarted = false;
+}
+
+melonDS::u32 Runtime::TestFrame(int instanceID) const {
+  if (!IsValidInstance(instanceID))
+    return 0;
+  std::lock_guard<std::mutex> lock(State->Mutex);
+  return State->TestFrame[instanceID];
+}
+
+melonDS::u32 Runtime::AdvanceTestFrame(int instanceID) {
+  if (!IsValidInstance(instanceID))
+    return 0;
+  std::lock_guard<std::mutex> lock(State->Mutex);
+  return ++State->TestFrame[instanceID];
+}
+
+bool Runtime::AllTestFramesReached(int instanceCount,
+                                   melonDS::u32 target) const {
+  instanceCount = ClampInstanceCount(instanceCount);
+  std::lock_guard<std::mutex> lock(State->Mutex);
+  for (int instance = 0; instance < instanceCount; instance++) {
+    if (State->TestFrame[instance] < target)
+      return false;
+  }
+  return true;
 }
 
 bool Runtime::WaitAtFrameBarrier(FrameBarrierKind kind, int instanceID,

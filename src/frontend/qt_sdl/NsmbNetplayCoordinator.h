@@ -34,6 +34,15 @@ public:
                                              melonDS::u32 frame, int timeoutMs);
   void CompleteNetplayStartWait();
 
+  bool IsNetplayLockstepStarted(int instanceID) const;
+  bool NeedsInitialRemoteInput(bool remoteInputAvailable) const;
+  void MarkNetplayLockstepStarted(int instanceID);
+  void ResetNetplayLockstep(int instanceID);
+
+  melonDS::u32 TestFrame(int instanceID) const;
+  melonDS::u32 AdvanceTestFrame(int instanceID);
+  bool AllTestFramesReached(int instanceCount, melonDS::u32 target) const;
+
   bool WaitAtFrameBarrier(FrameBarrierKind kind, int instanceID,
                           melonDS::u32 frame, int instanceCount, int timeoutMs,
                           const char *name);
