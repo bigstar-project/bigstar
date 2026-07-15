@@ -610,38 +610,20 @@ RollbackConfig LoadRollbackConfig() {
 
 MvlConfig LoadMvlConfig(const Environment &environment) {
   MvlConfig config;
-  config.DirectBootEnabled =
-      ReadFlag(environment, "MELONDS_NSML_DIRECT_MVL_BOOT");
-  config.DirectBootHostOnly =
-      ReadFlag(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY");
-  config.DirectBootClientOnly =
-      ReadFlag(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_CLIENT_ONLY");
-  config.DirectBootFrame = static_cast<std::uint32_t>(std::max(
-      0, ReadInt(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_FRAME", 900)));
-  config.DirectBootScene = std::clamp(
-      ReadInt(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_SCENE", 0x0F), 0,
-      0xFFFF);
-
-  const int directStage = std::clamp(
-      ReadInt(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", 0), 0, 4);
-  const int mvlStage = std::clamp(
-      ReadInt(environment, "MELONDS_NSML_MVL_STAGE", directStage), 0, 4);
-  config.DirectBootStage = mvlStage;
+  config.Stage = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_MVL_STAGE", 0), 0, 4);
   for (const std::uint32_t stage :
        ReadU32List(environment, "MELONDS_NSML_MVL_STAGE_SEQUENCE"))
     config.StageSequence.push_back(std::clamp(static_cast<int>(stage), 0, 4));
   if (!config.StageSequence.empty())
-    config.DirectBootStage = config.StageSequence.front();
-  config.DirectBootPlayerID =
-      ReadInt(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_PLAYER_ID", -1);
+    config.Stage = config.StageSequence.front();
 
   if (ReadHasValue(environment, "MELONDS_NSML_MVL_SCENE_SETTINGS")) {
     config.StageSceneSettings =
         ReadU32(environment, "MELONDS_NSML_MVL_SCENE_SETTINGS", 0x00B4FF00);
   } else {
     const auto sceneStage = static_cast<int>(
-        ReadU32(environment, "MELONDS_NSML_MVL_STAGE",
-                ReadU32(environment, "MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", 0)));
+        ReadU32(environment, "MELONDS_NSML_MVL_STAGE", 0));
     config.StageSceneSettings = ComposeMvlSceneSettingsForStage(sceneStage);
   }
 

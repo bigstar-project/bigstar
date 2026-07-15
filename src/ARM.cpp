@@ -90,17 +90,13 @@ static bool NSMLEnvHasValue(const char* name)
 
 static u32 NSMLComposeMvlSceneSettingsFromEnvironment()
 {
-    const u32 stage = std::min(
-        NSMLEnvU32("MELONDS_NSML_MVL_STAGE",
-            NSMLEnvU32("MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", 0)),
-        4u);
+    const u32 stage = std::min(NSMLEnvU32("MELONDS_NSML_MVL_STAGE", 0), 4u);
     return ((0xB4u + stage) << 16) | 0xFF00u;
 }
 
 static u32 NSMLMvlStage()
 {
-    u32 stage = NSMLEnvU32("MELONDS_NSML_MVL_STAGE",
-        NSMLEnvU32("MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", 0));
+    u32 stage = NSMLEnvU32("MELONDS_NSML_MVL_STAGE", 0);
     return std::min(stage, 4u);
 }
 

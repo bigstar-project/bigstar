@@ -211,14 +211,8 @@ struct MvlNetRandomConfig {
 };
 
 struct MvlConfig {
-  bool DirectBootEnabled = false;
-  bool DirectBootHostOnly = false;
-  bool DirectBootClientOnly = false;
-  std::uint32_t DirectBootFrame = 900;
-  int DirectBootScene = 0x0F;
-  int DirectBootStage = 0;
+  int Stage = 0;
   std::vector<int> StageSequence;
-  int DirectBootPlayerID = -1;
   std::uint32_t StageSceneSettings = 0x00B4FF00;
   std::string CourseMode = "fixed";
   std::string InvalidCourseMode;

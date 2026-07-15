@@ -269,7 +269,6 @@ function New-MelonEnv {
         MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_START_FRAME = "840"
         MELONDS_NSML_MVL_STAGE = "$Stage"
         MELONDS_NSML_MVL_STAGE_SEQUENCE = $MvlStageSequence
-        MELONDS_NSML_DIRECT_MVL_BOOT_STAGE = "$Stage"
         MELONDS_NSML_MVL_COURSE_MODE = $MvlCourseMode
         MELONDS_NSML_MVL_WINS = "$MvlWins"
         MELONDS_NSML_MVL_BIG_STARS = "$MvlBigStars"

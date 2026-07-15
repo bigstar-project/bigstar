@@ -306,7 +306,6 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert_eq!(env["MELONDS_NSML_ROLE"], "client");
     assert_eq!(env["MELONDS_NSML_PEER"], "127.0.0.1");
     assert_eq!(env["MELONDS_NSML_MVL_STAGE"], "2");
-    assert_eq!(env["MELONDS_NSML_DIRECT_MVL_BOOT_STAGE"], "2");
     assert_eq!(env["MELONDS_NSML_MVL_STAGE_SEQUENCE"], "2,3,4,0,1");
     assert_eq!(env["MELONDS_NSML_MVL_COURSE_MODE"], "random");
     assert_eq!(env["MELONDS_NSML_MVL_WINS"], "3");

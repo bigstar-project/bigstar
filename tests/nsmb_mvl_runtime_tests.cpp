@@ -88,18 +88,17 @@ void TestRestartFramePolicy() {
 void TestInstanceMarkerOwnership() {
   Runtime runtime;
   auto &first = runtime.Instances[0];
-  Require(!first.DirectBootApplied && !first.EntranceSpawnNormalizedLogged &&
+  Require(!first.EntranceSpawnNormalizedLogged &&
               !first.ClearCameraInitHoldApplied &&
               !first.NetRandomPatchApplied,
           "MvL instance markers start clear");
 
-  first.DirectBootApplied = true;
   first.EntranceSpawnNormalizedLogged = true;
   first.ClearCameraInitHoldApplied = true;
   first.NetRandomPatchApplied = true;
   runtime.ResetStartupHookState(-1);
   runtime.ResetStartupHookState(0);
-  Require(!first.DirectBootApplied && !first.ClearCameraInitHoldApplied,
+  Require(!first.ClearCameraInitHoldApplied,
           "restart clears startup hook markers");
   Require(first.EntranceSpawnNormalizedLogged && first.NetRandomPatchApplied,
           "restart preserves process and seed lifecycle markers");

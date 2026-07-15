@@ -653,14 +653,8 @@ void TestRollbackConfigReadsClampsAndDependencies() {
 void TestMvlConfigDefaults() {
   const MapEnvironment environment;
   const auto config = NsmbNetplayPoC::Config::LoadMvlConfig(environment);
-  CHECK(!config.DirectBootEnabled);
-  CHECK(!config.DirectBootHostOnly);
-  CHECK(!config.DirectBootClientOnly);
-  CHECK(config.DirectBootFrame == 900u);
-  CHECK(config.DirectBootScene == 0x0F);
-  CHECK(config.DirectBootStage == 0);
+  CHECK(config.Stage == 0);
   CHECK(config.StageSequence.empty());
-  CHECK(config.DirectBootPlayerID == -1);
   CHECK(config.StageSceneSettings == 0x00B4FF00u);
   CHECK(config.CourseMode == "fixed");
   CHECK(config.InvalidCourseMode.empty());
@@ -691,15 +685,8 @@ void TestMvlConfigDefaults() {
 void TestMvlConfigReadsClampsAndPreservesPriority() {
   MapEnvironment environment;
   environment.Values = {
-      {"MELONDS_NSML_DIRECT_MVL_BOOT", "1"},
-      {"MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY", "1"},
-      {"MELONDS_NSML_DIRECT_MVL_BOOT_CLIENT_ONLY", "1"},
-      {"MELONDS_NSML_DIRECT_MVL_BOOT_FRAME", "-4"},
-      {"MELONDS_NSML_DIRECT_MVL_BOOT_SCENE", "99999"},
-      {"MELONDS_NSML_DIRECT_MVL_BOOT_STAGE", "9"},
       {"MELONDS_NSML_MVL_STAGE", "-3"},
       {"MELONDS_NSML_MVL_STAGE_SEQUENCE", " 4, 9, invalid, , 2 "},
-      {"MELONDS_NSML_DIRECT_MVL_BOOT_PLAYER_ID", "7"},
       {"MELONDS_NSML_MVL_COURSE_MODE", "unsupported"},
       {"MELONDS_NSML_MVL_WINS", "0"},
       {"MELONDS_NSML_MVL_BIG_STARS", "99"},
@@ -721,14 +708,8 @@ void TestMvlConfigReadsClampsAndPreservesPriority() {
   };
 
   auto config = NsmbNetplayPoC::Config::LoadMvlConfig(environment);
-  CHECK(config.DirectBootEnabled);
-  CHECK(config.DirectBootHostOnly);
-  CHECK(config.DirectBootClientOnly);
-  CHECK(config.DirectBootFrame == 0u);
-  CHECK(config.DirectBootScene == 0xFFFF);
   CHECK(config.StageSequence == std::vector<int>({4, 4, 0, 2}));
-  CHECK(config.DirectBootStage == 4);
-  CHECK(config.DirectBootPlayerID == 7);
+  CHECK(config.Stage == 4);
   CHECK(config.StageSceneSettings == 0x00B4FF00u);
   CHECK(config.CourseMode == "fixed");
   CHECK(config.InvalidCourseMode == "unsupported");

@@ -298,11 +298,6 @@ param(
     [switch]$LanMPReliable,
     [switch]$LanMPDropOldRegular,
     [switch]$LanMPAcceptAnyChannel,
-    [switch]$DirectMvlBoot,
-    [switch]$DirectMvlBootHostOnly,
-    [switch]$DirectMvlBootClientOnly,
-    [int]$DirectMvlBootFrame = 900,
-    [int]$DirectMvlBootStage = 0,
     [int]$MvlStage = -1,
     [string]$MvlSceneSettings = "",
     [ValidateSet(1, 2, 3)] [int]$MvlWins = 2,
@@ -519,10 +514,6 @@ $mvlStageSequenceValues = Convert-ToMvlStageList -Value $MvlStageSequence
 if ($mvlStageSequenceValues.Count -gt 0 -and $MvlStage -lt 0) {
     $MvlStage = $mvlStageSequenceValues[0]
 }
-if ($mvlStageSequenceValues.Count -gt 0 -and $DirectMvlBootStage -eq 0) {
-    $DirectMvlBootStage = $mvlStageSequenceValues[0]
-}
-
 if (-not [string]::IsNullOrWhiteSpace($MvlMatchSeedSequence)) {
     $firstSeed = @($MvlMatchSeedSequence.Split(",") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
     if ($firstSeed.Count -gt 0 -and -not $MvlMatchSeed) {
@@ -597,7 +588,7 @@ if ($GenerateMvlConfiguredRoms) {
 }
 
 if (-not $MvlSceneSettings) {
-    $settingsStage = if ($MvlStage -ge 0) { $MvlStage } else { $DirectMvlBootStage }
+    $settingsStage = if ($MvlStage -ge 0) { $MvlStage } else { 0 }
     $MvlSceneSettings = Convert-ToMvlSceneSettings -Stage $settingsStage
 }
 
@@ -862,21 +853,6 @@ function Start-MelonLANProcess {
     }
     if ($MvlMatchSeed) { $env:MELONDS_NSML_MATCH_SEED = "$MvlMatchSeed" } else { Remove-Item Env:\MELONDS_NSML_MATCH_SEED -ErrorAction SilentlyContinue }
     if ($MvlMatchSeedSequence) { $env:MELONDS_NSML_MATCH_SEED_SEQUENCE = "$MvlMatchSeedSequence" } else { Remove-Item Env:\MELONDS_NSML_MATCH_SEED_SEQUENCE -ErrorAction SilentlyContinue }
-    if ($DirectMvlBoot) {
-        $env:MELONDS_NSML_DIRECT_MVL_BOOT = "1"
-        if ($DirectMvlBootHostOnly) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY -ErrorAction SilentlyContinue }
-        if ($DirectMvlBootClientOnly) { $env:MELONDS_NSML_DIRECT_MVL_BOOT_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CLIENT_ONLY -ErrorAction SilentlyContinue }
-        $env:MELONDS_NSML_DIRECT_MVL_BOOT_FRAME = "$DirectMvlBootFrame"
-        $env:MELONDS_NSML_DIRECT_MVL_BOOT_STAGE = "$DirectMvlBootStage"
-        $env:MELONDS_NSML_DIRECT_MVL_BOOT_PLAYER_ID = $(if ($Role -eq "client") { "1" } else { "0" })
-    } else {
-        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_HOST_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_CLIENT_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_STAGE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_DIRECT_MVL_BOOT_PLAYER_ID -ErrorAction SilentlyContinue
-    }
     if ($GuardPlayerModelRenderPtrs) {
         $env:MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS = "1"
         if ($GuardPlayerModelRenderPtrsStartFrame -gt 0) { $env:MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS_START_FRAME = "$GuardPlayerModelRenderPtrsStartFrame" } else { Remove-Item Env:\MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS_START_FRAME -ErrorAction SilentlyContinue }

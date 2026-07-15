@@ -93,7 +93,6 @@ melonDS::u32 Runtime::RestartPacketCutoffFrame() const {
 void Runtime::ResetStartupHookState(int instanceID) {
   if (!IsValidInstance(instanceID))
     return;
-  Instances[instanceID].DirectBootApplied = false;
   Instances[instanceID].ClearCameraInitHoldApplied = false;
 }
 

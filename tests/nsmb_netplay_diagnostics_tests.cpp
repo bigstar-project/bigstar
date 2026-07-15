@@ -657,7 +657,6 @@ void TestStartupReportFormattingContract() {
   packetBridge.WaitEnabled = true;
   packetBridge.WaitTimeoutMs = 33;
   Config::MvlConfig mvl;
-  mvl.DirectBootEnabled = true;
   mvl.NetRandom.Enabled = true;
   mvl.NetRandom.Value = 0xABCDEF01;
   mvl.MatchSeedConfigured = true;
@@ -668,7 +667,7 @@ void TestStartupReportFormattingContract() {
       3, 4, 0x55667788);
   CHECK(testReport.rfind("NSMB Test: enabled tUnixMs=123456789 ", 0) == 0);
   CHECK(testReport.find("netRandomValue=0xABCDEF01") != std::string::npos);
-  CHECK(testReport.find("directBootStage=4") != std::string::npos);
+  CHECK(testReport.find("mvlStage=4") != std::string::npos);
   CHECK(!testReport.empty() && testReport.back() == '\n');
 
   Config::ConnectionConfig connection;
@@ -699,8 +698,8 @@ void TestStartupReportFormattingContract() {
         std::string::npos);
   CHECK(!netplayReport.empty() && netplayReport.back() == '\n');
 
-  CHECK(Fnv1a64(testReport) == 12323706635436901969ull);
-  CHECK(Fnv1a64(netplayReport) == 12223666959346911241ull);
+  CHECK(Fnv1a64(testReport) == 16324978585019556272ull);
+  CHECK(Fnv1a64(netplayReport) == 14124424877864246494ull);
 }
 
 void TestAIStartupReportFormattingContract() {

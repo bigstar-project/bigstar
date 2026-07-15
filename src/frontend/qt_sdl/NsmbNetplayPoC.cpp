@@ -189,7 +189,6 @@ constexpr melonDS::u16 kMvlStockItemTouchX = 217;
 constexpr melonDS::u16 kMvlStockItemTouchY = 153;
 constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208B324;
 constexpr melonDS::u32 kGamePlayerDeadAddr = 0x0208B328;
-constexpr melonDS::u32 kGamePlayerInventoryPowerupAddr = 0x0208B32C;
 constexpr melonDS::u32 kGamePlayerTransitionStatusAddr = 0x0208B354; // Game::playerVSPipeState
 constexpr melonDS::u32 kGamePlayerLivesAddr = 0x0208B364;
 constexpr melonDS::u32 kGamePlayerBattleStarsAddr = 0x0208B36C;
@@ -263,7 +262,6 @@ constexpr melonDS::u16 kThwompAltObjectID = 0x0026;
 constexpr melonDS::u16 kFirebarObjectID = 0x0041;
 constexpr melonDS::u16 kBobOmbObjectID = 0x0023;
 constexpr melonDS::u16 kItemSpawnEffectObjectID = 0x00F0;
-constexpr melonDS::u32 kA2DJGameLoadLevelAddr = 0x020068A8;
 constexpr melonDS::u32 kA2DEActorSpawnActorAddr = 0x020A0B64;
 constexpr melonDS::u32 kDirectBootTrampolineAddr = 0x023C0000;
 constexpr melonDS::u32 kDirectBootTrampolineDataAddr = 0x023C0400;
@@ -514,17 +512,15 @@ void RebaseMvlAutoRestartStartupFrames(int instanceID, melonDS::u32 restartFrame
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ThrottleStartFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.Input.SendDelayStartFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.Input.SendDelayEndFrame);
-    G.MvlSeries.RebaseStartupFrame(restartFrame, G.Mvl.DirectBootFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.Mvl.CameraInitHold.StartFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.Mvl.CameraInitHold.EndFrame);
 
     G.MvlSeries.SetStartupFrameBase(restartFrame);
     std::printf(
-        "NSMB MvL auto restart: rebased startup frames inst=%d restartFrame=%u directBoot=%u netplayStart=%u packetJit=%u\n",
+        "NSMB MvL auto restart: rebased startup frames inst=%d restartFrame=%u netplayStart=%u packetJit=%u\n",
         instanceID,
         restartFrame,
-        G.Mvl.DirectBootFrame,
         G.Connection.StartFrame,
         G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
     std::fflush(stdout);
@@ -547,7 +543,6 @@ void RebaseMvlAutoRestartStartupFramesFromCheckpoint(
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ThrottleStartFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Input.SendDelayStartFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Input.SendDelayEndFrame);
-    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.DirectBootFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.CameraInitHold.StartFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.CameraInitHold.EndFrame);
@@ -555,11 +550,10 @@ void RebaseMvlAutoRestartStartupFramesFromCheckpoint(
     G.MvlSeries.SetStartupFrameBase(
         restoreFrame > checkpointFrame ? restoreFrame - checkpointFrame : restoreFrame);
     std::printf(
-        "NSMB MvL auto restart: rebased startup frames from checkpoint inst=%d restoreFrame=%u checkpointFrame=%u directBoot=%u netplayStart=%u packetJit=%u\n",
+        "NSMB MvL auto restart: rebased startup frames from checkpoint inst=%d restoreFrame=%u checkpointFrame=%u netplayStart=%u packetJit=%u\n",
         instanceID,
         restoreFrame,
         checkpointFrame,
-        G.Mvl.DirectBootFrame,
         G.Connection.StartFrame,
         G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
     std::fflush(stdout);
@@ -3192,30 +3186,6 @@ void EmitStrR4SP(std::vector<melonDS::u32>& code, melonDS::u32 offset)
     EmitARM(code, 0xE58D4000u | (offset & 0xFFF));
 }
 
-void EmitStrImm(std::vector<melonDS::u32>& code, int rd, int rn, melonDS::u32 offset)
-{
-    EmitARM(code, 0xE5800000u
-        | (static_cast<melonDS::u32>(rn & 0xF) << 16)
-        | (static_cast<melonDS::u32>(rd & 0xF) << 12)
-        | (offset & 0xFFF));
-}
-
-void EmitStrbImm(std::vector<melonDS::u32>& code, int rd, int rn, melonDS::u32 offset)
-{
-    EmitARM(code, 0xE5C00000u
-        | (static_cast<melonDS::u32>(rn & 0xF) << 16)
-        | (static_cast<melonDS::u32>(rd & 0xF) << 12)
-        | (offset & 0xFFF));
-}
-
-void EmitLdrImm(std::vector<melonDS::u32>& code, int rd, int rn, melonDS::u32 offset)
-{
-    EmitARM(code, 0xE5900000u
-        | (static_cast<melonDS::u32>(rn & 0xF) << 16)
-        | (static_cast<melonDS::u32>(rd & 0xF) << 12)
-        | (offset & 0xFFF));
-}
-
 void EmitStackArg(std::vector<melonDS::u32>& code, melonDS::u32 offset, melonDS::u32 value)
 {
     if (value <= 0xFF)
@@ -3225,120 +3195,6 @@ void EmitStackArg(std::vector<melonDS::u32>& code, melonDS::u32 offset, melonDS:
     else
         EmitMovImm(code, 4, 0);
     EmitStrR4SP(code, offset);
-}
-
-void EmitNormalizeMvlEntranceSpawnState(std::vector<melonDS::u32>& code)
-{
-    EmitLoadImm(code, 0, kEntranceSpawnEntranceIDAddr);
-    EmitMovImm(code, 1, 0);
-    EmitStrbImm(code, 1, 0, 0);
-    EmitMovImm(code, 1, 1);
-    EmitStrbImm(code, 1, 0, 1);
-    EmitLoadImm(code, 0, kEntranceTransitionFlagsAddr);
-    EmitMovImm(code, 1, 0);
-    EmitStrbImm(code, 1, 0, 0);
-    EmitStrbImm(code, 1, 0, 1);
-    EmitLoadImm(code, 0, kEntranceSpawnEntranceAddr);
-    EmitLdrImm(code, 1, 0, 0);
-    EmitARM(code, 0xE2812014u); // add r2, r1, #0x14
-    EmitStrImm(code, 2, 0, sizeof(melonDS::u32));
-}
-
-void EmitClearInitialPlayerInventoryPowerups(std::vector<melonDS::u32>& code)
-{
-    EmitLoadImm(code, 0, kGamePlayerInventoryPowerupAddr);
-    EmitMovImm(code, 1, 0);
-    EmitStrbImm(code, 1, 0, 0);
-    EmitStrbImm(code, 1, 0, 1);
-}
-
-bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool autoRestart = false)
-{
-    if ((!G.Mvl.DirectBootEnabled && !autoRestart) || !nds || instanceID < 0 || instanceID >= 16)
-        return false;
-    if (G.Mvl.DirectBootHostOnly && G.NetRole != Role::Host)
-        return false;
-    if (G.Mvl.DirectBootClientOnly && G.NetRole != Role::Client)
-        return false;
-    if (G.MvlSeries.Instances[instanceID].DirectBootApplied || (!autoRestart && frame < G.Mvl.DirectBootFrame))
-        return false;
-
-    int defaultPlayerID = instanceID;
-    if (G.NetRole == Role::Host)
-        defaultPlayerID = 0;
-    else if (G.NetRole == Role::Client)
-        defaultPlayerID = 1;
-    const int playerID = std::clamp(
-        G.Mvl.DirectBootPlayerID >= 0 ? G.Mvl.DirectBootPlayerID : defaultPlayerID,
-        0,
-        1);
-    const int scene = std::clamp(G.Mvl.DirectBootScene, 0, 0xFFFF);
-    if (G.Mvl.CourseMode == "random" && !G.Mvl.MatchSeedConfigured && G.Mvl.StageSequence.empty())
-        return false;
-    const int stage = std::clamp(MvlStageForGame(instanceID), 0, 4);
-    G.MvlCurrentStage = stage;
-    G.MvlCurrentStageSceneSettings = ComposeMvlSceneSettingsForStage(stage);
-    const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
-    const melonDS::u32 returnPC = oldPC | ((nds->ARM9.CPSR & 0x20) ? 1u : 0u);
-
-    std::vector<melonDS::u32> code;
-    code.reserve(64);
-    EmitARM(code, 0xE92D5FFFu); // push {r0-r12, lr}
-    EmitARM(code, 0xE10F5000u); // mrs r5, cpsr
-    EmitARM(code, 0xE92D0020u); // push {r5}
-    EmitARM(code, 0xE24DD034u); // sub sp, sp, #0x34
-    EmitMovImm(code, 0, static_cast<melonDS::u32>(scene));
-    EmitMovImm(code, 1, 0x01); // vs
-    EmitMovImm(code, 2, 0x09); // StageGroups::MvsL
-    EmitMovImm(code, 3, static_cast<melonDS::u32>(stage));
-    EmitStackArg(code, 0x00, 0x00); // act
-    EmitStackArg(code, 0x04, static_cast<melonDS::u32>(playerID));
-    EmitStackArg(code, 0x08, 0x03); // playerMask
-    EmitStackArg(code, 0x0C, 0x00); // character1
-    EmitStackArg(code, 0x10, 0x01); // character2
-    EmitStackArg(code, 0x14, 0x00); // powerup
-    EmitStackArg(code, 0x18, 0xFF); // entrance
-    EmitStackArg(code, 0x1C, 0x01); // flag
-    EmitStackArg(code, 0x20, 0x01); // unused/control flag observed in VSConnect
-    EmitStackArg(code, 0x24, 0xFF);
-    EmitStackArg(code, 0x28, 0x00);
-    EmitStackArg(code, 0x2C, 0x00);
-    EmitStackArg(code, 0x30, 0xFFFFFFFFu); // rngSeed: let NSMB keep its random path
-    EmitARM(code, 0xE59FC008u); // ldr ip, [pc, #8]
-    EmitARM(code, 0xE28FE008u); // add lr, pc, #8
-    EmitARM(code, 0xE12FFF1Cu); // bx ip
-    EmitARM(code, 0xE1A00000u); // nop
-    EmitARM(code, kA2DJGameLoadLevelAddr);
-    EmitNormalizeMvlEntranceSpawnState(code);
-    EmitClearInitialPlayerInventoryPowerups(code);
-    EmitARM(code, 0xE28DD034u); // add sp, sp, #0x34
-    EmitARM(code, 0xE8BD0020u); // pop {r5}
-    EmitARM(code, 0xE128F005u); // msr apsr_nzcvq, r5
-    EmitARM(code, 0xE8BD5FFFu); // pop {r0-r12, lr}
-    EmitARM(code, 0xE59FC004u); // ldr ip, [pc, #4]
-    EmitARM(code, 0xE12FFF1Cu); // bx ip
-    EmitARM(code, 0xE1A00000u); // nop
-    EmitARM(code, returnPC);
-
-    for (size_t i = 0; i < code.size(); i++)
-    {
-        if (!WriteARM9U32(nds, kDirectBootTrampolineAddr + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)), code[i]))
-            return false;
-    }
-
-    G.MvlSeries.Instances[instanceID].DirectBootApplied = true;
-    std::printf(
-        "NSMB DirectBoot: inst=%d frame=%u trampoline=%08X return=%08X mode=loadLevel scene=%d player=%d stage=%d\n",
-        instanceID,
-        frame,
-        kDirectBootTrampolineAddr,
-        returnPC,
-        scene,
-        playerID,
-        stage);
-    std::fflush(stdout);
-    nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
-    return true;
 }
 
 bool WriteNetAndGameRandomSeed(melonDS::NDS* nds, melonDS::u32 seed);
@@ -3354,20 +3210,16 @@ void SaveMvlAutoRestartBootstrapCheckpointIfNeeded(int instanceID, melonDS::u32 
         return;
     if (restart.RestartCount != 0 || restart.InResult)
         return;
-    const bool directBootReady = G.Mvl.DirectBootEnabled
-        && !G.MvlSeries.Instances[instanceID].DirectBootApplied
-        && frame >= G.Mvl.DirectBootFrame;
     const melonDS::u32 generatedBootstrapFrame = G.Mvl.AutoRestartBootstrapFrame;
     const melonDS::u32 stageGroup = nds->ARM9Read32(kGameStageGroupAddr);
     const melonDS::u16 currentScene = nds->ARM9Read16(kSceneCurrentSceneIDAddr);
     const melonDS::u16 nextScene = nds->ARM9Read16(kSceneNextSceneIDAddr);
-    const bool generatedRomReady = !G.Mvl.DirectBootEnabled
-        && frame >= generatedBootstrapFrame
+    const bool generatedRomReady = frame >= generatedBootstrapFrame
         && stageGroup != 9
         && currentScene == 0x0004
         && nextScene == 0x0006
         && nds->ARM9Read16(kSceneIsSceneActiveAddr) != 0;
-    if (!directBootReady && !generatedRomReady)
+    if (!generatedRomReady)
         return;
 
     melonDS::Savestate state;
@@ -6331,7 +6183,7 @@ void InitFromEnvironment()
     G.Input = Config::LoadInputConfig(false);
     G.RuntimePatch = Config::LoadRuntimePatchConfig();
     G.Mvl = Config::LoadMvlConfig();
-    G.MvlCurrentStage = G.Mvl.DirectBootStage;
+    G.MvlCurrentStage = G.Mvl.Stage;
     G.MvlCurrentStageSceneSettings = G.Mvl.StageSceneSettings;
     if (!G.Mvl.InvalidCourseMode.empty())
     {
@@ -6626,7 +6478,6 @@ void RunBeforeFrameBootPhase(int instanceID, melonDS::u32 frame, melonDS::NDS* n
     if (!CanRunFrameHooks(instanceID, nds))
         return;
     SaveMvlAutoRestartBootstrapCheckpointIfNeeded(instanceID, frame, nds);
-    InjectDirectMvlBootCall(instanceID, frame, nds);
     RestartMvlAfterResultIfNeeded(instanceID, frame, nds);
 }
 

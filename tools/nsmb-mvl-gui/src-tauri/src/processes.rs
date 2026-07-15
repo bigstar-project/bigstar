@@ -661,10 +661,6 @@ pub(crate) fn melon_env(
     );
     env.insert("MELONDS_NSML_MVL_STAGE".into(), stage.to_string());
     env.insert(
-        "MELONDS_NSML_DIRECT_MVL_BOOT_STAGE".into(),
-        stage.to_string(),
-    );
-    env.insert(
         "MELONDS_NSML_MVL_STAGE_SEQUENCE".into(),
         request
             .settings
