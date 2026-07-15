@@ -427,10 +427,8 @@ struct State
     MvlRuntime::Runtime MvlSeries;
     int MvlCurrentStage = 0;
     melonDS::u32 MvlCurrentStageSceneSettings = kMvlStageSceneDefaultSettings;
-    bool MvlEntranceSpawnNormalizedLogged[16] {};
     Config::AIConfig AI;
     NsmbImitationAI::Runtime ImitationAI;
-    bool DirectMvlBootApplied[16] {};
     Config::RuntimePatchConfig RuntimePatch;
     Config::HarnessConfig Harness;
     GameStateTraceWriter GameStateTrace;
@@ -444,8 +442,6 @@ struct State
     Config::RollbackConfig Rollback;
     RollbackStorage::Store RollbackStore;
     RollbackStorage::Statistics RollbackStats;
-    bool ClearMvlCameraInitHoldApplied[16] {};
-    bool NetRandomPatchApplied[16] {};
     bool NetplayAnyLockstepStarted = false;
     bool NetplayLockstepStarted[16] {};
     NsmbNetplayTransport::Transport Transport;
@@ -632,10 +628,9 @@ void ResetMvlAutoRestartStartupHookState(int instanceID)
     if (instanceID < 0 || instanceID >= 16)
         return;
 
-    G.DirectMvlBootApplied[instanceID] = false;
+    G.MvlSeries.ResetStartupHookState(instanceID);
     G.PacketBridgeRuntime.ResetStartupHookState(instanceID);
     G.ScriptRemotePacketLogged[instanceID] = false;
-    G.ClearMvlCameraInitHoldApplied[instanceID] = false;
     G.Coordinator.ResetNetplayStartWait();
     G.Session.ResetStartHandshake();
     G.InputRuntime.LastInputFrameLeadResendAt = {};
@@ -3427,7 +3422,7 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
         return false;
     if (G.Mvl.DirectBootClientOnly && G.NetRole != Role::Client)
         return false;
-    if (G.DirectMvlBootApplied[instanceID] || (!autoRestart && frame < G.Mvl.DirectBootFrame))
+    if (G.MvlSeries.Instances[instanceID].DirectBootApplied || (!autoRestart && frame < G.Mvl.DirectBootFrame))
         return false;
 
     int defaultPlayerID = instanceID;
@@ -3493,7 +3488,7 @@ bool InjectDirectMvlBootCall(int instanceID, melonDS::u32 frame, melonDS::NDS* n
             return false;
     }
 
-    G.DirectMvlBootApplied[instanceID] = true;
+    G.MvlSeries.Instances[instanceID].DirectBootApplied = true;
     std::printf(
         "NSMB DirectBoot: inst=%d frame=%u trampoline=%08X return=%08X mode=loadLevel scene=%d player=%d stage=%d\n",
         instanceID,
@@ -3522,7 +3517,7 @@ void SaveMvlAutoRestartBootstrapCheckpointIfNeeded(int instanceID, melonDS::u32 
     if (restart.RestartCount != 0 || restart.InResult)
         return;
     const bool directBootReady = G.Mvl.DirectBootEnabled
-        && !G.DirectMvlBootApplied[instanceID]
+        && !G.MvlSeries.Instances[instanceID].DirectBootApplied
         && frame >= G.Mvl.DirectBootFrame;
     const melonDS::u32 generatedBootstrapFrame = G.Mvl.AutoRestartBootstrapFrame;
     const melonDS::u32 stageGroup = nds->ARM9Read32(kGameStageGroupAddr);
@@ -3630,7 +3625,7 @@ bool RestoreMvlAutoRestartBootstrapCheckpoint(int instanceID, melonDS::u32 frame
 
     InvalidateMainRAMJIT(nds, nds->MainRAMMask + 1);
     melonDS::Platform::MP_Begin(nds->UserData);
-    G.NetRandomPatchApplied[instanceID] = false;
+    G.MvlSeries.Instances[instanceID].NetRandomPatchApplied = false;
     G.Mvl.NetRandom.Value = requestedSeed;
     G.Mvl.NetRandom.Enabled = true;
     G.Mvl.NetRandom.Auto = true;
@@ -3666,7 +3661,7 @@ bool ResetMvlAutoRestartConsoleForNextMatch(int instanceID, melonDS::u32 frame, 
     WriteNetAndGameRandomSeed(nds, requestedSeed);
     G.Mvl.NetRandom.Enabled = true;
     G.Mvl.NetRandom.Auto = true;
-    G.NetRandomPatchApplied[instanceID] = false;
+    G.MvlSeries.Instances[instanceID].NetRandomPatchApplied = false;
     G.Mvl.NetRandom.Value = requestedSeed;
     std::printf(
         "NSMB MvL auto restart: hard reset console for next match inst=%d frame=%u seed=0x%08X\n",
@@ -4938,9 +4933,9 @@ void NormalizeMvlEntranceSpawnStateIfNeeded(int instanceID, melonDS::u32 frame, 
         nds->ARM9Write32(kEntranceSpawnEntranceAddr + sizeof(melonDS::u32), oldPtr0 + 0x14);
     }
 
-    if (!G.MvlEntranceSpawnNormalizedLogged[instanceID])
+    if (!G.MvlSeries.Instances[instanceID].EntranceSpawnNormalizedLogged)
     {
-        G.MvlEntranceSpawnNormalizedLogged[instanceID] = true;
+        G.MvlSeries.Instances[instanceID].EntranceSpawnNormalizedLogged = true;
         std::printf(
             "NSMB MvL: normalized entrance spawn state inst=%d frame=%u ids=%u/%u->0/1 ptr=%08X/%08X->%08X/%08X\n",
             instanceID,
@@ -5996,7 +5991,7 @@ void ClearMvlCameraInitHoldIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
         return;
     if (instanceID < 0 || instanceID >= 16)
         return;
-    if (G.ClearMvlCameraInitHoldApplied[instanceID])
+    if (G.MvlSeries.Instances[instanceID].ClearCameraInitHoldApplied)
         return;
     if (frame < G.Mvl.CameraInitHold.StartFrame)
         return;
@@ -6016,7 +6011,7 @@ void ClearMvlCameraInitHoldIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
 
     const melonDS::u8 newValue = static_cast<melonDS::u8>(oldValue & ~0x08u);
     nds->ARM9Write8(kMvlCameraModeFlagsAddr, newValue);
-    G.ClearMvlCameraInitHoldApplied[instanceID] = true;
+    G.MvlSeries.Instances[instanceID].ClearCameraInitHoldApplied = true;
 
     std::printf(
         "NSMB Test: clear MvL camera init hold inst=%d frame=%u addr=%08X old=0x%02X value=0x%02X\n",
@@ -6585,7 +6580,7 @@ void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!nds || !nds->MainRAM || !G.Mvl.NetRandom.Enabled) return;
     if (instanceID < 0 || instanceID >= 16) return;
-    if (G.NetRandomPatchApplied[instanceID]) return;
+    if (G.MvlSeries.Instances[instanceID].NetRandomPatchApplied) return;
 
     bool shouldPatch = frame == G.Mvl.NetRandom.Frame;
     melonDS::u8 randomCallCountBeforePatch = 0;
@@ -6603,7 +6598,7 @@ void ApplyNetRandomPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         ? MatchSeedForGame(instanceID)
         : G.Mvl.NetRandom.Value;
     if (!WriteNetAndGameRandomSeed(nds, patchValue)) return;
-    G.NetRandomPatchApplied[instanceID] = true;
+    G.MvlSeries.Instances[instanceID].NetRandomPatchApplied = true;
 
     std::printf("NSMB Test: patched Net/Game random inst=%d frame=%u value=0x%08X auto=%d oldNetCount=0x%02X oldGameCount=0x%02X resetCount=1\n",
         instanceID,

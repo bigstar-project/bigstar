@@ -85,6 +85,29 @@ void TestRestartFramePolicy() {
           "packet cutoff uses the latest instance restart");
 }
 
+void TestInstanceMarkerOwnership() {
+  Runtime runtime;
+  auto &first = runtime.Instances[0];
+  Require(!first.DirectBootApplied && !first.EntranceSpawnNormalizedLogged &&
+              !first.ClearCameraInitHoldApplied &&
+              !first.NetRandomPatchApplied,
+          "MvL instance markers start clear");
+
+  first.DirectBootApplied = true;
+  first.EntranceSpawnNormalizedLogged = true;
+  first.ClearCameraInitHoldApplied = true;
+  first.NetRandomPatchApplied = true;
+  runtime.ResetStartupHookState(-1);
+  runtime.ResetStartupHookState(0);
+  Require(!first.DirectBootApplied && !first.ClearCameraInitHoldApplied,
+          "restart clears startup hook markers");
+  Require(first.EntranceSpawnNormalizedLogged && first.NetRandomPatchApplied,
+          "restart preserves process and seed lifecycle markers");
+  Require(!runtime.Instances[1].EntranceSpawnNormalizedLogged &&
+              !runtime.Instances[1].NetRandomPatchApplied,
+          "MvL instance markers remain isolated");
+}
+
 void TestResultWinnerPolicy() {
   ResultSnapshot result;
   Require(ResolveResultWinner(result) == -1, "fully tied result unresolved");
@@ -113,6 +136,7 @@ void TestResultWinnerPolicy() {
 int main() {
   TestGameSelection();
   TestRestartFramePolicy();
+  TestInstanceMarkerOwnership();
   TestResultWinnerPolicy();
   std::cout << "NsmbMvlRuntime tests passed\n";
   return 0;

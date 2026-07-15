@@ -90,6 +90,13 @@ melonDS::u32 Runtime::RestartPacketCutoffFrame() const {
   return cutoff;
 }
 
+void Runtime::ResetStartupHookState(int instanceID) {
+  if (!IsValidInstance(instanceID))
+    return;
+  Instances[instanceID].DirectBootApplied = false;
+  Instances[instanceID].ClearCameraInitHoldApplied = false;
+}
+
 melonDS::u32 Runtime::RelativeStartupFrame(melonDS::u32 value) const {
   if (value == 0 || value == kNoFrame)
     return value;

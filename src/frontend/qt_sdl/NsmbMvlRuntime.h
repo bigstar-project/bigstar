@@ -24,6 +24,10 @@ struct InstanceState {
   bool InResult = false;
   bool ResultScored = false;
   bool ResultUnresolvedLogged = false;
+  bool DirectBootApplied = false;
+  bool EntranceSpawnNormalizedLogged = false;
+  bool ClearCameraInitHoldApplied = false;
+  bool NetRandomPatchApplied = false;
   melonDS::u32 ResultFrame = 0;
   melonDS::u32 LastRestartFrame = 0;
   int RestartCount = 0;
@@ -52,6 +56,7 @@ public:
   melonDS::u32 MatchSeedForGame(int instanceID,
                                 const Config::MvlConfig &config) const;
   melonDS::u32 RestartPacketCutoffFrame() const;
+  void ResetStartupHookState(int instanceID);
 
   melonDS::u32 RelativeStartupFrame(melonDS::u32 value) const;
   void RebaseStartupFrame(melonDS::u32 restartFrame,
