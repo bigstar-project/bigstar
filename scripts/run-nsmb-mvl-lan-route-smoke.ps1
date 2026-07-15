@@ -150,12 +150,6 @@ param(
     [int]$StageStartDispatchTraceEndFrame = 0,
     [string]$PacketBridgeReplayOps = "",
     [switch]$PacketBridgeDirectCapture,
-    [switch]$PacketBridgeFakePeerInfo,
-    [switch]$PacketBridgeBypassStartConnection,
-    [switch]$PacketBridgeBypassStartConnectionClientOnly,
-    [int]$PacketBridgeBypassStartConnectionStartFrame = 0,
-    [switch]$PacketBridgeBypassWifiStart,
-    [int]$PacketBridgeBypassWifiStartFrame = 0,
     [switch]$PacketBridgeForceTick,
     [int]$PacketBridgeForceTickStartFrame = 0,
     [int]$PacketBridgeForceTickBase = -1,
@@ -1296,31 +1290,6 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE -ErrorAction SilentlyContinue
         }
-        if ($PacketBridgeFakePeerInfo) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_FAKE_PEER_INFO = "1"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FAKE_PEER_INFO -ErrorAction SilentlyContinue
-        }
-        if ($PacketBridgeBypassStartConnection) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_BYPASS_START_CONNECTION = "1"
-            $env:MELONDS_NSML_PACKET_BRIDGE_BYPASS_START_CONNECTION_START_FRAME = "$PacketBridgeBypassStartConnectionStartFrame"
-            if ($PacketBridgeBypassStartConnectionClientOnly) {
-                $env:MELONDS_NSML_PACKET_BRIDGE_BYPASS_START_CONNECTION_CLIENT_ONLY = "1"
-            } else {
-                Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_START_CONNECTION_CLIENT_ONLY -ErrorAction SilentlyContinue
-            }
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_START_CONNECTION -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_START_CONNECTION_START_FRAME -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_START_CONNECTION_CLIENT_ONLY -ErrorAction SilentlyContinue
-        }
-        if ($PacketBridgeBypassWifiStart) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_BYPASS_WIFI_START = "1"
-            $env:MELONDS_NSML_PACKET_BRIDGE_BYPASS_WIFI_START_START_FRAME = "$PacketBridgeBypassWifiStartFrame"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_WIFI_START -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_WIFI_START_START_FRAME -ErrorAction SilentlyContinue
-        }
         if ($PacketBridgeLowerStatusResult -ge 0) {
             $env:MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT = "$PacketBridgeLowerStatusResult"
         } else {
@@ -1746,12 +1715,6 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FAKE_PEER_INFO -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_START_CONNECTION -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_START_CONNECTION_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_START_CONNECTION_CLIENT_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_WIFI_START -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_WIFI_START_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START_FRAME -ErrorAction SilentlyContinue
