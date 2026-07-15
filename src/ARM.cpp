@@ -95,7 +95,6 @@ static bool NSMLRuntimeHooksMaybeEnabled()
         NSMLEnvFlag("MELONDS_NSML_PACKET_REPLAY_FILE") ||
         NSMLEnvFlag("MELONDS_NSML_RANDOM_TRACE") ||
         NSMLEnvFlag("MELONDS_NSML_CALL_TRACE") ||
-        NSMLEnvFlag("MELONDS_NSML_STAGE_START_DISPATCH_TRACE") ||
         NSMLEnvFlag("MELONDS_NSML_TRACE_STAGE_CAMERA") ||
         NSMLEnvFlag("MELONDS_NSML_TRACE_PLAYER_RENDER") ||
         NSMLEnvFlag("MELONDS_NSML_TRACE_PLAYER_DEFEATED") ||
@@ -104,12 +103,6 @@ static bool NSMLRuntimeHooksMaybeEnabled()
         NSMLEnvFlag("MELONDS_NSML_DYNAMIC_CAMERA_LEAD") ||
         NSMLEnvFlag("MELONDS_NSML_RENDER_CAMERA_ALIAS") ||
         NSMLEnvFlag("MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT") ||
-        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE") ||
-        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE") ||
-        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE") ||
-        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK") ||
-        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_READ_PACKET_BYTE") ||
-        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_CHECK_PACKET_BITS") ||
         NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT") ||
         NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_RESET") ||
         NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT");
@@ -253,151 +246,7 @@ static void NSMLMaintainSessionPeers(NDS& nds)
     }
 }
 
-static bool NSMLPacketBridgeClientConfirmToStageStart()
-{
-    static int enabled = -1;
-    if (enabled < 0)
-        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START") ? 1 : 0;
-    return enabled != 0;
-}
-
-static u32 NSMLPacketBridgeClientConfirmToStageStartFrame()
-{
-    static u32 startFrame = 0xFFFFFFFF;
-    if (startFrame == 0xFFFFFFFF)
-        startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START_FRAME", 0);
-    return startFrame;
-}
-
 static bool IsNSMLMarioVsLuigiPacketContext(NDS& nds);
-
-static void PatchNSMLClientConfirmSchedule(ARM* cpu, u32 instrAddr)
-{
-    if (!cpu || cpu->Num != 0 || instrAddr != 0x021528A0)
-        return;
-    if (!NSMLPacketBridgeClientConfirmToStageStart())
-        return;
-    if (cpu->NDS.NumFrames < NSMLPacketBridgeClientConfirmToStageStartFrame())
-        return;
-    const char* role = getenv("MELONDS_NSML_ROLE");
-    if (!role || strcmp(role, "client") != 0)
-        return;
-    if (!NSMLPacketBridgeEnabled() || !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
-        return;
-
-    constexpr u32 loadGameSMSubMenu = 0x02156624;
-    constexpr u32 stageStartSMSubMenu = 0x02156678;
-    const bool fromClientConfirmTimeout =
-        cpu->R[1] == loadGameSMSubMenu &&
-        cpu->R[2] == 0x1E &&
-        cpu->R[3] == 1 &&
-        cpu->R[14] >= 0x021516E8 &&
-        cpu->R[14] <= 0x021516F0;
-    if (!fromClientConfirmTimeout)
-        return;
-
-    static u32 logCount = 0;
-    if (logCount < 8)
-    {
-        printf("NSMB PacketBridge: client confirm schedule redirected LoadGameSM -> StageStartSM frame=%u lr=%08X\n",
-            cpu->NDS.NumFrames,
-            cpu->R[14]);
-        logCount++;
-    }
-    cpu->R[1] = stageStartSMSubMenu;
-}
-
-static bool NSMLPacketBridgeStageStartReadyProbe()
-{
-    static int enabled = -1;
-    if (enabled < 0)
-        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE") ? 1 : 0;
-    return enabled != 0;
-}
-
-static int NSMLPacketBridgeStageStartPacketAction()
-{
-    static int action = -2;
-    if (action == -2)
-    {
-        if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_PACKET_ACTION"))
-            action = static_cast<int>(strtol(value, nullptr, 0));
-        else
-            action = -1;
-    }
-    return action;
-}
-
-static u32 NSMLPacketBridgeStageStartEnvU32(const char* name, u32 fallback)
-{
-    if (const char* value = getenv(name))
-        return static_cast<u32>(strtoul(value, nullptr, 0));
-    return fallback;
-}
-
-static bool NSMLStageStartDispatchTraceEnabled()
-{
-    static int enabled = -1;
-    if (enabled < 0)
-        enabled = NSMLEnvFlag("MELONDS_NSML_STAGE_START_DISPATCH_TRACE") ? 1 : 0;
-    return enabled != 0;
-}
-
-static u32 NSMLStageStartDispatchTraceStartFrame()
-{
-    static u32 startFrame = 0xFFFFFFFF;
-    if (startFrame == 0xFFFFFFFF)
-        startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_STAGE_START_DISPATCH_TRACE_START_FRAME", 0);
-    return startFrame;
-}
-
-static u32 NSMLStageStartDispatchTraceEndFrame()
-{
-    static u32 endFrame = 0xFFFFFFFF;
-    if (endFrame == 0xFFFFFFFF)
-        endFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_STAGE_START_DISPATCH_TRACE_END_FRAME", 0);
-    return endFrame;
-}
-
-static bool NSMLStageStartNet20CheckOverride()
-{
-    static int enabled = -1;
-    if (enabled < 0)
-        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK") ? 1 : 0;
-    return enabled != 0;
-}
-
-static bool NSMLStageStartStep6CloseOverride()
-{
-    static int enabled = -1;
-    if (enabled < 0)
-        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE") ? 1 : 0;
-    return enabled != 0;
-}
-
-static bool NSMLStageSceneReadyCloseOverride()
-{
-    static int enabled = -1;
-    if (enabled < 0)
-        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE") ? 1 : 0;
-    return enabled != 0;
-}
-
-static bool NSMLPacketBridgeReadPacketByteOverride()
-{
-    static int enabled = -1;
-    if (enabled < 0)
-        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_READ_PACKET_BYTE") ? 1 : 0;
-    return enabled != 0;
-}
-
-static bool NSMLPacketBridgeCheckPacketBitsOverride()
-{
-    static int enabled = -1;
-    if (enabled < 0)
-        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_CHECK_PACKET_BITS") ? 1 : 0;
-    return enabled != 0;
-}
 
 static bool IsNSMLMarioVsLuigiGGID(u32 value)
 {
@@ -473,334 +322,6 @@ static u32 NSMLFindObjectBaseByID(NDS& nds, u16 objectID)
     }
 
     return 0;
-}
-
-static bool IsNSMLStageStartSM(NDS& nds)
-{
-    if (!NSMLPacketBridgeStageStartReadyProbe() || !IsNSMLMarioVsLuigiPacketContext(nds))
-        return false;
-    const u32 vsConnectBase = NSMLFindObjectBaseByID(nds, 0x0006);
-    return vsConnectBase != 0 && nds.ARM9Read32(vsConnectBase + 0x120) == 0x021512B8;
-}
-
-static void TraceNSMLStageStartDispatch(ARM* cpu, u32 instrAddr)
-{
-    if (!cpu || cpu->Num != 0 || !NSMLStageStartDispatchTraceEnabled())
-        return;
-    if (instrAddr < 0x02151200 || instrAddr > 0x02152B00)
-        return;
-
-    static int fullTrace = -1;
-    if (fullTrace < 0)
-        fullTrace = NSMLEnvFlag("MELONDS_NSML_STAGE_START_DISPATCH_TRACE_FULL") ? 1 : 0;
-    if (!fullTrace
-        && ((instrAddr > 0x02151320 && instrAddr < 0x02151580)
-            || (instrAddr > 0x02151620 && instrAddr < 0x02152800)))
-    {
-        return;
-    }
-    if (!fullTrace)
-    {
-        switch (instrAddr)
-        {
-        case 0x0215125C: // renderStageStartSM entry
-        case 0x021512B8: // updateStageStartSM entry
-        case 0x021515B4: // createStageStartSM entry
-        case 0x0215280C: // apply scheduled submenu data
-        case 0x0215281C: // write create callback
-        case 0x0215282C: // write update callback
-        case 0x0215283C: // write render callback
-        case 0x02152894: // call create callback
-        case 0x02152978: // VSConnect onRender entry
-        case 0x02152998: // render callback dispatch setup
-        case 0x021529C0: // call render callback
-        case 0x021529FC: // VSConnect onUpdate entry
-        case 0x02152A48: // decrement transition delay
-        case 0x02152A5C: // scheduled submenu transition
-        case 0x02152A94: // call update callback
-            break;
-        default:
-            return;
-        }
-    }
-
-    const u32 frame = cpu->NDS.NumFrames;
-    if (frame < NSMLStageStartDispatchTraceStartFrame())
-        return;
-    const u32 endFrame = NSMLStageStartDispatchTraceEndFrame();
-    if (endFrame != 0 && frame > endFrame)
-        return;
-
-    struct TraceConfig
-    {
-        bool Checked = false;
-        FILE* LogFile = nullptr;
-    };
-    static TraceConfig cfg;
-    if (!cfg.Checked)
-    {
-        std::lock_guard<std::mutex> configLock(NSMLTraceConfigMutex);
-        if (!cfg.Checked)
-        {
-            if (const char* logPath = getenv("MELONDS_NSML_STAGE_START_DISPATCH_TRACE_LOG"))
-            {
-                if (logPath[0])
-                    cfg.LogFile = fopen(logPath, "w");
-            }
-            if (cfg.LogFile)
-            {
-                fprintf(cfg.LogFile,
-                    "nds,frame,pc,lr,sp,cpsr,r0,r1,r2,r3,scene_current,scene_next,net_tick,net_action,vs_base,"
-                    "f118,f120,f128,f134,f138,f13c,f140,f144,f148,f154,f158,f15c,f160\n");
-            }
-            cfg.Checked = true;
-        }
-    }
-    if (!cfg.LogFile)
-        return;
-
-    struct BaseCache
-    {
-        u32 Frame = 0xFFFFFFFF;
-        u32 Base = 0;
-    };
-    static std::map<NDS*, BaseCache> baseCache;
-    BaseCache& cached = baseCache[&cpu->NDS];
-    if (cached.Frame != frame)
-    {
-        cached.Frame = frame;
-        cached.Base = NSMLFindObjectBaseByID(cpu->NDS, 0x0006);
-    }
-    const u32 base = cached.Base;
-    if (base == 0)
-        return;
-
-    const u32 f118 = cpu->NDS.ARM9Read32(base + 0x118);
-    const u32 f120 = cpu->NDS.ARM9Read32(base + 0x120);
-    const u32 f128 = cpu->NDS.ARM9Read32(base + 0x128);
-    const u32 f134 = cpu->NDS.ARM9Read32(base + 0x134);
-    const u32 f138 = cpu->NDS.ARM9Read32(base + 0x138);
-    const bool stageStartRelated =
-        f118 == 0x021515B4 || f120 == 0x021512B8 || f128 == 0x0215125C ||
-        f134 == 0x02156678 || f138 == 0x02156678 ||
-        (instrAddr >= 0x02151200 && instrAddr <= 0x02151320) ||
-        (instrAddr >= 0x02152800 && instrAddr <= 0x02152B00);
-    if (!stageStartRelated && !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
-        return;
-
-    static std::map<NDS*, std::map<u32, u32>> lastLoggedFrameByPC;
-    u32& lastFrame = lastLoggedFrameByPC[&cpu->NDS][instrAddr];
-    if (lastFrame == frame)
-        return;
-    lastFrame = frame;
-
-    std::lock_guard<std::mutex> outputLock(NSMLTraceOutputMutex);
-    fprintf(cfg.LogFile,
-        "%p,%u,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%04X,%04X,%04X,%02X,%08X,"
-        "%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X\n",
-        static_cast<void*>(&cpu->NDS),
-        frame,
-        instrAddr,
-        cpu->R[14],
-        cpu->R[13],
-        cpu->CPSR,
-        cpu->R[0],
-        cpu->R[1],
-        cpu->R[2],
-        cpu->R[3],
-        cpu->NDS.ARM9Read16(0x0203B484),
-        cpu->NDS.ARM9Read16(0x0203B480),
-        cpu->NDS.ARM9Read16(0x020888E0),
-        cpu->NDS.ARM9Read8(0x020888E4),
-        base,
-        f118,
-        f120,
-        f128,
-        f134,
-        f138,
-        cpu->NDS.ARM9Read32(base + 0x13C),
-        cpu->NDS.ARM9Read32(base + 0x140),
-        cpu->NDS.ARM9Read32(base + 0x144),
-        cpu->NDS.ARM9Read32(base + 0x148),
-        cpu->NDS.ARM9Read32(base + 0x154),
-        cpu->NDS.ARM9Read32(base + 0x158),
-        cpu->NDS.ARM9Read32(base + 0x15C),
-        cpu->NDS.ARM9Read32(base + 0x160));
-    fflush(cfg.LogFile);
-}
-
-static bool HandleNSMLStageStartReadyProbeCall(ARM* cpu, u32 instrAddr)
-{
-    if (!cpu || cpu->Num != 0)
-        return false;
-    if (instrAddr != 0x02046260 && instrAddr != 0x02046C7C)
-        return false;
-    if (!IsNSMLStageStartSM(cpu->NDS))
-        return false;
-
-    static u32 transferProbeLogs = 0;
-    static u32 readyProbeLogs = 0;
-    if (instrAddr == 0x02046260)
-    {
-        if (transferProbeLogs < 8)
-        {
-            printf("NSMB PacketBridge: StageStart probe 02046260 -> 0 frame=%u lr=%08X\n",
-                cpu->NDS.NumFrames,
-                cpu->R[14]);
-            fflush(stdout);
-            transferProbeLogs++;
-        }
-        cpu->R[0] = 0;
-    }
-    else
-    {
-        if (readyProbeLogs < 8)
-        {
-            printf("NSMB PacketBridge: StageStart probe 02046C7C -> 1 frame=%u lr=%08X\n",
-                cpu->NDS.NumFrames,
-                cpu->R[14]);
-            fflush(stdout);
-            readyProbeLogs++;
-        }
-        cpu->R[0] = 1;
-    }
-
-    cpu->JumpTo(cpu->R[14]);
-    return true;
-}
-
-static void PatchNSMLStageStartNet20Check(ARM* cpu, u32 instrAddr)
-{
-    if (!cpu || cpu->Num != 0 || !NSMLStageStartNet20CheckOverride())
-        return;
-    if (instrAddr != 0x02151454)
-        return;
-    if (!IsNSMLStageStartSM(cpu->NDS))
-        return;
-
-    const u32 vsConnectBase = NSMLFindObjectBaseByID(cpu->NDS, 0x0006);
-    if (vsConnectBase == 0)
-        return;
-    if (cpu->NDS.ARM9Read32(vsConnectBase + 0x144) != 3)
-        return;
-
-    const u32 timer = cpu->NDS.ARM9Read32(vsConnectBase + 0x148);
-    const u32 minTimer = NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK_MIN_TIMER", 0);
-    if (timer < minTimer)
-        return;
-
-    // Keep the global lower-Net memory untouched; only satisfy the StageStartSM
-    // local comparison. Writing the lower Net flags globally also affects
-    // render/sleep paths.
-    cpu->R[0] = 2;
-}
-
-static bool HandleNSMLStageStartStep6CloseCall(ARM* cpu, u32 instrAddr)
-{
-    if (!cpu || cpu->Num != 0 || !NSMLStageStartStep6CloseOverride())
-        return false;
-    if (instrAddr != 0x0200E658)
-        return false;
-    if (!IsNSMLStageStartSM(cpu->NDS))
-        return false;
-
-    const u32 vsConnectBase = NSMLFindObjectBaseByID(cpu->NDS, 0x0006);
-    if (vsConnectBase == 0)
-        return false;
-    if (cpu->NDS.ARM9Read32(vsConnectBase + 0x144) != 6)
-        return false;
-
-    const u32 timer = cpu->NDS.ARM9Read32(vsConnectBase + 0x148);
-    const u32 minTimer = NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE_MIN_TIMER", 0);
-    if (timer < minTimer)
-        return false;
-
-    cpu->R[0] = 1;
-    cpu->JumpTo(cpu->R[14]);
-    return true;
-}
-
-static bool HandleNSMLStageSceneReadyCloseCall(ARM* cpu, u32 instrAddr)
-{
-    if (!cpu || cpu->Num != 0 || !NSMLStageSceneReadyCloseOverride())
-        return false;
-    if (instrAddr != 0x0200E658)
-        return false;
-    if (cpu->R[14] != 0x020A2348)
-        return false;
-    if (!IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
-        return false;
-
-    const u32 startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE_START_FRAME", 0);
-    if (cpu->NDS.NumFrames < startFrame)
-        return false;
-
-    cpu->R[0] = 1;
-    cpu->JumpTo(cpu->R[14]);
-
-    static int logCount = 0;
-    if (logCount < 8)
-    {
-        printf("NSMB PacketBridge: stage scene ready close frame=%u lr=%08X\n",
-            cpu->NDS.NumFrames,
-            cpu->R[14]);
-        fflush(stdout);
-        logCount++;
-    }
-    return true;
-}
-
-static void NSMLProbeStageStartReadyBits(NDS& nds)
-{
-    if (!NSMLPacketBridgeStageStartReadyProbe() || !IsNSMLMarioVsLuigiPacketContext(nds))
-        return;
-    if (nds.ARM9Read16(0x0203B484) != 0x0006)
-        return;
-
-    const u32 vsConnectBase = NSMLFindObjectBaseByID(nds, 0x0006);
-    if (vsConnectBase == 0)
-        return;
-    if (nds.ARM9Read32(vsConnectBase + 0x120) != 0x021512B8)
-        return;
-
-    // StageStartSM step 1 waits for the lower Net/Wifi state machine to report
-    // the same "ready for stage transition" state that LocalMP would provide.
-    // Keep this scoped to StageStartSM so the earlier search/confirm flow can
-    // still exercise the WAN adapter path naturally.
-    const u32 vsStep = nds.ARM9Read32(vsConnectBase + 0x144);
-    u32 net20 = NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20", 2);
-    if (vsStep >= 3)
-    {
-        const u32 step3Timer = nds.ARM9Read32(vsConnectBase + 0x148);
-        const u32 step3MinTimer = NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3_MIN_TIMER", 0);
-        if (step3Timer >= step3MinTimer)
-            net20 = NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3", net20);
-    }
-
-    nds.ARM9Write32(0x020887FC, NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET14", 1));
-    nds.ARM9Write8(0x02088804, static_cast<u8>(NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET1C", 6)));
-    nds.ARM9Write16(0x02088808, static_cast<u16>(net20));
-    nds.ARM9Write8(0x0208880C, static_cast<u8>(NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET24", 2)));
-    nds.ARM9Write32(0x02088814, NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET2C", 0));
-    nds.ARM9Write8(0x0208881C, static_cast<u8>(NSMLPacketBridgeStageStartEnvU32("MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET34", 0)));
-    const int packetAction = NSMLPacketBridgeStageStartPacketAction();
-    nds.ARM9Write32(0x020888E4, packetAction >= 0 ? (0xFFFF0000u | (static_cast<u32>(packetAction) & 0xFFu)) : 0u);
-    nds.ARM9Write32(0x0208ADD8, 0);
-
-    if (vsStep == 1)
-    {
-        const char* role = getenv("MELONDS_NSML_ROLE");
-        const bool isClient = role && strcmp(role, "client") == 0;
-        nds.ARM9Write32(0x02085A84, 1); // Game::vsMode
-        nds.ARM9Write32(0x02085A7C, isClient ? 1 : 0); // Game::localPlayerID
-        nds.ARM9Write32(vsConnectBase + 0x144, 2);
-        nds.ARM9Write32(vsConnectBase + 0x148, 0);
-    }
-
-    if (nds.ARM9Read32(vsConnectBase + 0x144) < 5)
-        return;
-
-    nds.ARM9Write8(vsConnectBase + 0x156, 0x03);
 }
 
 static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
@@ -1372,112 +893,6 @@ static u32 NSMLWriteBridgePacketScratch(NDS& nds, u32 player, const std::array<u
     return addr;
 }
 
-static bool HandleNSMLPacketReadByteBridge(ARM* cpu, u32 instrAddr)
-{
-    if (!cpu || cpu->Num != 0 || !NSMLPacketBridgeReadPacketByteOverride())
-        return false;
-    if (instrAddr != 0x0200E978)
-        return false;
-    if (!NSMLPacketBridgeEnabled() || !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
-        return false;
-
-    const u32 player = cpu->R[0] & 0xFF;
-    const u32 offset = cpu->R[1] & 0xFF;
-    if (player > 1 || offset >= 52)
-        return false;
-
-    std::array<u8, 52> packet {};
-    if (!NSMLSelectBridgePacketForPlayer(cpu->NDS, player, NSMLPacketBridgeCanonicalTick(cpu->NDS), packet))
-        return false;
-
-    static int traceLower = -1;
-    if (traceLower < 0)
-    {
-        traceLower = (NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_TRACE")
-            || NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_READ_PACKET_BYTE_TRACE")) ? 1 : 0;
-    }
-
-    const u32 value = packet[offset];
-    static u32 traceCount = 0;
-    if (traceLower && (traceCount < 64 || offset == 0x29 || offset <= 7 || (traceCount % 600) == 0))
-    {
-        printf("NSMB PacketBridge lower: readPacketByte 0200E978 player=%u off=0x%02X frame=%u tick=0x%04X pktTick=0x%04X keys=0x%04X action=0x%02X b5=0x%02X b6=0x%02X b7=0x%02X bit=0x%02X -> 0x%02X lr=%08X\n",
-            player,
-            offset,
-            cpu->NDS.NumFrames,
-            NSMLPacketBridgeCanonicalTick(cpu->NDS) & 0xFFFF,
-            static_cast<u32>(packet[0] | (packet[1] << 8)),
-            static_cast<u32>(packet[2] | (packet[3] << 8)),
-            packet[4],
-            packet[5],
-            packet[6],
-            packet[7],
-            packet[0x29],
-            value,
-            cpu->R[14]);
-    }
-    traceCount++;
-
-    cpu->R[0] = value;
-    cpu->JumpTo(cpu->R[14]);
-    return true;
-}
-
-static bool HandleNSMLCheckPacketBitsBridge(ARM* cpu, u32 instrAddr)
-{
-    if (!cpu || cpu->Num != 0 || !NSMLPacketBridgeCheckPacketBitsOverride())
-        return false;
-    if (instrAddr != 0x020111D4)
-        return false;
-    if (!NSMLPacketBridgeEnabled() || !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
-        return false;
-
-    const u32 bitIndex = cpu->R[0] & 0xFF;
-    if (bitIndex >= 8)
-        return false;
-
-    const u8 mask = static_cast<u8>(1u << bitIndex);
-    bool ready = true;
-    u32 values[2] {};
-    for (u32 player = 0; player < 2; player++)
-    {
-        std::array<u8, 52> packet {};
-        if (!NSMLSelectBridgePacketForPlayer(cpu->NDS, player, NSMLPacketBridgeCanonicalTick(cpu->NDS), packet))
-        {
-            ready = false;
-            values[player] = 0xFFFFFFFF;
-            continue;
-        }
-        values[player] = packet[0x29];
-        if ((packet[0x29] & mask) == 0)
-            ready = false;
-    }
-
-    static int traceLower = -1;
-    if (traceLower < 0)
-    {
-        traceLower = (NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_TRACE")
-            || NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_CHECK_PACKET_BITS_TRACE")) ? 1 : 0;
-    }
-    static u32 traceCount = 0;
-    if (traceLower && (traceCount < 64 || ready || (traceCount % 300) == 0))
-    {
-        printf("NSMB PacketBridge lower: checkPacketBits 020111D4 bit=%u frame=%u tick=0x%04X values=%02X/%02X -> %u lr=%08X\n",
-            bitIndex,
-            cpu->NDS.NumFrames,
-            NSMLPacketBridgeCanonicalTick(cpu->NDS) & 0xFFFF,
-            values[0] & 0xFF,
-            values[1] & 0xFF,
-            ready ? 1 : 0,
-            cpu->R[14]);
-    }
-    traceCount++;
-
-    cpu->R[0] = ready ? 1 : 0;
-    cpu->JumpTo(cpu->R[14]);
-    return true;
-}
-
 static bool HandleNSMLLowerMPBridge(ARM* cpu, u32 instrAddr)
 {
     if (!cpu || cpu->Num != 0 || !NSMLPacketBridgeEnabled())
@@ -1700,7 +1115,6 @@ void NSML_RefreshMarioVsLuigiPacketSlots(NDS* nds)
     const u32 tick = nds->ARM9Read16(0x020888E0);
     NSMLMaintainPacketFreeBytes(*nds);
     NSMLMaintainSessionPeers(*nds);
-    NSMLProbeStageStartReadyBits(*nds);
 
     // The old local-MP slot mirror uses 0x0208B040 + player * 0x3E. In US
     // direct MvL gameplay the player1 range overlaps Entrance globals
@@ -4104,44 +3518,17 @@ void ARMv5::Execute()
             {
                 HandleNSMLNetReadyHotPatch(this, instrAddr);
                 TraceNSMLPacketCapture(this, instrAddr);
-                if (HandleNSMLStageStartReadyProbeCall(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLStageStartStep6CloseCall(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLStageSceneReadyCloseCall(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLCheckPacketBitsBridge(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
-                if (HandleNSMLPacketReadByteBridge(this, instrAddr))
-                {
-                    NDS.ARM9Timestamp++;
-                    continue;
-                }
                 if (HandleNSMLLowerMPBridge(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;
                     continue;
                 }
-                PatchNSMLStageStartNet20Check(this, instrAddr);
                 PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
                 PatchNSMLDynamicCameraLead(this, instrAddr);
                 PatchNSMLRenderCameraAlias(this, instrAddr);
                 PatchNSMLCameraFocusLoopCount(this, instrAddr);
                 TraceNSMLStageCamera(this, instrAddr);
                 TraceNSMLPlayerDefeatedEntry(this, instrAddr);
-                TraceNSMLStageStartDispatch(this, instrAddr);
                 TraceNSMLCallImpl(this, instrAddr);
                 TraceNSMLRandomCall(this, instrAddr);
             }
@@ -4191,31 +3578,6 @@ void ARMv5::Execute()
                 {
                     HandleNSMLNetReadyHotPatch(this, instrAddr);
                     TraceNSMLPacketCapture(this, instrAddr);
-                    if (HandleNSMLStageStartReadyProbeCall(this, instrAddr))
-                    {
-                        NDS.ARM9Timestamp++;
-                        continue;
-                    }
-                    if (HandleNSMLStageStartStep6CloseCall(this, instrAddr))
-                    {
-                        NDS.ARM9Timestamp++;
-                        continue;
-                    }
-                    if (HandleNSMLStageSceneReadyCloseCall(this, instrAddr))
-                    {
-                        NDS.ARM9Timestamp++;
-                        continue;
-                    }
-                    if (HandleNSMLCheckPacketBitsBridge(this, instrAddr))
-                    {
-                        NDS.ARM9Timestamp++;
-                        continue;
-                    }
-                    if (HandleNSMLPacketReadByteBridge(this, instrAddr))
-                    {
-                        NDS.ARM9Timestamp++;
-                        continue;
-                    }
                     if (HandleNSMLLowerMPBridge(this, instrAddr))
                     {
                         NDS.ARM9Timestamp++;
@@ -4241,8 +3603,6 @@ void ARMv5::Execute()
                         NDS.ARM9Timestamp++;
                         continue;
                     }
-                    PatchNSMLClientConfirmSchedule(this, instrAddr);
-                    PatchNSMLStageStartNet20Check(this, instrAddr);
                     PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
                     PatchNSMLDynamicCameraLead(this, instrAddr);
                     PatchNSMLRenderCameraAlias(this, instrAddr);
@@ -4250,7 +3610,6 @@ void ARMv5::Execute()
                     TraceNSMLStageCamera(this, instrAddr);
                     TraceNSMLPlayerRender(this, instrAddr);
                     TraceNSMLPlayerDefeatedEntry(this, instrAddr);
-                    TraceNSMLStageStartDispatch(this, instrAddr);
                     TraceNSMLCallImpl(this, instrAddr);
                     TraceNSMLRandomCall(this, instrAddr);
                 }
@@ -4275,31 +3634,6 @@ void ARMv5::Execute()
                 {
                     HandleNSMLNetReadyHotPatch(this, instrAddr);
                     TraceNSMLPacketCapture(this, instrAddr);
-                    if (HandleNSMLStageStartReadyProbeCall(this, instrAddr))
-                    {
-                        NDS.ARM9Timestamp++;
-                        continue;
-                    }
-                    if (HandleNSMLStageStartStep6CloseCall(this, instrAddr))
-                    {
-                        NDS.ARM9Timestamp++;
-                        continue;
-                    }
-                    if (HandleNSMLStageSceneReadyCloseCall(this, instrAddr))
-                    {
-                        NDS.ARM9Timestamp++;
-                        continue;
-                    }
-                    if (HandleNSMLCheckPacketBitsBridge(this, instrAddr))
-                    {
-                        NDS.ARM9Timestamp++;
-                        continue;
-                    }
-                    if (HandleNSMLPacketReadByteBridge(this, instrAddr))
-                    {
-                        NDS.ARM9Timestamp++;
-                        continue;
-                    }
                     if (HandleNSMLLowerMPBridge(this, instrAddr))
                     {
                         NDS.ARM9Timestamp++;
@@ -4325,8 +3659,6 @@ void ARMv5::Execute()
                         NDS.ARM9Timestamp++;
                         continue;
                     }
-                    PatchNSMLClientConfirmSchedule(this, instrAddr);
-                    PatchNSMLStageStartNet20Check(this, instrAddr);
                     PatchNSMLPlayerModelRenderPtrs(this, instrAddr);
                     PatchNSMLDynamicCameraLead(this, instrAddr);
                     PatchNSMLRenderCameraAlias(this, instrAddr);
@@ -4334,7 +3666,6 @@ void ARMv5::Execute()
                     TraceNSMLStageCamera(this, instrAddr);
                     TraceNSMLPlayerRender(this, instrAddr);
                     TraceNSMLPlayerDefeatedEntry(this, instrAddr);
-                    TraceNSMLStageStartDispatch(this, instrAddr);
                     TraceNSMLCallImpl(this, instrAddr);
                     TraceNSMLRandomCall(this, instrAddr);
                 }

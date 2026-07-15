@@ -119,31 +119,7 @@ param(
     [int]$PacketBridgeMaintainSessionPeersStartFrame = 0,
     [switch]$PacketBridgeMaintainSessionPeersHostOnly,
     [switch]$PacketBridgeMaintainSessionPeersClientOnly,
-    [switch]$PacketBridgeClientConfirmToStageStart,
-    [int]$PacketBridgeClientConfirmToStageStartFrame = 0,
     [int]$PacketBridgeLowerStatusResult = -1,
-    [switch]$PacketBridgeStageStartReadyProbe,
-    [int]$PacketBridgeStageStartPacketAction = -1,
-    [int]$PacketBridgeStageStartNet14 = -1,
-    [int]$PacketBridgeStageStartNet1C = -1,
-    [int]$PacketBridgeStageStartNet20 = -1,
-    [int]$PacketBridgeStageStartNet20Step3 = -1,
-    [int]$PacketBridgeStageStartNet20Step3MinTimer = -1,
-    [switch]$PacketBridgeStageStartNet20Check,
-    [int]$PacketBridgeStageStartNet20CheckMinTimer = -1,
-    [switch]$PacketBridgeStageStartStep6Close,
-    [int]$PacketBridgeStageStartStep6CloseMinTimer = -1,
-    [switch]$PacketBridgeStageSceneReadyClose,
-    [int]$PacketBridgeStageSceneReadyCloseStartFrame = -1,
-    [switch]$PacketBridgeReadPacketByte,
-    [switch]$PacketBridgeCheckPacketBits,
-    [int]$PacketBridgeStageStartNet24 = -1,
-    [int]$PacketBridgeStageStartNet2C = -1,
-    [int]$PacketBridgeStageStartNet34 = -1,
-    [switch]$StageStartDispatchTrace,
-    [switch]$StageStartDispatchTraceFull,
-    [int]$StageStartDispatchTraceStartFrame = 0,
-    [int]$StageStartDispatchTraceEndFrame = 0,
     [string]$PacketBridgeReplayOps = "",
     [switch]$PacketBridgeDirectCapture,
     [switch]$PacketBridgeForceTick,
@@ -1479,63 +1455,6 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT -ErrorAction SilentlyContinue
         }
-        if ($PacketBridgeClientConfirmToStageStart) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START = "1"
-            $env:MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START_FRAME = "$PacketBridgeClientConfirmToStageStartFrame"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START_FRAME -ErrorAction SilentlyContinue
-        }
-        if ($PacketBridgeStageStartReadyProbe) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE = "1"
-            if ($PacketBridgeStageStartPacketAction -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_PACKET_ACTION = "$PacketBridgeStageStartPacketAction" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_PACKET_ACTION -ErrorAction SilentlyContinue }
-            if ($PacketBridgeStageStartNet14 -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET14 = "$PacketBridgeStageStartNet14" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET14 -ErrorAction SilentlyContinue }
-            if ($PacketBridgeStageStartNet1C -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET1C = "$PacketBridgeStageStartNet1C" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET1C -ErrorAction SilentlyContinue }
-            if ($PacketBridgeStageStartNet20 -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20 = "$PacketBridgeStageStartNet20" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20 -ErrorAction SilentlyContinue }
-            if ($PacketBridgeStageStartNet20Step3 -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3 = "$PacketBridgeStageStartNet20Step3" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3 -ErrorAction SilentlyContinue }
-            if ($PacketBridgeStageStartNet20Step3MinTimer -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3_MIN_TIMER = "$PacketBridgeStageStartNet20Step3MinTimer" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3_MIN_TIMER -ErrorAction SilentlyContinue }
-            if ($PacketBridgeStageStartNet20Check) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK -ErrorAction SilentlyContinue }
-            if ($PacketBridgeStageStartNet20CheckMinTimer -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK_MIN_TIMER = "$PacketBridgeStageStartNet20CheckMinTimer" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK_MIN_TIMER -ErrorAction SilentlyContinue }
-            if ($PacketBridgeStageStartStep6Close) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE -ErrorAction SilentlyContinue }
-            if ($PacketBridgeStageStartStep6CloseMinTimer -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE_MIN_TIMER = "$PacketBridgeStageStartStep6CloseMinTimer" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE_MIN_TIMER -ErrorAction SilentlyContinue }
-            if ($PacketBridgeStageSceneReadyClose) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE -ErrorAction SilentlyContinue }
-            if ($PacketBridgeStageSceneReadyCloseStartFrame -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE_START_FRAME = "$PacketBridgeStageSceneReadyCloseStartFrame" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE_START_FRAME -ErrorAction SilentlyContinue }
-            if ($PacketBridgeReadPacketByte) { $env:MELONDS_NSML_PACKET_BRIDGE_READ_PACKET_BYTE = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_READ_PACKET_BYTE -ErrorAction SilentlyContinue }
-            if ($PacketBridgeCheckPacketBits) { $env:MELONDS_NSML_PACKET_BRIDGE_CHECK_PACKET_BITS = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_CHECK_PACKET_BITS -ErrorAction SilentlyContinue }
-            if ($PacketBridgeStageStartNet24 -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET24 = "$PacketBridgeStageStartNet24" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET24 -ErrorAction SilentlyContinue }
-            if ($PacketBridgeStageStartNet2C -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET2C = "$PacketBridgeStageStartNet2C" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET2C -ErrorAction SilentlyContinue }
-            if ($PacketBridgeStageStartNet34 -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET34 = "$PacketBridgeStageStartNet34" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET34 -ErrorAction SilentlyContinue }
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_PACKET_ACTION -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET14 -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET1C -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20 -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3 -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3_MIN_TIMER -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK_MIN_TIMER -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE_MIN_TIMER -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE_START_FRAME -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET24 -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET2C -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET34 -ErrorAction SilentlyContinue
-        }
-        if ($StageStartDispatchTrace) {
-            $env:MELONDS_NSML_STAGE_START_DISPATCH_TRACE = "1"
-            $env:MELONDS_NSML_STAGE_START_DISPATCH_TRACE_LOG = "$Stdout.stage-start-dispatch.csv"
-            if ($StageStartDispatchTraceFull) { $env:MELONDS_NSML_STAGE_START_DISPATCH_TRACE_FULL = "1" } else { Remove-Item Env:\MELONDS_NSML_STAGE_START_DISPATCH_TRACE_FULL -ErrorAction SilentlyContinue }
-            if ($StageStartDispatchTraceStartFrame -gt 0) { $env:MELONDS_NSML_STAGE_START_DISPATCH_TRACE_START_FRAME = "$StageStartDispatchTraceStartFrame" } else { Remove-Item Env:\MELONDS_NSML_STAGE_START_DISPATCH_TRACE_START_FRAME -ErrorAction SilentlyContinue }
-            if ($StageStartDispatchTraceEndFrame -gt 0) { $env:MELONDS_NSML_STAGE_START_DISPATCH_TRACE_END_FRAME = "$StageStartDispatchTraceEndFrame" } else { Remove-Item Env:\MELONDS_NSML_STAGE_START_DISPATCH_TRACE_END_FRAME -ErrorAction SilentlyContinue }
-        } else {
-            Remove-Item Env:\MELONDS_NSML_STAGE_START_DISPATCH_TRACE -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_STAGE_START_DISPATCH_TRACE_LOG -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_STAGE_START_DISPATCH_TRACE_FULL -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_STAGE_START_DISPATCH_TRACE_START_FRAME -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_STAGE_START_DISPATCH_TRACE_END_FRAME -ErrorAction SilentlyContinue
-        }
         if ($PacketBridgeReplayOps) {
             $env:MELONDS_NSML_PACKET_REPLAY_OPS = $PacketBridgeReplayOps
         } else {
@@ -1697,8 +1616,6 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE -ErrorAction SilentlyContinue
@@ -1737,26 +1654,6 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_HOST_ONLY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_CLIENT_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_PACKET_ACTION -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET14 -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET1C -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20 -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3 -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3_MIN_TIMER -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK_MIN_TIMER -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE_MIN_TIMER -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET24 -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET2C -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET34 -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_STAGE_START_DISPATCH_TRACE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_STAGE_START_DISPATCH_TRACE_LOG -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_STAGE_START_DISPATCH_TRACE_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_STAGE_START_DISPATCH_TRACE_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_OPS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_TRACE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WAIT_FOR_PEER -ErrorAction SilentlyContinue
@@ -1815,37 +1712,6 @@ function Start-MelonLANProcess {
         }
         if ($PacketBridgeLowerStatusResult -ge 0) {
             $env:MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT = "$PacketBridgeLowerStatusResult"
-        }
-        if ($PacketBridgeClientConfirmToStageStart) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START = "1"
-            $env:MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START_FRAME = "$PacketBridgeClientConfirmToStageStartFrame"
-        }
-        if ($PacketBridgeStageStartReadyProbe) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE = "1"
-            if ($PacketBridgeStageStartPacketAction -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_PACKET_ACTION = "$PacketBridgeStageStartPacketAction" }
-            if ($PacketBridgeStageStartNet14 -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET14 = "$PacketBridgeStageStartNet14" }
-            if ($PacketBridgeStageStartNet1C -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET1C = "$PacketBridgeStageStartNet1C" }
-            if ($PacketBridgeStageStartNet20 -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20 = "$PacketBridgeStageStartNet20" }
-            if ($PacketBridgeStageStartNet20Step3 -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3 = "$PacketBridgeStageStartNet20Step3" }
-            if ($PacketBridgeStageStartNet20Step3MinTimer -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3_MIN_TIMER = "$PacketBridgeStageStartNet20Step3MinTimer" }
-            if ($PacketBridgeStageStartNet20Check) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK = "1" }
-            if ($PacketBridgeStageStartNet20CheckMinTimer -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK_MIN_TIMER = "$PacketBridgeStageStartNet20CheckMinTimer" }
-            if ($PacketBridgeStageStartStep6Close) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE = "1" }
-            if ($PacketBridgeStageStartStep6CloseMinTimer -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE_MIN_TIMER = "$PacketBridgeStageStartStep6CloseMinTimer" }
-            if ($PacketBridgeStageSceneReadyClose) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE = "1" }
-            if ($PacketBridgeStageSceneReadyCloseStartFrame -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE_START_FRAME = "$PacketBridgeStageSceneReadyCloseStartFrame" }
-            if ($PacketBridgeReadPacketByte) { $env:MELONDS_NSML_PACKET_BRIDGE_READ_PACKET_BYTE = "1" }
-            if ($PacketBridgeCheckPacketBits) { $env:MELONDS_NSML_PACKET_BRIDGE_CHECK_PACKET_BITS = "1" }
-            if ($PacketBridgeStageStartNet24 -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET24 = "$PacketBridgeStageStartNet24" }
-            if ($PacketBridgeStageStartNet2C -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET2C = "$PacketBridgeStageStartNet2C" }
-            if ($PacketBridgeStageStartNet34 -ge 0) { $env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET34 = "$PacketBridgeStageStartNet34" }
-        }
-        if ($StageStartDispatchTrace) {
-            $env:MELONDS_NSML_STAGE_START_DISPATCH_TRACE = "1"
-            $env:MELONDS_NSML_STAGE_START_DISPATCH_TRACE_LOG = "$Stdout.stage-start-dispatch.csv"
-            if ($StageStartDispatchTraceFull) { $env:MELONDS_NSML_STAGE_START_DISPATCH_TRACE_FULL = "1" }
-            if ($StageStartDispatchTraceStartFrame -gt 0) { $env:MELONDS_NSML_STAGE_START_DISPATCH_TRACE_START_FRAME = "$StageStartDispatchTraceStartFrame" }
-            if ($StageStartDispatchTraceEndFrame -gt 0) { $env:MELONDS_NSML_STAGE_START_DISPATCH_TRACE_END_FRAME = "$StageStartDispatchTraceEndFrame" }
         }
         if ($PacketBridgeReplayOps) {
             $env:MELONDS_NSML_PACKET_REPLAY_OPS = $PacketBridgeReplayOps
@@ -2023,34 +1889,11 @@ function Start-MelonLANProcess {
         "packetBridgeMaintainSessionPeersHostOnly=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_HOST_ONLY)"
         "packetBridgeMaintainSessionPeersClientOnly=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_CLIENT_ONLY)"
         "packetBridgeLowerStatusResult=$($env:MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT)"
-        "packetBridgeClientConfirmToStageStart=$($env:MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START)"
-        "packetBridgeClientConfirmToStageStartFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START_FRAME)"
-        "packetBridgeStageStartReadyProbe=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_READY_PROBE)"
-        "packetBridgeStageStartPacketAction=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_PACKET_ACTION)"
-        "packetBridgeStageStartNet14=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET14)"
-        "packetBridgeStageStartNet1C=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET1C)"
-        "packetBridgeStageStartNet20=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20)"
-        "packetBridgeStageStartNet20Step3=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3)"
-        "packetBridgeStageStartNet20Step3MinTimer=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_STEP3_MIN_TIMER)"
-        "packetBridgeStageStartNet20Check=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK)"
-        "packetBridgeStageStartNet20CheckMinTimer=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET20_CHECK_MIN_TIMER)"
-        "packetBridgeStageStartStep6Close=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE)"
-        "packetBridgeStageStartStep6CloseMinTimer=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_STEP6_CLOSE_MIN_TIMER)"
-        "packetBridgeStageSceneReadyClose=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE)"
-        "packetBridgeStageSceneReadyCloseStartFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE_START_FRAME)"
         "inputMaxFrameLead=$($env:MELONDS_NSML_INPUT_MAX_FRAME_LEAD)"
         "gameplayHeartbeatInterval=$($env:MELONDS_NSML_GAMEPLAY_HEARTBEAT_INTERVAL)"
         "worldStateTraceActorInternals=$($env:MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS)"
         "worldStateTraceEffects=$($env:MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS)"
         "perfSpikePhaseTrace=$($env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE)"
-        "packetBridgeReadPacketByte=$($env:MELONDS_NSML_PACKET_BRIDGE_READ_PACKET_BYTE)"
-        "packetBridgeCheckPacketBits=$($env:MELONDS_NSML_PACKET_BRIDGE_CHECK_PACKET_BITS)"
-        "packetBridgeStageStartNet24=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET24)"
-        "packetBridgeStageStartNet2C=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET2C)"
-        "packetBridgeStageStartNet34=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_START_NET34)"
-        "stageStartDispatchTrace=$($env:MELONDS_NSML_STAGE_START_DISPATCH_TRACE)"
-        "stageStartDispatchTraceFull=$($env:MELONDS_NSML_STAGE_START_DISPATCH_TRACE_FULL)"
-        "stageStartDispatchTraceLog=$($env:MELONDS_NSML_STAGE_START_DISPATCH_TRACE_LOG)"
         "clearMvlCameraInitHold=$($env:MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD)"
         "clearMvlCameraInitHoldStart=$($env:MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_START_FRAME)"
         "clearMvlCameraInitHoldEnd=$($env:MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_END_FRAME)"
