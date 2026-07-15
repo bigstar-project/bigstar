@@ -33,6 +33,8 @@ set(SOURCES_QT_SDL
     NsmbNetplayProtocol.h
     NsmbNetplayTransport.cpp
     NsmbNetplayTransport.h
+    NsmbNetplaySession.cpp
+    NsmbNetplaySession.h
     NsmbNetplayDiagnostics.cpp
     NsmbNetplayDiagnostics.h
     NsmbNetplayCoordinator.cpp

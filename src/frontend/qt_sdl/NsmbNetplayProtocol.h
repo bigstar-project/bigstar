@@ -179,6 +179,14 @@ bool ShouldAcceptStartReady(bool hasRemoteReadyFrame,
                             bool remoteReadyAfterLocal,
                             bool hasPostStartRemoteInput);
 bool ShouldResendStartReady(const StartReadyResendState &state);
+bool ShouldPumpNetworkAtFrame(bool deferUntilStart,
+                              melonDS::u32 netplayStartFrame,
+                              melonDS::u32 syncFrame,
+                              melonDS::u32 sendStartFrame);
+melonDS::u32 LogicalInputFrame(bool inputNetplayOnly,
+                               std::optional<melonDS::u32> localReadyFrame,
+                               melonDS::u32 netplayStartFrame,
+                               melonDS::u32 rawFrame);
 
 class Runtime {
 public:

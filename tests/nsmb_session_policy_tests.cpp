@@ -80,6 +80,20 @@ void TestResendPolicy() {
   CHECK(!ShouldResendStartReady(state));
 }
 
+void TestFrameActivationPolicy() {
+  using namespace NsmbNetplayPoC::SessionPolicy;
+  CHECK(ShouldPumpNetworkAtFrame(false, 100, 0, 90));
+  CHECK(ShouldPumpNetworkAtFrame(true, 0, 0, 90));
+  CHECK(!ShouldPumpNetworkAtFrame(true, 100, 89, 90));
+  CHECK(ShouldPumpNetworkAtFrame(true, 100, 90, 90));
+
+  CHECK(LogicalInputFrame(false, 800, 100, 900) == 900);
+  CHECK(LogicalInputFrame(true, std::nullopt, 100, 900) == 900);
+  CHECK(LogicalInputFrame(true, 800, 100, 799) == 799);
+  CHECK(LogicalInputFrame(true, 800, 100, 800) == 100);
+  CHECK(LogicalInputFrame(true, 800, 100, 850) == 150);
+}
+
 void TestRuntimeReadyOrderingAndSendState() {
   using NsmbNetplayPoC::SessionPolicy::Runtime;
   Runtime runtime;
@@ -154,7 +168,7 @@ void TestRuntimeResetContracts() {
   CHECK(!runtime.WaitedForPeerAtStart());
   CHECK(!runtime.StartReadySent());
   CHECK(runtime.StartReadySendCount() == 0);
-  CHECK(runtime.LastStartReadySentAt() == Runtime::Clock::time_point {});
+  CHECK(runtime.LastStartReadySentAt() == Runtime::Clock::time_point{});
   CHECK(!runtime.LocalReadyFrame());
   CHECK(!runtime.RemoteReadyFrame());
   CHECK(!runtime.RemoteReadyAfterLocal());
@@ -166,6 +180,7 @@ void TestRuntimeResetContracts() {
 int main() {
   TestStartFrameAndReceivePolicy();
   TestResendPolicy();
+  TestFrameActivationPolicy();
   TestRuntimeReadyOrderingAndSendState();
   TestRuntimeResetContracts();
 

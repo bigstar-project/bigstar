@@ -120,6 +120,23 @@ bool ShouldResendStartReady(const StartReadyResendState &state) {
          state.ElapsedSinceLastSendMs >= kStartReadyResendIntervalMs;
 }
 
+bool ShouldPumpNetworkAtFrame(bool deferUntilStart,
+                              melonDS::u32 netplayStartFrame,
+                              melonDS::u32 syncFrame,
+                              melonDS::u32 sendStartFrame) {
+  return !deferUntilStart || netplayStartFrame == 0 ||
+         syncFrame >= sendStartFrame;
+}
+
+melonDS::u32 LogicalInputFrame(bool inputNetplayOnly,
+                               std::optional<melonDS::u32> localReadyFrame,
+                               melonDS::u32 netplayStartFrame,
+                               melonDS::u32 rawFrame) {
+  if (!inputNetplayOnly || !localReadyFrame || rawFrame < *localReadyFrame)
+    return rawFrame;
+  return netplayStartFrame + (rawFrame - *localReadyFrame);
+}
+
 void Runtime::ResetStartHandshake() {
   WaitedForPeerAtStart_ = false;
   StartReadySent_ = false;
