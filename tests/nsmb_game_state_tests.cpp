@@ -509,6 +509,25 @@ void TestAIObservationRuntime() {
                                std::istreambuf_iterator<char>());
     CHECK(contents == "reopened\n");
   }
+
+  NsmbNetplayPoC::AIObservation::Runtime configuredRuntime;
+  NsmbNetplayPoC::Config::DiagnosticsConfig config;
+  config.AIPlayLogPath = (root / "configured" / "v1.jsonl").string();
+  config.AIObservationV2Path = (root / "configured" / "v2.jsonl").string();
+  config.AIObservationV3Path = (root / "configured" / "v3.jsonl").string();
+  configuredRuntime.OpenConfiguredLogs(false, config);
+  CHECK(!configuredRuntime.CanWriteLog(LogKind::V1));
+  CHECK(!configuredRuntime.CanWriteLog(LogKind::V2));
+  CHECK(!configuredRuntime.CanWriteLog(LogKind::V3));
+  configuredRuntime.OpenConfiguredLogs(true, config);
+  CHECK(configuredRuntime.CanWriteLog(LogKind::V1));
+  CHECK(configuredRuntime.CanWriteLog(LogKind::V2));
+  CHECK(configuredRuntime.CanWriteLog(LogKind::V3));
+  configuredRuntime.CloseLogs();
+  CHECK(std::filesystem::exists(config.AIPlayLogPath));
+  CHECK(std::filesystem::exists(config.AIObservationV2Path));
+  CHECK(std::filesystem::exists(config.AIObservationV3Path));
+
   std::error_code removeError;
   std::filesystem::remove_all(root, removeError);
   CHECK(!removeError);

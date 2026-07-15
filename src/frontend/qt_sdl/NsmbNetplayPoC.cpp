@@ -7240,71 +7240,8 @@ void InitFromEnvironment()
             std::printf("NSMB Test: failed to open game state trace: %s\n", G.Diagnostics.GameStateTracePath.c_str());
         }
     }
-    if ((G.TestEnabled || G.Enabled) && !G.Diagnostics.AIPlayLogPath.empty())
-    {
-        if (!G.AIObservationRuntime.OpenLog(
-                AIObservation::LogKind::V1,
-                G.Diagnostics.AIPlayLogPath))
-        {
-            std::printf("NSMB AIPlayLog: failed to open path=%s\n", G.Diagnostics.AIPlayLogPath.c_str());
-        }
-        else
-        {
-            std::printf(
-                "NSMB AIPlayLog: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d gameplayOnly=%d\n",
-                G.Diagnostics.AIPlayLogPath.c_str(),
-                G.Diagnostics.AIPlayLogInterval,
-                G.Diagnostics.AIPlayLogFlushInterval,
-                G.Diagnostics.AIPlayLogStartFrame,
-                G.Diagnostics.AIPlayLogEndFrame,
-                G.Diagnostics.AIPlayLogMaxObjects,
-                G.Diagnostics.AIPlayLogGameplayOnly ? 1 : 0);
-        }
-    }
-    if ((G.TestEnabled || G.Enabled) && !G.Diagnostics.AIObservationV2Path.empty())
-    {
-        if (!G.AIObservationRuntime.OpenLog(
-                AIObservation::LogKind::V2,
-                G.Diagnostics.AIObservationV2Path))
-        {
-            std::printf("NSMB AIObservationV2: failed to open path=%s\n", G.Diagnostics.AIObservationV2Path.c_str());
-        }
-        else
-        {
-            std::printf(
-                "NSMB AIObservationV2: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d stageFilter=%d gameplayOnly=%d\n",
-                G.Diagnostics.AIObservationV2Path.c_str(),
-                G.Diagnostics.AIPlayLogInterval,
-                G.Diagnostics.AIPlayLogFlushInterval,
-                G.Diagnostics.AIPlayLogStartFrame,
-                G.Diagnostics.AIPlayLogEndFrame,
-                G.Diagnostics.AIPlayLogMaxObjects,
-                G.Diagnostics.AIObservationV2StageFilter,
-                G.Diagnostics.AIPlayLogGameplayOnly ? 1 : 0);
-        }
-    }
-    if ((G.TestEnabled || G.Enabled) && !G.Diagnostics.AIObservationV3Path.empty())
-    {
-        if (!G.AIObservationRuntime.OpenLog(
-                AIObservation::LogKind::V3,
-                G.Diagnostics.AIObservationV3Path))
-        {
-            std::printf("NSMB AIObservationV3: failed to open path=%s\n", G.Diagnostics.AIObservationV3Path.c_str());
-        }
-        else
-        {
-            std::printf(
-                "NSMB AIObservationV3: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d stageFilter=%d gameplayOnly=%d\n",
-                G.Diagnostics.AIObservationV3Path.c_str(),
-                G.Diagnostics.AIPlayLogInterval,
-                G.Diagnostics.AIPlayLogFlushInterval,
-                G.Diagnostics.AIPlayLogStartFrame,
-                G.Diagnostics.AIPlayLogEndFrame,
-                G.Diagnostics.AIPlayLogMaxObjects,
-                G.Diagnostics.AIObservationV3StageFilter,
-                G.Diagnostics.AIPlayLogGameplayOnly ? 1 : 0);
-        }
-    }
+    G.AIObservationRuntime.OpenConfiguredLogs(
+        G.TestEnabled || G.Enabled, G.Diagnostics);
 
     if (G.TestEnabled)
     {

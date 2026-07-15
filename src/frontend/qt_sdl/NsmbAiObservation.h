@@ -1,11 +1,13 @@
 #pragma once
 
 #include "NsmbGameState.h"
+#include "NsmbNetplayConfig.h"
 #include "NsmbNetplayPoC.h"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -58,6 +60,53 @@ public:
       std::filesystem::create_directories(parent, dirError);
     stream.open(path, std::ios::out | std::ios::trunc);
     return static_cast<bool>(stream);
+  }
+
+  void OpenConfiguredLogs(bool active,
+                          const Config::DiagnosticsConfig &config) {
+    if (!active)
+      return;
+    if (!config.AIPlayLogPath.empty()) {
+      if (!OpenLog(LogKind::V1, config.AIPlayLogPath)) {
+        std::printf("NSMB AIPlayLog: failed to open path=%s\n",
+                    config.AIPlayLogPath.c_str());
+      } else {
+        std::printf(
+            "NSMB AIPlayLog: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d gameplayOnly=%d\n",
+            config.AIPlayLogPath.c_str(), config.AIPlayLogInterval,
+            config.AIPlayLogFlushInterval, config.AIPlayLogStartFrame,
+            config.AIPlayLogEndFrame, config.AIPlayLogMaxObjects,
+            config.AIPlayLogGameplayOnly ? 1 : 0);
+      }
+    }
+    if (!config.AIObservationV2Path.empty()) {
+      if (!OpenLog(LogKind::V2, config.AIObservationV2Path)) {
+        std::printf("NSMB AIObservationV2: failed to open path=%s\n",
+                    config.AIObservationV2Path.c_str());
+      } else {
+        std::printf(
+            "NSMB AIObservationV2: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d stageFilter=%d gameplayOnly=%d\n",
+            config.AIObservationV2Path.c_str(), config.AIPlayLogInterval,
+            config.AIPlayLogFlushInterval, config.AIPlayLogStartFrame,
+            config.AIPlayLogEndFrame, config.AIPlayLogMaxObjects,
+            config.AIObservationV2StageFilter,
+            config.AIPlayLogGameplayOnly ? 1 : 0);
+      }
+    }
+    if (!config.AIObservationV3Path.empty()) {
+      if (!OpenLog(LogKind::V3, config.AIObservationV3Path)) {
+        std::printf("NSMB AIObservationV3: failed to open path=%s\n",
+                    config.AIObservationV3Path.c_str());
+      } else {
+        std::printf(
+            "NSMB AIObservationV3: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d stageFilter=%d gameplayOnly=%d\n",
+            config.AIObservationV3Path.c_str(), config.AIPlayLogInterval,
+            config.AIPlayLogFlushInterval, config.AIPlayLogStartFrame,
+            config.AIPlayLogEndFrame, config.AIPlayLogMaxObjects,
+            config.AIObservationV3StageFilter,
+            config.AIPlayLogGameplayOnly ? 1 : 0);
+      }
+    }
   }
 
   bool CanWriteLog(LogKind kind) const {
