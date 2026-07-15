@@ -15,6 +15,8 @@ set(SOURCES_QT_SDL
     NsmbNetplayPoC.h
     NsmbNetplayConfig.cpp
     NsmbNetplayConfig.h
+    NsmbPacketBridgeRuntime.cpp
+    NsmbPacketBridgeRuntime.h
     NsmbMvlRuntime.cpp
     NsmbMvlRuntime.h
     NsmbInputTimeline.cpp
@@ -353,6 +355,22 @@ add_subdirectory("../../net"
     ${CMAKE_BINARY_DIR}/net)
 
 if (BUILD_TESTING)
+    add_executable(nsmb_packet_bridge_runtime_tests
+        NsmbPacketBridgeRuntime.cpp
+        NsmbPacketBridgeRuntime.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_packet_bridge_runtime_tests.cpp
+    )
+    target_include_directories(nsmb_packet_bridge_runtime_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_packet_bridge_runtime_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-packet-bridge-runtime COMMAND nsmb_packet_bridge_runtime_tests)
+
     add_executable(nsmb_netplay_diagnostics_tests
         NsmbNetplayDiagnostics.cpp
         NsmbNetplayDiagnostics.h

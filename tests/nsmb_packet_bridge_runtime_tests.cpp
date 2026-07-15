@@ -1,0 +1,200 @@
+#include "NsmbPacketBridgeRuntime.h"
+
+#include <cstdlib>
+#include <iostream>
+#include <string>
+
+namespace {
+
+using NsmbNetplayPoC::Config::PacketBridgeConfig;
+using NsmbNetplayPoC::Config::RuntimePatchConfig;
+using NsmbNetplayPoC::InputState;
+using NsmbNetplayPoC::PacketBridge::JitHookRestoreAction;
+using NsmbNetplayPoC::PacketBridge::Runtime;
+using NsmbNetplayPoC::PacketBridge::kUnsetProgress;
+using NsmbNetplayPoC::WireProtocol::WireNSMLPacket;
+
+void Require(bool condition, const std::string &message) {
+  if (condition)
+    return;
+  std::cerr << "FAIL: " << message << '\n';
+  std::exit(1);
+}
+
+WireNSMLPacket MakePacket(melonDS::u32 frame, melonDS::u32 player,
+                          melonDS::u32 tick) {
+  WireNSMLPacket packet{};
+  packet.Frame = frame;
+  packet.Player = player;
+  packet.Tick = tick;
+  return packet;
+}
+
+void TestPacketInputHistory() {
+  Runtime runtime;
+  Require(!runtime.PacketInput(0), "packet input starts empty");
+
+  InputState first;
+  first.KeyMask = 0x12;
+  runtime.StorePacketInput(10, first);
+  Require(runtime.PacketInput(10) && runtime.PacketInput(10)->KeyMask == 0x12,
+          "exact packet input is returned");
+  Require(runtime.PacketInput(11) && runtime.PacketInput(11)->KeyMask == 0x12,
+          "previous frame input is the sole fallback");
+  Require(!runtime.PacketInput(12), "fallback does not reach two frames back");
+
+  InputState recent;
+  recent.KeyMask = 0x34;
+  runtime.StorePacketInput(300, recent);
+  runtime.PrunePacketInputs(300, 240);
+  Require(runtime.PacketInputCount() == 1 && runtime.PacketInput(300) &&
+              runtime.PacketInput(300)->KeyMask == 0x34,
+          "input pruning keeps the configured history boundary");
+}
+
+void TestPacketQueuesAndDelay() {
+  Runtime runtime;
+  runtime.QueuePendingPacket(MakePacket(10, 0, 1));
+  runtime.QueuePendingPacket(MakePacket(11, 1, 2));
+  Require(runtime.PendingPacketCount() == 2, "pending packets accumulate");
+  const auto pending = runtime.TakePendingPackets();
+  Require(pending.size() == 2 && pending[0].Frame == 10 &&
+              pending[1].Frame == 11 && runtime.PendingPacketCount() == 0,
+          "pending packet take preserves order and drains the queue");
+
+  melonDS::u8 bytes[52]{};
+  bytes[2] = 0xAA;
+  PacketBridgeConfig config;
+  const auto now = Runtime::Clock::time_point{};
+  const auto immediate =
+      runtime.PrepareOutgoingPacket(5, 1, 9, bytes, config, now);
+  Require(immediate && immediate->Frame == 5 && immediate->Player == 1 &&
+              immediate->Tick == 9 && immediate->Packet[2] == 0xAA,
+          "zero-delay packet is encoded for immediate sending");
+  Require(!runtime.PrepareOutgoingPacket(5, 2, 9, bytes, config, now),
+          "invalid player is rejected");
+
+  config.SendDelayFrames = 2;
+  config.SendJitterFrames = 3;
+  Require(!runtime.PrepareOutgoingPacket(5, 0, 10, bytes, config, now) &&
+              runtime.DelayedPacketCount() == 1,
+          "configured delay plus deterministic jitter queues the packet");
+  Require(runtime.TakeDueOutgoingPackets(
+                     7, now + std::chrono::milliseconds(49))
+              .empty(),
+          "delayed packet remains queued before both deadlines");
+  const auto dueByTime = runtime.TakeDueOutgoingPackets(
+      7, now + std::chrono::milliseconds(50));
+  Require(dueByTime.size() == 1 && dueByTime[0].Tick == 10,
+          "wall-clock deadline releases delayed packet");
+
+  Require(!runtime.PrepareOutgoingPacket(8, 0, 11, bytes, config, now),
+          "second delayed packet is queued");
+  const auto dueByFrame = runtime.TakeDueOutgoingPackets(10, now);
+  Require(dueByFrame.size() == 1 && dueByFrame[0].Tick == 11,
+          "frame deadline independently releases delayed packet");
+}
+
+void TestProgressAndTraceMarkers() {
+  Runtime runtime;
+  Require(runtime.ReceivedPacketProgress(0).Tick == kUnsetProgress &&
+              runtime.ReceivedPacketProgress(3).Frame == kUnsetProgress,
+          "received progress starts and remains unset for invalid players");
+  Require(runtime.RecordReceivedPacket(0, 20, 100),
+          "first received tick is new");
+  Require(!runtime.RecordReceivedPacket(0, 20, 101),
+          "same received tick is not new");
+  Require(runtime.ReceivedPacketProgress(0).Frame == 101 &&
+              runtime.RecordReceivedPacket(1, 20, 200),
+          "frame still advances and player progress is independent");
+
+  Require(runtime.ShouldTraceSentTick(30) &&
+              !runtime.ShouldTraceSentTick(30) &&
+              runtime.ShouldTraceSentTick(31),
+          "sent tick trace is emitted once per value");
+  Require(runtime.ShouldTraceWaitTimeout(40) &&
+              !runtime.ShouldTraceWaitTimeout(40),
+          "wait timeout trace is deduplicated");
+  Require(runtime.ShouldTraceTickThrottle(50) &&
+              !runtime.ShouldTraceTickThrottle(50),
+          "tick throttle trace is deduplicated");
+  Require(runtime.ShouldTraceFrameThrottle(60) &&
+              !runtime.ShouldTraceFrameThrottle(60),
+          "frame throttle trace is deduplicated");
+
+  Require(!runtime.MarkForcedTickFrame(0, 0),
+          "frame zero retains the old already-marked sentinel behavior");
+  Require(runtime.MarkForcedTickFrame(0, 1) &&
+              !runtime.MarkForcedTickFrame(0, 1) &&
+              runtime.MarkForcedTickFrame(1, 1) &&
+              !runtime.MarkForcedTickFrame(16, 1),
+          "forced tick marker deduplicates per valid instance");
+}
+
+void TestJitHookRestorePolicy() {
+  Runtime runtime;
+  RuntimePatchConfig config;
+  auto result = runtime.ScheduleJitHookAfterRestore(0, 4000, 700, config);
+  Require(result.Action == JitHookRestoreAction::Disabled &&
+              !runtime.IsJitHookApplied(0),
+          "disabled JIT hook remains unapplied after restore");
+
+  config.PacketBridgeJitHelperPatchEnabled = true;
+  config.PacketBridgeJitHelperPatchFrame = 840;
+  result = runtime.ScheduleJitHookAfterRestore(0, 4000, 900, config);
+  Require(result.Action == JitHookRestoreAction::KeepApplied &&
+              runtime.IsJitHookApplied(0) &&
+              !runtime.ShouldApplyJitHook(0, 5000, 840),
+          "checkpoint captured after patch keeps the hook applied");
+
+  runtime.ResetStartupHookState(0);
+  result = runtime.ScheduleJitHookAfterRestore(0, 4000, 700, config);
+  Require(result.Action == JitHookRestoreAction::Schedule &&
+              result.ResumeFrame == 4134 &&
+              runtime.JitHookResumeFrame(0) == 4134 &&
+              !runtime.ShouldApplyJitHook(0, 4133, 840) &&
+              runtime.ShouldApplyJitHook(0, 4134, 840),
+          "pre-patch checkpoint preserves the six-frame restore lead policy");
+  runtime.MarkJitHookApplied(0);
+  Require(runtime.IsJitHookApplied(0) &&
+              runtime.JitHookResumeFrame(0) == 0,
+          "applying the hook clears its resume schedule");
+
+  result = runtime.ScheduleJitHookAfterRestore(1, 4000, 839, config);
+  Require(result.Action == JitHookRestoreAction::Schedule &&
+              result.ResumeFrame == 4001,
+          "short restore delay is not reduced below one frame");
+}
+
+void TestRestartQueueReset() {
+  Runtime runtime;
+  InputState input;
+  runtime.StorePacketInput(1, input);
+  runtime.QueuePendingPacket(MakePacket(1, 0, 1));
+  PacketBridgeConfig config;
+  config.SendDelayFrames = 1;
+  melonDS::u8 bytes[52]{};
+  runtime.PrepareOutgoingPacket(1, 0, 1, bytes, config,
+                                Runtime::Clock::time_point{});
+  runtime.RecordReceivedPacket(0, 7, 8);
+
+  runtime.ResetQueuesForRestart();
+  Require(runtime.PacketInputCount() == 0 &&
+              runtime.PendingPacketCount() == 0 &&
+              runtime.DelayedPacketCount() == 0,
+          "restart clears all packet queues");
+  Require(runtime.ReceivedPacketProgress(0).Tick == 7,
+          "restart retains received progress like the previous implementation");
+}
+
+} // namespace
+
+int main() {
+  TestPacketInputHistory();
+  TestPacketQueuesAndDelay();
+  TestProgressAndTraceMarkers();
+  TestJitHookRestorePolicy();
+  TestRestartQueueReset();
+  std::cout << "nsmb_packet_bridge_runtime_tests: pass\n";
+  return 0;
+}

@@ -13,6 +13,7 @@
 
 #include "NsmbNetplayPoC.h"
 #include "NsmbNetplayConfig.h"
+#include "NsmbPacketBridgeRuntime.h"
 #include "NsmbMvlRuntime.h"
 #include "NsmbNetplayCoordinator.h"
 #include "NsmbInputDelivery.h"
@@ -41,7 +42,6 @@
 #include <cstring>
 #include <fstream>
 #include <iomanip>
-#include <map>
 #include <mutex>
 #include <filesystem>
 #include <iterator>
@@ -356,13 +356,6 @@ constexpr melonDS::s32 kDiagnosticOffscreenMargin = 512 * kDiagnosticFixedOne;
 constexpr melonDS::s32 kDiagnosticLargePositionDelta = 256 * kDiagnosticFixedOne;
 
 
-struct DelayedWireNSMLPacket
-{
-    melonDS::u32 ReleaseFrame = 0;
-    std::chrono::steady_clock::time_point ReleaseTime {};
-    WireNSMLPacket Packet {};
-};
-
 AITerrainDerivedSummary DeriveAITerrainSummaryFromGrid(
     const AIPlayerTileProbeSample& probe,
     bool contactGround,
@@ -425,11 +418,10 @@ struct State
     SessionPolicy::Runtime Session;
     Coordination::Runtime Coordinator;
     Config::PacketBridgeConfig PacketBridge;
+    PacketBridge::Runtime PacketBridgeRuntime;
     Config::InputConfig Input;
     InputTimeline::Runtime InputRuntime;
     InputTimeline::Recorder InputRecorder;
-    std::map<melonDS::u32, InputState> PacketBridgePacketInputs;
-    std::vector<DelayedWireNSMLPacket> DelayedNSMLPackets;
     InputDelivery::Runtime Delivery;
     Config::MvlConfig Mvl;
     MvlRuntime::Runtime MvlSeries;
@@ -451,8 +443,6 @@ struct State
     bool LastPlayerLifeSampleValid[16] {};
     GameStateSample LastPlayerLifeSample[16] {};
     bool ScriptRemotePacketLogged[16] {};
-    bool PacketBridgeJitHelperPatchApplied[16] {};
-    melonDS::u32 PacketBridgeJitHelperPatchResumeFrame[16] {};
     Config::RollbackConfig Rollback;
     RollbackStorage::Store RollbackStore;
     RollbackStorage::Statistics RollbackStats;
@@ -462,14 +452,6 @@ struct State
     bool NetplayLockstepStarted[16] {};
     NsmbNetplayTransport::Transport Transport;
     StateSyncRuntime GameSync;
-    std::vector<WireNSMLPacket> PendingNSMLPackets;
-    melonDS::u32 LastSentNSMLPacketTick = 0xFFFFFFFF;
-    melonDS::u32 LastReceivedNSMLPacketTick[2] { 0xFFFFFFFF, 0xFFFFFFFF };
-    melonDS::u32 LastReceivedNSMLPacketFrame[2] { 0xFFFFFFFF, 0xFFFFFFFF };
-    melonDS::u32 LastPacketBridgeWaitTimeoutTick = 0xFFFFFFFF;
-    melonDS::u32 LastPacketBridgeThrottleTraceTick = 0xFFFFFFFF;
-    melonDS::u32 LastPacketBridgeFrameThrottleTraceFrame = 0xFFFFFFFF;
-    melonDS::u32 LastPacketBridgeForcedTickFrame[16] {};
     std::vector<std::pair<melonDS::u32, melonDS::u32>> RamDumpRanges;
     std::vector<std::pair<melonDS::u32, melonDS::u32>> MemPatchRanges;
     melonDS::u32 TestFrameCount[16] {};
@@ -563,9 +545,7 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     std::lock_guard<std::mutex> lock(G.Mutex);
 
     G.GameSync.ResetForRestart(instanceID);
-    G.PendingNSMLPackets.clear();
-    G.PacketBridgePacketInputs.clear();
-    G.DelayedNSMLPackets.clear();
+    G.PacketBridgeRuntime.ResetQueuesForRestart();
     G.Delivery.Clear();
     G.InputRuntime.ResetForRestart(kNoFrameLimit);
     G.DiagnosticsRuntime.ResetNetplaySnapshot(kNoFrameLimit);
@@ -655,9 +635,7 @@ void ResetMvlAutoRestartStartupHookState(int instanceID)
         return;
 
     G.DirectMvlBootApplied[instanceID] = false;
-    G.PacketBridgeJitHelperPatchApplied[instanceID] = false;
-    G.PacketBridgeJitHelperPatchResumeFrame[instanceID] = 0;
-    G.LastPacketBridgeForcedTickFrame[instanceID] = 0;
+    G.PacketBridgeRuntime.ResetStartupHookState(instanceID);
     G.ScriptRemotePacketLogged[instanceID] = false;
     G.ClearMvlCameraInitHoldApplied[instanceID] = false;
     G.Coordinator.ResetNetplayStartWait();
@@ -1264,10 +1242,9 @@ void HandleReceivedNSMLPacketLocked(
     if (G.PacketBridge.Enabled && nds)
         melonDS::NSML_PushMarioVsLuigiRemotePacket(nds, packet.Player, packet.Packet);
     else
-        G.PendingNSMLPackets.push_back(packet);
-    const bool newTick = packet.Tick != G.LastReceivedNSMLPacketTick[packet.Player];
-    G.LastReceivedNSMLPacketTick[packet.Player] = packet.Tick;
-    G.LastReceivedNSMLPacketFrame[packet.Player] = packet.Frame;
+        G.PacketBridgeRuntime.QueuePendingPacket(packet);
+    const bool newTick = G.PacketBridgeRuntime.RecordReceivedPacket(
+        packet.Player, packet.Tick, packet.Frame);
     if (G.PacketBridge.TraceEnabled && newTick)
     {
         const melonDS::u32 keys = packet.Packet[2] | (packet.Packet[3] << 8);
@@ -1282,7 +1259,7 @@ void HandleReceivedNSMLPacketLocked(
             packet.Packet[0x29],
             packet.Frame,
             localFrame,
-            G.PendingNSMLPackets.size());
+            G.PacketBridgeRuntime.PendingPacketCount());
     }
 }
 
@@ -2377,12 +2354,11 @@ melonDS::u32 LocalPlayerID(melonDS::NDS* nds)
 
 void ApplyPendingNSMLPacketsLocked(melonDS::NDS* nds)
 {
-    if (!G.PacketBridge.Enabled || !nds || G.PendingNSMLPackets.empty())
+    if (!G.PacketBridge.Enabled || !nds || G.PacketBridgeRuntime.PendingPacketCount() == 0)
         return;
 
-    for (const WireNSMLPacket& packet : G.PendingNSMLPackets)
+    for (const WireNSMLPacket& packet : G.PacketBridgeRuntime.TakePendingPackets())
         melonDS::NSML_PushMarioVsLuigiRemotePacket(nds, packet.Player, packet.Packet);
-    G.PendingNSMLPackets.clear();
 }
 
 void SendNSMLWirePacketNowLocked(const WireNSMLPacket& packet)
@@ -2392,21 +2368,14 @@ void SendNSMLWirePacketNowLocked(const WireNSMLPacket& packet)
 
 void FlushDelayedNSMLPacketsLocked(melonDS::u32 frame)
 {
-    if (!G.PacketBridge.Enabled || !G.Transport.IsConnected() || G.DelayedNSMLPackets.empty())
+    if (!G.PacketBridge.Enabled || !G.Transport.IsConnected()
+        || G.PacketBridgeRuntime.DelayedPacketCount() == 0)
         return;
 
-    for (auto it = G.DelayedNSMLPackets.begin(); it != G.DelayedNSMLPackets.end(); )
-    {
-        if (it->ReleaseFrame <= frame || std::chrono::steady_clock::now() >= it->ReleaseTime)
-        {
-            SendNSMLWirePacketNowLocked(it->Packet);
-            it = G.DelayedNSMLPackets.erase(it);
-        }
-        else
-        {
-            ++it;
-        }
-    }
+    for (const WireNSMLPacket& packet :
+        G.PacketBridgeRuntime.TakeDueOutgoingPackets(
+            frame, std::chrono::steady_clock::now()))
+        SendNSMLWirePacketNowLocked(packet);
 }
 
 void SendNSMLPacketLocked(melonDS::u32 frame, melonDS::u32 player, melonDS::u32 tick, const melonDS::u8 packetBytes[52])
@@ -2416,36 +2385,16 @@ void SendNSMLPacketLocked(melonDS::u32 frame, melonDS::u32 player, melonDS::u32 
 
     SendMatchSeedLocked();
 
-    WireNSMLPacket packet {};
-    packet.Magic = kMagic;
-    packet.Version = kVersion;
-    packet.Kind = kWireKindPacket;
-    packet.Frame = frame;
-    packet.Player = player;
-    packet.Tick = tick;
-    std::memcpy(packet.Packet, packetBytes, sizeof(packet.Packet));
+    const std::optional<WireNSMLPacket> immediate =
+        G.PacketBridgeRuntime.PrepareOutgoingPacket(
+            frame, player, tick, packetBytes, G.PacketBridge,
+            std::chrono::steady_clock::now());
+    if (immediate)
+        SendNSMLWirePacketNowLocked(*immediate);
 
-    const int jitterFrames = G.PacketBridge.SendJitterFrames > 0
-        ? static_cast<int>(frame % static_cast<melonDS::u32>(G.PacketBridge.SendJitterFrames + 1))
-        : 0;
-    const int sendDelayFrames = G.PacketBridge.SendDelayFrames + jitterFrames;
-    if (sendDelayFrames > 0)
+    if (G.PacketBridge.TraceEnabled
+        && G.PacketBridgeRuntime.ShouldTraceSentTick(tick))
     {
-        G.DelayedNSMLPackets.push_back({
-            frame + static_cast<melonDS::u32>(sendDelayFrames),
-            std::chrono::steady_clock::now() + std::chrono::milliseconds(
-                (sendDelayFrames * 1000 + 59) / 60),
-            packet,
-        });
-    }
-    else
-    {
-        SendNSMLWirePacketNowLocked(packet);
-    }
-
-    if (G.PacketBridge.TraceEnabled && tick != G.LastSentNSMLPacketTick)
-    {
-        G.LastSentNSMLPacketTick = tick;
         const melonDS::u32 keys = packetBytes[2] | (packetBytes[3] << 8);
         std::printf("NSMB PacketBridge: send player=%u tick=0x%04X keys=0x%04X action=0x%02X b5=0x%02X b6=0x%02X b7=0x%02X bit=0x%02X frame=%u\n",
             player,
@@ -2476,12 +2425,11 @@ void CaptureAndSendNSMLPacketLocked(melonDS::u32 frame, melonDS::NDS* nds)
     if (!captured)
         return;
 
-    auto overrideInput = G.PacketBridgePacketInputs.find(frame);
-    if (overrideInput == G.PacketBridgePacketInputs.end() && frame > 0)
-        overrideInput = G.PacketBridgePacketInputs.find(frame - 1);
-    if (overrideInput != G.PacketBridgePacketInputs.end())
+    const std::optional<InputState> overrideInput =
+        G.PacketBridgeRuntime.PacketInput(frame);
+    if (overrideInput)
     {
-        keys = (~overrideInput->second.KeyMask) & 0x0FFF;
+        keys = (~overrideInput->KeyMask) & 0x0FFF;
         packet[2] = static_cast<melonDS::u8>(keys & 0xFF);
         packet[3] = static_cast<melonDS::u8>((keys >> 8) & 0xFF);
     }
@@ -2500,17 +2448,7 @@ void CaptureAndSendNSMLPacketLocked(melonDS::u32 frame, melonDS::NDS* nds)
     melonDS::NSML_PushMarioVsLuigiRemotePacket(nds, localPlayer, packet);
     SendNSMLPacketLocked(frame, localPlayer, tick, packet);
 
-    if (!G.PacketBridgePacketInputs.empty())
-    {
-        const melonDS::u32 keepFrom = frame > 240 ? frame - 240 : 0;
-        for (auto it = G.PacketBridgePacketInputs.begin(); it != G.PacketBridgePacketInputs.end(); )
-        {
-            if (it->first < keepFrom)
-                it = G.PacketBridgePacketInputs.erase(it);
-            else
-                ++it;
-        }
-    }
+    G.PacketBridgeRuntime.PrunePacketInputs(frame, 240);
 }
 
 melonDS::u32 PacketBridgeCanonicalTick(melonDS::NDS* nds, melonDS::u32 frame)
@@ -2532,12 +2470,11 @@ void ForceNSMLPacketBridgeTickIfNeeded(int instanceID, melonDS::u32 frame, melon
         return;
     if (frame < G.PacketBridge.ForceTickStartFrame)
         return;
-    if (G.LastPacketBridgeForcedTickFrame[instanceID] == frame)
+    if (!G.PacketBridgeRuntime.MarkForcedTickFrame(instanceID, frame))
         return;
 
     const melonDS::u32 tick = PacketBridgeCanonicalTick(nds, frame);
     nds->ARM9Write16(0x020888E0, static_cast<melonDS::u16>(tick));
-    G.LastPacketBridgeForcedTickFrame[instanceID] = frame;
 
     if (G.PacketBridge.TraceEnabled && (frame % 60) == 0)
     {
@@ -2630,7 +2567,8 @@ void WaitForNSMLPacketBridgeRemote(melonDS::NDS* nds, melonDS::u32 frame)
         return;
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
-        if (G.LastReceivedNSMLPacketTick[remotePlayer] == 0xFFFFFFFF)
+        if (G.PacketBridgeRuntime.ReceivedPacketProgress(remotePlayer).Tick
+            == PacketBridge::kUnsetProgress)
             return;
     }
 
@@ -2651,9 +2589,9 @@ void WaitForNSMLPacketBridgeRemote(melonDS::NDS* nds, melonDS::u32 frame)
                 std::chrono::steady_clock::now() - start).count();
             if (elapsed >= G.PacketBridge.WaitTimeoutMs)
             {
-                if (G.PacketBridge.TraceEnabled && G.LastPacketBridgeWaitTimeoutTick != tick)
+                if (G.PacketBridge.TraceEnabled
+                    && G.PacketBridgeRuntime.ShouldTraceWaitTimeout(tick))
                 {
-                    G.LastPacketBridgeWaitTimeoutTick = tick;
                     std::printf("NSMB PacketBridge: wait timeout player=%u tick=0x%04X frame=%u waitedMs=%d\n",
                         remotePlayer,
                         tick,
@@ -2689,8 +2627,10 @@ void ThrottleNSMLPacketBridgeLead(melonDS::NDS* nds, melonDS::u32 frame)
         melonDS::u32 remoteFrame = 0xFFFFFFFF;
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
-            remoteTick = G.LastReceivedNSMLPacketTick[remotePlayer];
-            remoteFrame = G.LastReceivedNSMLPacketFrame[remotePlayer];
+            const PacketBridge::ReceivedProgress progress =
+                G.PacketBridgeRuntime.ReceivedPacketProgress(remotePlayer);
+            remoteTick = progress.Tick;
+            remoteFrame = progress.Frame;
         }
 
         if (remoteTick == 0xFFFFFFFF)
@@ -2701,9 +2641,9 @@ void ThrottleNSMLPacketBridgeLead(melonDS::NDS* nds, melonDS::u32 frame)
         if (lead <= G.PacketBridge.MaxTickLead)
             return;
 
-        if (G.PacketBridge.TraceEnabled && G.LastPacketBridgeThrottleTraceTick != localTick)
+        if (G.PacketBridge.TraceEnabled
+            && G.PacketBridgeRuntime.ShouldTraceTickThrottle(localTick))
         {
-            G.LastPacketBridgeThrottleTraceTick = localTick;
             std::printf("NSMB PacketBridge: throttle localTick=0x%04X remotePlayer=%u remoteTick=0x%04X lead=%d maxLead=%d frame=%u remoteFrame=%u\n",
                 localTick,
                 remotePlayer,
@@ -2762,8 +2702,10 @@ void ThrottleNSMLPacketBridgeFrameLead(melonDS::NDS* nds, melonDS::u32 frame)
         melonDS::u32 remoteFrame = 0xFFFFFFFF;
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
-            remoteTick = G.LastReceivedNSMLPacketTick[remotePlayer];
-            remoteFrame = G.LastReceivedNSMLPacketFrame[remotePlayer];
+            const PacketBridge::ReceivedProgress progress =
+                G.PacketBridgeRuntime.ReceivedPacketProgress(remotePlayer);
+            remoteTick = progress.Tick;
+            remoteFrame = progress.Frame;
         }
 
         if (remoteFrame == 0xFFFFFFFF)
@@ -2775,9 +2717,9 @@ void ThrottleNSMLPacketBridgeFrameLead(melonDS::NDS* nds, melonDS::u32 frame)
         if (lead <= G.PacketBridge.MaxFrameLead)
             return;
 
-        if (G.PacketBridge.TraceEnabled && G.LastPacketBridgeFrameThrottleTraceFrame != frame)
+        if (G.PacketBridge.TraceEnabled
+            && G.PacketBridgeRuntime.ShouldTraceFrameThrottle(frame))
         {
-            G.LastPacketBridgeFrameThrottleTraceFrame = frame;
             std::printf("NSMB PacketBridge: frame throttle frame=%u remotePlayer=%u remoteFrame=%u lead=%d maxLead=%d remoteTick=0x%04X\n",
                 frame,
                 remotePlayer,
@@ -3633,16 +3575,14 @@ void SchedulePacketBridgeJitHelperPatchAfterRestore(
     if (instanceID < 0 || instanceID >= 16)
         return;
 
-    G.PacketBridgeJitHelperPatchResumeFrame[instanceID] = 0;
-    if (!G.RuntimePatch.PacketBridgeJitHelperPatchEnabled)
-    {
-        G.PacketBridgeJitHelperPatchApplied[instanceID] = false;
+    const PacketBridge::JitHookRestoreResult result =
+        G.PacketBridgeRuntime.ScheduleJitHookAfterRestore(
+            instanceID, restoreFrame, checkpointFrame, G.RuntimePatch);
+    if (result.Action == PacketBridge::JitHookRestoreAction::Disabled)
         return;
-    }
 
-    if (checkpointFrame >= G.RuntimePatch.PacketBridgeJitHelperPatchFrame)
+    if (result.Action == PacketBridge::JitHookRestoreAction::KeepApplied)
     {
-        G.PacketBridgeJitHelperPatchApplied[instanceID] = true;
         std::printf(
             "NSMB MvL auto restart: keeping packet bridge JIT helper patch inst=%d restoreFrame=%u checkpointFrame=%u patchFrame=%u\n",
             instanceID,
@@ -3653,18 +3593,13 @@ void SchedulePacketBridgeJitHelperPatchAfterRestore(
         return;
     }
 
-    melonDS::u32 delay = G.RuntimePatch.PacketBridgeJitHelperPatchFrame - checkpointFrame;
-    if (delay > 6)
-        delay -= 6;
-    G.PacketBridgeJitHelperPatchApplied[instanceID] = false;
-    G.PacketBridgeJitHelperPatchResumeFrame[instanceID] = restoreFrame + delay;
     std::printf(
         "NSMB MvL auto restart: scheduled packet bridge JIT helper patch inst=%d restoreFrame=%u checkpointFrame=%u patchFrame=%u resumeFrame=%u\n",
         instanceID,
         restoreFrame,
         checkpointFrame,
         G.RuntimePatch.PacketBridgeJitHelperPatchFrame,
-        G.PacketBridgeJitHelperPatchResumeFrame[instanceID]);
+        result.ResumeFrame);
     std::fflush(stdout);
 }
 
@@ -6012,10 +5947,8 @@ void ApplyPacketBridgeJitHelperPatchIfNeeded(int instanceID, melonDS::u32 frame,
         return;
     if (instanceID < 0 || instanceID >= 16)
         return;
-    melonDS::u32 patchFrame = G.RuntimePatch.PacketBridgeJitHelperPatchFrame;
-    if (G.PacketBridgeJitHelperPatchResumeFrame[instanceID] != 0)
-        patchFrame = std::max(patchFrame, G.PacketBridgeJitHelperPatchResumeFrame[instanceID]);
-    if (G.PacketBridgeJitHelperPatchApplied[instanceID] || frame < patchFrame)
+    if (!G.PacketBridgeRuntime.ShouldApplyJitHook(
+            instanceID, frame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame))
         return;
 
     auto invalidateMainRAM = [&](melonDS::u32 start, melonDS::u32 end)
@@ -6051,8 +5984,7 @@ void ApplyPacketBridgeJitHelperPatchIfNeeded(int instanceID, melonDS::u32 frame,
     invalidateMainRAM(0x0200E854, 0x0200E864);
     invalidateMainRAM(0x0200E7D0, 0x0200E7FC);
 
-    G.PacketBridgeJitHelperPatchApplied[instanceID] = true;
-    G.PacketBridgeJitHelperPatchResumeFrame[instanceID] = 0;
+    G.PacketBridgeRuntime.MarkJitHookApplied(instanceID);
     std::printf(
         "NSMB Test: packet bridge JIT keys/touch helper patch inst=%d frame=%u scratch=0x%08X\n",
         instanceID,
@@ -8033,7 +7965,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         if (bridgeNetworkActive && G.PacketBridge.NeutralizeLocalInput)
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
-            G.PacketBridgePacketInputs[syncFrame] = testInput;
+            G.PacketBridgeRuntime.StorePacketInput(syncFrame, testInput);
             packetBridgeInput = G.PacketBridge.PreserveLocalTouch
                 ? NeutralInputPreservingTouch(testInput)
                 : NeutralInput();
