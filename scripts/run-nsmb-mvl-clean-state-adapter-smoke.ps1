@@ -1,12 +1,14 @@
 param(
     [int]$StateFrame = 3200,
     [int]$Frames = 5000,
+    [string]$Exe = "build\debug-windows-x86_64\melonDS.exe",
     [string]$RouteInputScript = "tests\nsmb_mario_vs_luigi.inputs",
     [string]$AdapterInputScript = "tests\nsmb_after_state_escape.inputs",
     [string]$LogDir = "logs\nsmb-mvl-clean-state-adapter-smoke",
     [int]$WaitTimeoutMs = 420000,
     [int]$VerifyFromFrame = 200,
-    [int]$Attempts = 3
+    [int]$Attempts = 3,
+    [switch]$Fast
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,6 +21,18 @@ New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
 
 $sourceFrames = $StateFrame + 10
 $lastError = $null
+$routeSpeedArgs = @{}
+$adapterSpeedArgs = @{}
+$adapterScreenshotInterval = 500
+if ($Fast) {
+    $routeSpeedArgs.NoFrameLimit = $true
+    $routeSpeedArgs.NoScreenshots = $true
+    $adapterSpeedArgs.NoFrameLimit = $true
+    $adapterSpeedArgs.NoAudioSync = $true
+    $adapterSpeedArgs.NoDrawScreen = $true
+    $adapterSpeedArgs.FixedFrameTime = $true
+    $adapterScreenshotInterval = 0
+}
 
 for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
     $attemptRoot = Join-Path $logRoot "attempt$attempt"
@@ -29,7 +43,8 @@ for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
 
     try {
         Write-Host "Attempt $attempt/$Attempts`: generating clean LocalMP state at frame $StateFrame..."
-        & "$root\scripts\run-nsmb-mvl-route-smoke.ps1" `
+        & "$root\scripts\run-nsmb-mvl-route-smoke.ps1" @routeSpeedArgs `
+            -Exe $Exe `
             -Frames $sourceFrames `
             -LogDir $routeLog `
             -InputScript $RouteInputScript `
@@ -44,12 +59,13 @@ for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         Copy-Item -Force "$stateSource\inst1.mln" "$stateSplit\client\inst0.mln"
 
         Write-Host "Attempt $attempt/$Attempts`: running adapter smoke from split state..."
-        & "$root\scripts\run-nsmb-mvl-lan-route-smoke.ps1" `
+        & "$root\scripts\run-nsmb-mvl-lan-route-smoke.ps1" @adapterSpeedArgs `
+            -Exe $Exe `
             -WaitTimeoutMs $WaitTimeoutMs `
             -LanStartAttempts 1 `
             -Frames $Frames `
             -HostStartupDelayMs 0 `
-            -ScreenshotInterval 500 `
+            -ScreenshotInterval $adapterScreenshotInterval `
             -InputScript $AdapterInputScript `
             -LogDir $adapterLog `
             -GameStateTrace `

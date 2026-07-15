@@ -167,7 +167,8 @@ function Start-MelonStagedProcess {
     $env:MELONDS_NSML_WAIT_TIMEOUT_MS = "$WaitTimeoutMs"
     $env:MELONDS_NSML_SEED_WAIT_TIMEOUT_MS = "$WaitTimeoutMs"
     $env:MELONDS_NSML_QUIT_GRACE_MS = "3000"
-    $env:MELONDS_NSML_POC = "1"
+    $env:MELONDS_NSML_NETPLAY = "1"
+    Remove-Item Env:\MELONDS_NSML_POC -ErrorAction SilentlyContinue
     $env:MELONDS_NSML_ROLE = $Role
     $env:MELONDS_NSML_PORT = "$Port"
     $env:MELONDS_NSML_LOCAL_INSTANCE = "$LocalInstance"

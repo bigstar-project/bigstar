@@ -478,7 +478,7 @@ pub(crate) fn melon_env(
         "MELONDS_NSML_TEST_FRAMES".into(),
         DEFAULT_FRAMES.to_string(),
     );
-    env.insert("MELONDS_NSML_POC".into(), "1".into());
+    env.insert("MELONDS_NSML_NETPLAY".into(), "1".into());
     env.insert("MELONDS_NSML_ROLE".into(), role.into());
     env.insert("MELONDS_NSML_PORT".into(), request.port.to_string());
     env.insert("MELONDS_NSML_LOCAL_INSTANCE".into(), local_instance.into());
@@ -660,10 +660,6 @@ pub(crate) fn melon_env(
         NETPLAY_START_FRAME.to_string(),
     );
     env.insert("MELONDS_NSML_MVL_STAGE".into(), stage.to_string());
-    env.insert(
-        "MELONDS_NSML_DIRECT_MVL_BOOT_STAGE".into(),
-        stage.to_string(),
-    );
     env.insert(
         "MELONDS_NSML_MVL_STAGE_SEQUENCE".into(),
         request

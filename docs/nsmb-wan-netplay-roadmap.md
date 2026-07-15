@@ -607,8 +607,8 @@ melonDS:
 確認済みログ:
 
 ```text
-host:   NSMB PoC: peer connected
-client: NSMB PoC: peer connected
+host:   NSMB MvL Netplay: peer connected
+client: NSMB MvL Netplay: peer connected
 host:   NSMB InputNetplay: remote start ready accepted remoteFrame=870 localFrame=870
 client: NSMB InputNetplay: remote start ready accepted remoteFrame=870 localFrame=870
 host:   NSMB Test: frame limit reached at frame=1800

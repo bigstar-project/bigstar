@@ -1,7 +1,196 @@
-// AI observation/logging implementation extracted from NsmbNetplayPoC.cpp.
-// This file is intentionally included from NsmbNetplayPoC.cpp inside its anonymous namespace.
-// Do not add it as a separately compiled translation unit unless the shared internal types are moved to a real header.
+#include "NsmbAiObservation.h"
 
+#include "NsmbGameStateReader.h"
+#include "NsmbImitationAI.h"
+#include "NsmbRuleAI.h"
+
+#include "NDS.h"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <iomanip>
+#include <limits>
+#include <map>
+#include <set>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+namespace NsmbMvlNetplay::AIObservation {
+namespace {
+
+using GameStateModel::AIPlayerTileProbeSample;
+using GameStateModel::AITerrainDerivedSummary;
+using GameStateModel::AITileGridSample;
+using GameStateModel::AITileProbeSample;
+using GameStateModel::GameStateSample;
+using GameStateModel::kAIFireballSlotCount;
+using GameStateModel::kAIFireballSlotDebugWordCount;
+using GameStateModel::kAIFireballSlotStateByteCount;
+using GameStateModel::kAISpecialHandlerWordCount;
+using GameStateModel::kAITileGridCount;
+using GameStateModel::kAITileGridHeight;
+using GameStateModel::kAITileGridMinRelX;
+using GameStateModel::kAITileGridMinRelY;
+using GameStateModel::kAITileGridWidth;
+using GameStateModel::kAITileProbeCount;
+using GameStateModel::PlayerCollisionMgrSample;
+using GameStateModel::PlayerHitboxSample;
+using GameStateReader::BuildGameStateObjectScanCache;
+using GameStateReader::FindActiveObjectsByIDAndSettings;
+using GameStateReader::FindCachedObjectBaseByID;
+using GameStateReader::FindNewestActiveObjectByIDAndSettings;
+using GameStateReader::FindObjectByID;
+using GameStateReader::FindObjectByIDAndSettings;
+using GameStateReader::FindObjectByIDAndSettingsLoose;
+using GameStateReader::FindObjectPairByIDSortedX;
+using GameStateReader::FindVsBattleStarCandidate;
+using GameStateReader::GameStateObjectScanCache;
+using GameStateReader::GameStateObjectScanEntry;
+using GameStateReader::HasActiveObjectScanCache;
+using GameStateReader::ObjectPairScanSample;
+using GameStateReader::ObjectScanSample;
+using GameStateReader::ReadAIPlayerTileProbeSample;
+using GameStateReader::ReadObjectByBase;
+using GameStateReader::ReadPlayerCollisionMgrSample;
+using GameStateReader::ReadPlayerHitboxSample;
+
+constexpr melonDS::u16 kPlayerObjectID = 0x0015;
+constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
+constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
+constexpr melonDS::u16 kVsBattleStarRelatedObjectID = 0x0021;
+constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
+constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
+constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
+constexpr melonDS::u16 kVsKoopaTroopaObjectID = 0x005E;
+constexpr melonDS::u16 kVsWorldItemObjectID = 0x001F;
+constexpr melonDS::u32 kVsNeutralWorldItemSettings = 0x00080000;
+constexpr melonDS::u32 kVsWorldItemSettings = 0x00080002;
+constexpr melonDS::u32 kVsDroppedStarItemSettings = 0x00090002;
+constexpr melonDS::u32 kFireballsHandlerAddr = 0x02129484;
+constexpr melonDS::u32 kProjectilesHandlerAddr = 0x0212A680;
+constexpr melonDS::u32 kAIFireballSlotActiveOffset = 0x80;
+constexpr melonDS::u32 kAIFireballSlotDebugWordOffset = 0x40;
+constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
+constexpr melonDS::u16 kStageFXObjectID = 0x0012;
+constexpr melonDS::u16 kStageActorManagerObjectID = 0x012F;
+constexpr melonDS::u16 kStageControllerObjectID = 0x0130;
+constexpr melonDS::u16 kMvlObject267ID = 0x010B;
+constexpr melonDS::u16 kVsConnectObjectID = 0x0006;
+constexpr melonDS::u16 kCourseSelectObjectID = 0x0005;
+constexpr melonDS::u16 kStageCameraObjectID = 0x013C;
+constexpr melonDS::u16 kStageLayoutObjectID = 0x0145;
+constexpr melonDS::u16 kCoinObjectID = 0x0042;
+constexpr melonDS::u16 kGoombaObjectID = 0x0053;
+constexpr melonDS::u16 kGoombaBigObjectID = 0x0054;
+constexpr melonDS::u16 kGoombaMegaObjectID = 0x0055;
+constexpr melonDS::u16 kKoopaTroopaAltObjectID = 0x005F;
+constexpr melonDS::u16 kWarpEntranceObjectID = 0x0057;
+constexpr melonDS::u16 kDonutLiftObjectID = 0x0047;
+constexpr melonDS::u16 kTrampolineObjectID = 0x00ED;
+constexpr melonDS::u16 kSpinBlockObjectID = 0x00FE;
+constexpr melonDS::u16 kSpinBlockAltObjectID = 0x00FF;
+constexpr melonDS::u16 kSpinBlockFinalObjectID = 0x0100;
+constexpr melonDS::u16 kBulletBillObjectID = 0x001B;
+constexpr melonDS::u16 kBulletBillAltObjectID = 0x00EE;
+constexpr melonDS::u16 kBulletBillBlasterObjectID = 0x00F8;
+constexpr melonDS::u16 kBulletBillBlasterAltObjectID = 0x00F9;
+constexpr melonDS::u16 kThwompObjectID = 0x0025;
+constexpr melonDS::u16 kThwompAltObjectID = 0x0026;
+constexpr melonDS::u16 kFirebarObjectID = 0x0041;
+constexpr melonDS::u16 kBobOmbObjectID = 0x0023;
+constexpr melonDS::u16 kItemSpawnEffectObjectID = 0x00F0;
+
+// Call-scoped integration state. Public entry points bind this per emulator
+// thread so internal feature and serialization helpers never depend on the PoC
+// process-global state.
+thread_local Context *GActiveContext = nullptr;
+thread_local const Hooks *GActiveHooks = nullptr;
+
+Context &ActiveContext() { return *GActiveContext; }
+
+const Hooks &ActiveHooks() { return *GActiveHooks; }
+
+class ScopedContext {
+public:
+  ScopedContext(Context &context, const Hooks &hooks)
+      : PreviousContext(GActiveContext), PreviousHooks(GActiveHooks) {
+    GActiveContext = &context;
+    GActiveHooks = &hooks;
+  }
+
+  ~ScopedContext() {
+    GActiveContext = PreviousContext;
+    GActiveHooks = PreviousHooks;
+  }
+
+private:
+  Context *PreviousContext;
+  const Hooks *PreviousHooks;
+};
+
+bool IsVsDroppedStarActorSettings(melonDS::u32 settings) {
+  const melonDS::u32 normalized = settings & 0x7FFFFFFFu;
+  return normalized == 0x00001002u || normalized == 0x00001012u ||
+         normalized == 0x00001102u || normalized == 0x00001112u;
+}
+
+void WriteJsonHex(std::ostream &out, melonDS::u32 value, int width = 8) {
+  const std::ios::fmtflags oldFlags = out.flags();
+  const char oldFill = out.fill();
+  out << "\"0x" << std::uppercase << std::hex << std::setw(width)
+      << std::setfill('0') << value << "\"";
+  out.flags(oldFlags);
+  out.fill(oldFill);
+}
+
+std::int32_t SignedU32(melonDS::u32 value) {
+  return static_cast<std::int32_t>(value);
+}
+
+InputState NeutralInputPreservingTouch(const InputState &source) {
+  InputState input;
+  input.KeyMask = 0xFFF;
+  input.Touching = source.Touching;
+  input.TouchX = source.TouchX;
+  input.TouchY = source.TouchY;
+  return input;
+}
+
+bool ImitationAIProvidesInputForPlayer(int player) {
+  return ProvidesImitationInput(ActiveContext(), player);
+}
+
+const char *AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings);
+
+using RuntimeHazardThreat = NsmbRuleAI::RuntimeHazardThreat;
+
+bool AIPlayerContactGround(melonDS::u32 collisionFlag) {
+  return NsmbRuleAI::PlayerContactGround(collisionFlag);
+}
+
+RuntimeHazardThreat MostDangerousRuntimeHazard(
+    const GameStateObjectScanCache &objectScanCache, melonDS::u32 selfX,
+    melonDS::u32 selfY, melonDS::u32 selfVelX, std::int64_t horizontalRange,
+    std::int64_t verticalRange, std::int64_t closeRange) {
+  return NsmbRuleAI::FindRuntimeHazard(
+      {
+          ActiveContext().AI.Rule.HorizontalWrapWidth,
+          horizontalRange,
+          verticalRange,
+          closeRange,
+      },
+      objectScanCache, selfX, selfY, selfVelX, AIObjectCategory);
+}
+
+// Shared game semantics and geometry. Training logs and runtime inference must
+// use these same mappings to avoid feature drift.
 const char* AIPowerupCandidateName(melonDS::u32 value)
 {
     switch (value)
@@ -108,7 +297,7 @@ bool AIStarInvincibleCandidate(
 std::int64_t AIWrappedDeltaX(std::int64_t x, std::int64_t origin)
 {
     std::int64_t dx = x - origin;
-    const std::int64_t wrapWidth = G.RuleAIHorizontalWrapWidth;
+    const std::int64_t wrapWidth = ActiveContext().AI.Rule.HorizontalWrapWidth;
     if (wrapWidth <= 0)
         return dx;
     while (dx < -(wrapWidth / 2))
@@ -193,19 +382,6 @@ int AIFireballOwnerCandidateStateless(const GameStateSample& sample, int slotInd
     return -1;
 }
 
-void ResetAIFireballOwnerTracking(int instanceID)
-{
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    for (int i = 0; i < kAIFireballSlotCount; i++)
-    {
-        G.AIPlayLogFireballOwnerValid[instanceID][i] = false;
-        G.AIPlayLogFireballOwner[instanceID][i] = -1;
-        G.AIPlayLogFireballOwnerConfidence[instanceID][i] = 0;
-        G.AIPlayLogFireballOwnerHeuristic[instanceID][i] = 0;
-    }
-}
-
 int AIFireballOwnerCandidate(
     int instanceID,
     const GameStateSample& sample,
@@ -228,29 +404,15 @@ int AIFireballOwnerCandidate(
     if (instanceID < 0 || instanceID >= 16)
         return statelessOwner;
 
-    if (statelessOwner >= 0 && statelessConfidence >= 55)
-    {
-        if (!G.AIPlayLogFireballOwnerValid[instanceID][slotIndex] ||
-            statelessOwner == G.AIPlayLogFireballOwner[instanceID][slotIndex] ||
-            statelessConfidence >= 80)
-        {
-            G.AIPlayLogFireballOwnerValid[instanceID][slotIndex] = true;
-            G.AIPlayLogFireballOwner[instanceID][slotIndex] = statelessOwner;
-            G.AIPlayLogFireballOwnerConfidence[instanceID][slotIndex] =
-                std::max(G.AIPlayLogFireballOwnerConfidence[instanceID][slotIndex], std::min(95, statelessConfidence + 20));
-            G.AIPlayLogFireballOwnerHeuristic[instanceID][slotIndex] = 10 + statelessHeuristic;
-        }
-    }
-
-    if (G.AIPlayLogFireballOwnerValid[instanceID][slotIndex])
-    {
-        tracked = true;
-        confidence = G.AIPlayLogFireballOwnerConfidence[instanceID][slotIndex];
-        heuristic = G.AIPlayLogFireballOwnerHeuristic[instanceID][slotIndex];
-        return G.AIPlayLogFireballOwner[instanceID][slotIndex];
-    }
-
-    return statelessOwner;
+    return ActiveContext().AIObservationRuntime.ResolveFireballOwner(
+        instanceID,
+        slotIndex,
+        statelessOwner,
+        statelessConfidence,
+        statelessHeuristic,
+        confidence,
+        heuristic,
+        tracked);
 }
 
 const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings)
@@ -382,7 +544,7 @@ bool IsInCameraRect(
     melonDS::u32 cameraHeight)
 {
     std::int64_t sx = static_cast<std::int64_t>(SignedU32(x)) - SignedU32(cameraX);
-    const std::int64_t wrapWidth = G.RuleAIHorizontalWrapWidth;
+    const std::int64_t wrapWidth = ActiveContext().AI.Rule.HorizontalWrapWidth;
     if (wrapWidth > 0)
     {
         while (sx < 0)
@@ -405,7 +567,7 @@ void WriteAIScreenJson(
     melonDS::u32 cameraHeight)
 {
     std::int64_t screenX = static_cast<std::int64_t>(SignedU32(x)) - SignedU32(cameraX);
-    const std::int64_t wrapWidth = G.RuleAIHorizontalWrapWidth;
+    const std::int64_t wrapWidth = ActiveContext().AI.Rule.HorizontalWrapWidth;
     if (wrapWidth > 0)
     {
         while (screenX < 0)
@@ -424,6 +586,7 @@ void WriteAIScreenJson(
         << "}";
 }
 
+// Verbose observation serialization primitives.
 void WriteAIInputJson(std::ostream& out, const char* name, melonDS::u32 held, melonDS::u32 pressed)
 {
     out << "\"" << name << "\":{\"held\":" << held << ",\"heldHex\":";
@@ -436,17 +599,18 @@ void WriteAIInputJson(std::ostream& out, const char* name, melonDS::u32 held, me
 void WriteAIAppliedInputJson(std::ostream& out, int instanceID, int player)
 {
     out << "\"appliedPlayer" << player << "\":{";
-    if (instanceID < 0 || instanceID >= 16 || player < 0 || player >= 2 ||
-        !G.AIPlayLogLastAppliedInputValid[instanceID][player])
+    const AIObservation::Runtime::AppliedInputRecord* record =
+        ActiveContext().AIObservationRuntime.AppliedInput(instanceID, player);
+    if (!record)
     {
         out << "\"valid\":0}";
         return;
     }
 
-    const InputState& input = G.AIPlayLogLastAppliedInput[instanceID][player];
+    const InputState& input = record->Input;
     const melonDS::u32 held = (~input.KeyMask) & 0x0FFF;
     out << "\"valid\":1"
-        << ",\"frame\":" << G.AIPlayLogLastAppliedInputFrame[instanceID][player]
+        << ",\"frame\":" << record->Frame
         << ",\"keyMask\":";
     WriteJsonHex(out, input.KeyMask, 3);
     out << ",\"held\":" << held << ",\"heldHex\":";
@@ -660,6 +824,7 @@ void WriteAITileGridCellJson(std::ostream& out, const AITileGridSample& cell)
 
 int AITileProbeSolidishValue(const AIPlayerTileProbeSample& probe, const char* name);
 
+// Terrain and compact-observation semantics shared by logging and inference.
 int AIObservationV2EntityCategoryID(const char* category)
 {
     if (std::strcmp(category, "player") == 0)
@@ -1741,7 +1906,7 @@ void WriteAIVisualSummaryJson(
             visibleCamera0++;
         const std::int64_t camera0X =
             (static_cast<std::int64_t>(SignedU32(entry.Actor.PosX)) - SignedU32(sample.StageCameraGlobalX0) +
-                G.RuleAIHorizontalWrapWidth) % std::max(1, G.RuleAIHorizontalWrapWidth);
+                ActiveContext().AI.Rule.HorizontalWrapWidth) % std::max(1, ActiveContext().AI.Rule.HorizontalWrapWidth);
         if (camera0X >= 0 && camera0X < SignedU32(sample.StageCameraGlobalWidth0))
             visibleCamera0X++;
         if (IsInCameraRect(
@@ -1754,7 +1919,7 @@ void WriteAIVisualSummaryJson(
             visibleCamera1++;
         const std::int64_t camera1X =
             (static_cast<std::int64_t>(SignedU32(entry.Actor.PosX)) - SignedU32(sample.StageCameraGlobalX1) +
-                G.RuleAIHorizontalWrapWidth) % std::max(1, G.RuleAIHorizontalWrapWidth);
+                ActiveContext().AI.Rule.HorizontalWrapWidth) % std::max(1, ActiveContext().AI.Rule.HorizontalWrapWidth);
         if (camera1X >= 0 && camera1X < SignedU32(sample.StageCameraGlobalWidth1))
             visibleCamera1X++;
     }
@@ -1808,6 +1973,7 @@ void WriteAIVisualSummaryJson(
     out << "]}";
 }
 
+// Named-feature resolution for linear imitation models.
 bool AITileTypeFeature(melonDS::u32 tileType, const std::string& name, double& out)
 {
     auto bit = [tileType](melonDS::u32 mask) { return (tileType & mask) ? 1.0 : 0.0; };
@@ -2225,48 +2391,6 @@ bool RuntimeHazardFeature(
     return true;
 }
 
-const GameStateObjectScanEntry* NearestRuntimeHazard(
-    const GameStateObjectScanCache& objectScanCache,
-    melonDS::u32 selfX,
-    melonDS::u32 selfY,
-    std::int64_t horizontalRange,
-    std::int64_t verticalRange,
-    std::int64_t& outDx,
-    std::int64_t& outDy)
-{
-    const GameStateObjectScanEntry* nearest = nullptr;
-    std::int64_t nearestDist2 = 0;
-    auto abs64 = [](std::int64_t value) {
-        return value < 0 ? -value : value;
-    };
-    for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
-    {
-        if (entry.LifecycleState != 1)
-            continue;
-        const char* category = AIObjectCategory(entry.ObjectID, entry.Actor.Settings);
-        if (std::strcmp(category, "moving_hazard") != 0 &&
-            std::strcmp(category, "hazard") != 0 &&
-            std::strcmp(category, "enemy_goomba") != 0 &&
-            std::strcmp(category, "enemy_koopa") != 0)
-        {
-            continue;
-        }
-        const std::int64_t dx = AIWrappedDeltaX(SignedU32(entry.Actor.PosX), SignedU32(selfX));
-        const std::int64_t dy = static_cast<std::int64_t>(SignedU32(entry.Actor.PosY)) - SignedU32(selfY);
-        if (abs64(dx) > horizontalRange || abs64(dy) > verticalRange)
-            continue;
-        const std::int64_t dist2 = dx * dx + dy * dy;
-        if (!nearest || dist2 < nearestDist2)
-        {
-            nearest = &entry;
-            nearestDist2 = dist2;
-            outDx = dx;
-            outDy = dy;
-        }
-    }
-    return nearest;
-}
-
 bool ApplyImitationAIHazardGuard(
     const GameStateSample& sample,
     const GameStateObjectScanCache& objectScanCache,
@@ -2275,7 +2399,7 @@ bool ApplyImitationAIHazardGuard(
     std::int64_t& outHazardDx,
     std::int64_t& outHazardDy)
 {
-    if (!G.ImitationAIHazardGuardEnabled || player < 0 || player > 1)
+    if (!ActiveContext().AI.Imitation.HazardGuardEnabled || player < 0 || player > 1)
         return false;
 
     const bool p0 = player == 0;
@@ -2295,9 +2419,9 @@ bool ApplyImitationAIHazardGuard(
         selfX,
         selfY,
         selfVelX,
-        G.ImitationAIHazardGuardHorizontalRange,
-        G.ImitationAIHazardGuardVerticalRange,
-        G.ImitationAIHazardGuardCloseRange);
+        ActiveContext().AI.Imitation.HazardGuardHorizontalRange,
+        ActiveContext().AI.Imitation.HazardGuardVerticalRange,
+        ActiveContext().AI.Imitation.HazardGuardCloseRange);
     if (!threat.Found)
         return false;
     outHazardDx = threat.Dx;
@@ -2322,7 +2446,7 @@ bool ApplyImitationAIHazardGuard(
     const bool pushWall = (collisionFlag & 0x00000004u) != 0;
     const bool hazardOnLeft = outHazardDx < 0;
     const bool escapeBlocked = hazardOnLeft ? (blockedRight || pushWall) : (blockedLeft || pushWall);
-    const bool close = abs64(outHazardDx) <= G.ImitationAIHazardGuardCloseRange;
+    const bool close = abs64(outHazardDx) <= ActiveContext().AI.Imitation.HazardGuardCloseRange;
     const bool movingTowardHazard =
         (hazardOnLeft && (held & kHeldLeft) != 0) ||
         (!hazardOnLeft && (held & kHeldRight) != 0);
@@ -2668,12 +2792,12 @@ bool RuntimeFeatureValue(
                 continue;
             if (IsInCameraRect(entry.Actor.PosX, entry.Actor.PosY, sample.StageCameraGlobalX0, sample.StageCameraGlobalY0, sample.StageCameraGlobalWidth0, sample.StageCameraGlobalHeight0))
                 visible0++;
-            const std::int64_t camera0X = (static_cast<std::int64_t>(SignedU32(entry.Actor.PosX)) - SignedU32(sample.StageCameraGlobalX0) + G.RuleAIHorizontalWrapWidth) % std::max(1, G.RuleAIHorizontalWrapWidth);
+            const std::int64_t camera0X = (static_cast<std::int64_t>(SignedU32(entry.Actor.PosX)) - SignedU32(sample.StageCameraGlobalX0) + ActiveContext().AI.Rule.HorizontalWrapWidth) % std::max(1, ActiveContext().AI.Rule.HorizontalWrapWidth);
             if (camera0X >= 0 && camera0X < SignedU32(sample.StageCameraGlobalWidth0))
                 visible0x++;
             if (IsInCameraRect(entry.Actor.PosX, entry.Actor.PosY, sample.StageCameraGlobalX1, sample.StageCameraGlobalY1, sample.StageCameraGlobalWidth1, sample.StageCameraGlobalHeight1))
                 visible1++;
-            const std::int64_t camera1X = (static_cast<std::int64_t>(SignedU32(entry.Actor.PosX)) - SignedU32(sample.StageCameraGlobalX1) + G.RuleAIHorizontalWrapWidth) % std::max(1, G.RuleAIHorizontalWrapWidth);
+            const std::int64_t camera1X = (static_cast<std::int64_t>(SignedU32(entry.Actor.PosX)) - SignedU32(sample.StageCameraGlobalX1) + ActiveContext().AI.Rule.HorizontalWrapWidth) % std::max(1, ActiveContext().AI.Rule.HorizontalWrapWidth);
             if (camera1X >= 0 && camera1X < SignedU32(sample.StageCameraGlobalWidth1))
                 visible1x++;
         }
@@ -2806,8 +2930,8 @@ bool BuildRuntimeImitationFeatures(
                 missingNames.insert(model.FeatureNames[i]);
         }
     }
-    if (G.ImitationAIWarnMissingFeatures && missing > 0 &&
-        G.ImitationAIFeaturesFilled == 0 && G.ImitationAIFeaturesMissing == 0)
+    if (ActiveContext().AI.Imitation.WarnMissingFeatures && missing > 0 &&
+        !ActiveContext().ImitationAI.HasFeatureCoverage())
     {
         std::printf(
             "NSMB ImitationAI: feature coverage filled=%d missing=%d missingExamples=",
@@ -2821,11 +2945,11 @@ bool BuildRuntimeImitationFeatures(
         }
         std::printf("\n");
     }
-    G.ImitationAIFeaturesFilled = filled;
-    G.ImitationAIFeaturesMissing = missing;
+    ActiveContext().ImitationAI.RecordFeatureCoverage(filled, missing);
     return filled > 0;
 }
 
+// Compact-model feature packing and inference.
 constexpr int kAICompactRuntimeLegacyScalarCount = 35;
 constexpr int kAICompactRuntimeScalarCount = 47;
 constexpr int kAICompactRuntimeTerrainChannels = 16;
@@ -3002,7 +3126,7 @@ void AppendAICompactRuntimeEntities(
     {
         if (entry.LifecycleState != 1)
             continue;
-        if (writtenObjects >= G.AIPlayLogMaxObjects)
+        if (writtenObjects >= ActiveContext().Diagnostics.AIPlayLogMaxObjects)
             break;
         const char* category = AIObjectCategory(entry.ObjectID, entry.Actor.Settings);
         const auto kind = RuntimeItemKindAndConfidence(entry, category, visualPowerup);
@@ -3178,100 +3302,11 @@ bool CompactPredictionHasFirePress(
     return false;
 }
 
-void ResetImitationAIFireTapState(int instanceID, int player)
-{
-    if (instanceID < 0 || instanceID >= 16 || player < 0 || player >= 2)
-        return;
-    G.ImitationAIFireTapPressNext[instanceID][player] = false;
-    G.ImitationAILastHeldValid[instanceID][player] = false;
-    G.ImitationAILastHeld[instanceID][player] = 0;
-    G.ImitationAICachedHeldValid[instanceID][player] = false;
-    G.ImitationAICachedHeld[instanceID][player] = 0;
-    G.ImitationAICachedFrame[instanceID][player] = 0;
-    G.ImitationAILastNonZeroHeldValid[instanceID][player] = false;
-    G.ImitationAILastNonZeroHeld[instanceID][player] = 0;
-    G.ImitationAILastNonZeroFrame[instanceID][player] = 0;
-}
-
-melonDS::u32 ApplyImitationAIFireTapRelease(
-    int instanceID,
-    int player,
-    melonDS::u32 held,
-    bool firePressIntent,
-    const char*& outPhase)
-{
-    outPhase = "none";
-    if (instanceID < 0 || instanceID >= 16 || player < 0 || player >= 2)
-        return held;
-
-    constexpr melonDS::u32 kHeldY = 1u << 11;
-    if ((G.ImitationAIAllowedHeldMask & kHeldY) == 0)
-    {
-        G.ImitationAIFireTapPressNext[instanceID][player] = false;
-        G.ImitationAILastHeld[instanceID][player] = held;
-        G.ImitationAILastHeldValid[instanceID][player] = true;
-        return held;
-    }
-
-    if (G.ImitationAIFireTapPressNext[instanceID][player])
-    {
-        held |= kHeldY;
-        G.ImitationAIFireTapPressNext[instanceID][player] = false;
-        outPhase = "press";
-    }
-    else
-    {
-        const bool yHeldNow = (held & kHeldY) != 0;
-        const bool yHeldLast =
-            G.ImitationAILastHeldValid[instanceID][player] &&
-            (G.ImitationAILastHeld[instanceID][player] & kHeldY) != 0;
-        if (firePressIntent && yHeldNow && yHeldLast)
-        {
-            held &= ~kHeldY;
-            G.ImitationAIFireTapPressNext[instanceID][player] = true;
-            outPhase = "release";
-        }
-    }
-
-    G.ImitationAILastHeld[instanceID][player] = held;
-    G.ImitationAILastHeldValid[instanceID][player] = true;
-    return held;
-}
-
 InputState BuildImitationAIInputFromHeld(const InputState& fallback, melonDS::u32 held)
 {
     InputState input = NeutralInputPreservingTouch(fallback);
     input.KeyMask = (~held) & 0x0FFFu;
     return input;
-}
-
-melonDS::u32 ApplyImitationAINeutralHold(
-    int instanceID,
-    int player,
-    melonDS::u32 frame,
-    melonDS::u32 held,
-    bool& adjusted)
-{
-    adjusted = false;
-    if (instanceID < 0 || instanceID >= 16 || player < 0 || player >= 2)
-        return held;
-    if (held != 0)
-    {
-        G.ImitationAILastNonZeroHeldValid[instanceID][player] = true;
-        G.ImitationAILastNonZeroHeld[instanceID][player] = held;
-        G.ImitationAILastNonZeroFrame[instanceID][player] = frame;
-        return held;
-    }
-    if (G.ImitationAINeutralHoldFrames <= 0 || !G.ImitationAILastNonZeroHeldValid[instanceID][player])
-        return held;
-    const melonDS::u32 lastFrame = G.ImitationAILastNonZeroFrame[instanceID][player];
-    if (frame >= lastFrame &&
-        frame - lastFrame <= static_cast<melonDS::u32>(G.ImitationAINeutralHoldFrames))
-    {
-        adjusted = true;
-        return G.ImitationAILastNonZeroHeld[instanceID][player] & G.ImitationAIAllowedHeldMask;
-    }
-    return held;
 }
 
 InputState ApplyImitationAIInput(
@@ -3282,9 +3317,9 @@ InputState ApplyImitationAIInput(
     const InputState& fallback)
 {
     auto traceFallback = [&](const char* reason) {
-        if (G.ImitationAITraceEnabled &&
-            (G.ImitationAITraceInterval <= 1 ||
-                (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
+        if (ActiveContext().AI.Imitation.TraceEnabled &&
+            (ActiveContext().AI.Imitation.TraceInterval <= 1 ||
+                (frame % static_cast<melonDS::u32>(ActiveContext().AI.Imitation.TraceInterval)) == 0))
         {
             std::printf(
                 "NSMB ImitationAI: inst=%d frame=%u player=%d fallback=%s\n",
@@ -3295,35 +3330,36 @@ InputState ApplyImitationAIInput(
         }
         return fallback;
     };
-    if (!G.ImitationAIEnabled || !G.ImitationAIModelLoaded || frame < G.ImitationAIStartFrame || !nds || !nds->MainRAM)
+    if (!ActiveContext().ImitationAI.IsEnabled() || !ActiveContext().ImitationAI.HasModel() || frame < ActiveContext().AI.Imitation.StartFrame || !nds || !nds->MainRAM)
         return traceFallback("disabled");
-    if (G.ImitationAIHostOnly && G.NetRole != Role::Host)
+    if (ActiveContext().AI.Imitation.HostOnly && ActiveContext().NetRole != Role::Host)
         return traceFallback("hostOnly");
-    if (G.ImitationAIClientOnly && G.NetRole != Role::Client)
+    if (ActiveContext().AI.Imitation.ClientOnly && ActiveContext().NetRole != Role::Client)
         return traceFallback("clientOnly");
     if (!ImitationAIProvidesInputForPlayer(player))
         return traceFallback("playerFilter");
 
-    const bool inGameplay = IsMarioVsLuigiGameplay(nds);
+    const bool inGameplay = ActiveHooks().IsGameplay(nds);
     if (!inGameplay)
     {
-        ResetImitationAIFireTapState(instanceID, player);
+        ActiveContext().ImitationAI.ResetPlayer(instanceID, player);
         return traceFallback("notGameplay");
     }
 
-    if (G.ImitationAITorchCompactModelLoaded &&
-        G.ImitationAIInferInterval > 1 &&
-        instanceID >= 0 && instanceID < 16 && player >= 0 && player < 2 &&
-        G.ImitationAICachedHeldValid[instanceID][player] &&
-        frame >= G.ImitationAICachedFrame[instanceID][player] &&
-        frame - G.ImitationAICachedFrame[instanceID][player] <
-            static_cast<melonDS::u32>(G.ImitationAIInferInterval))
+    const NsmbImitationAI::Runtime::HeldRecord* cachedHeld =
+        ActiveContext().ImitationAI.CachedHeld(instanceID, player);
+    if (ActiveContext().ImitationAI.HasTorchCompactModel() &&
+        ActiveContext().AI.Imitation.InferInterval > 1 &&
+        cachedHeld &&
+        frame >= cachedHeld->Frame &&
+        frame - cachedHeld->Frame <
+            static_cast<melonDS::u32>(ActiveContext().AI.Imitation.InferInterval))
     {
-        const melonDS::u32 held = G.ImitationAICachedHeld[instanceID][player] & G.ImitationAIAllowedHeldMask;
+        const melonDS::u32 held = cachedHeld->Held & ActiveContext().AI.Imitation.AllowedHeldMask;
         InputState input = BuildImitationAIInputFromHeld(fallback, held);
-        if (G.ImitationAITraceEnabled &&
-            (G.ImitationAITraceInterval <= 1 ||
-                (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
+        if (ActiveContext().AI.Imitation.TraceEnabled &&
+            (ActiveContext().AI.Imitation.TraceInterval <= 1 ||
+                (frame % static_cast<melonDS::u32>(ActiveContext().AI.Imitation.TraceInterval)) == 0))
         {
             std::printf(
                 "NSMB ImitationAI: inst=%d frame=%u player=%d model=torchCompact cachedHeld=0x%03X keyMask=0x%03X inferInterval=%d cachedFrame=%u\n",
@@ -3332,51 +3368,59 @@ InputState ApplyImitationAIInput(
                 player,
                 held,
                 input.KeyMask,
-                G.ImitationAIInferInterval,
-                G.ImitationAICachedFrame[instanceID][player]);
+                ActiveContext().AI.Imitation.InferInterval,
+                cachedHeld->Frame);
         }
         return input;
     }
 
-    const GameStateSample sample = ReadGameStateSample(nds);
+    const GameStateSample sample = ActiveHooks().ReadGameState(nds);
     const GameStateObjectScanCache objectScanCache = BuildGameStateObjectScanCache(nds);
-    if (G.ImitationAITorchCompactModelLoaded)
+    if (ActiveContext().ImitationAI.HasTorchCompactModel())
     {
         std::vector<double> features;
         if (!BuildCompactRuntimeImitationFeatures(
-                G.ImitationAITorchCompactModel,
+                ActiveContext().ImitationAI.TorchCompactModel(),
                 sample,
                 objectScanCache,
                 instanceID,
                 player,
                 features))
         {
-            ResetImitationAIFireTapState(instanceID, player);
+            ActiveContext().ImitationAI.ResetPlayer(instanceID, player);
             return traceFallback("torchCompactFeatures");
         }
         const NsmbImitationAI::CompactActionPrediction prediction =
-            NsmbImitationAI::PredictTorchCompactPolicy(G.ImitationAITorchCompactModel, features);
-        melonDS::u32 held = prediction.Held & G.ImitationAIAllowedHeldMask;
-        const bool firePressIntent = CompactPredictionHasFirePress(G.ImitationAITorchCompactModel, prediction);
+            NsmbImitationAI::PredictTorchCompactPolicy(ActiveContext().ImitationAI.TorchCompactModel(), features);
+        melonDS::u32 held = prediction.Held & ActiveContext().AI.Imitation.AllowedHeldMask;
+        const bool firePressIntent = CompactPredictionHasFirePress(ActiveContext().ImitationAI.TorchCompactModel(), prediction);
         std::int64_t guardHazardDx = 0;
         std::int64_t guardHazardDy = 0;
         const bool hazardGuardAdjusted =
             ApplyImitationAIHazardGuard(sample, objectScanCache, player, held, guardHazardDx, guardHazardDy);
         const char* fireTapPhase = "none";
-        held = ApplyImitationAIFireTapRelease(instanceID, player, held, firePressIntent, fireTapPhase);
+        held = ActiveContext().ImitationAI.ApplyFireTapRelease(
+            instanceID,
+            player,
+            held,
+            ActiveContext().AI.Imitation.AllowedHeldMask,
+            firePressIntent,
+            fireTapPhase);
         bool neutralHoldAdjusted = false;
-        held = ApplyImitationAINeutralHold(instanceID, player, frame, held, neutralHoldAdjusted);
-        if (instanceID >= 0 && instanceID < 16 && player >= 0 && player < 2)
-        {
-            G.ImitationAICachedHeldValid[instanceID][player] = true;
-            G.ImitationAICachedHeld[instanceID][player] = held;
-            G.ImitationAICachedFrame[instanceID][player] = frame;
-        }
+        held = ActiveContext().ImitationAI.ApplyNeutralHold(
+            instanceID,
+            player,
+            frame,
+            held,
+            ActiveContext().AI.Imitation.NeutralHoldFrames,
+            ActiveContext().AI.Imitation.AllowedHeldMask,
+            neutralHoldAdjusted);
+        ActiveContext().ImitationAI.CacheHeld(instanceID, player, frame, held);
         InputState input = BuildImitationAIInputFromHeld(fallback, held);
 
-        if (G.ImitationAITraceEnabled &&
-            (G.ImitationAITraceInterval <= 1 ||
-                (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
+        if (ActiveContext().AI.Imitation.TraceEnabled &&
+            (ActiveContext().AI.Imitation.TraceInterval <= 1 ||
+                (frame % static_cast<melonDS::u32>(ActiveContext().AI.Imitation.TraceInterval)) == 0))
         {
             std::printf(
                 "NSMB ImitationAI: inst=%d frame=%u player=%d model=torchCompact held=0x%03X keyMask=0x%03X features=%zu hazardGuard=%d hazardDx=%lld hazardDy=%lld fireTap=%s neutralHold=%d inferInterval=%d actions=",
@@ -3391,10 +3435,10 @@ InputState ApplyImitationAIInput(
                 static_cast<long long>(guardHazardDy),
                 fireTapPhase,
                 neutralHoldAdjusted ? 1 : 0,
-                G.ImitationAIInferInterval);
-            for (std::size_t i = 0; i < prediction.Actions.size() && i < G.ImitationAITorchCompactModel.Heads.size(); i++)
+                ActiveContext().AI.Imitation.InferInterval);
+            for (std::size_t i = 0; i < prediction.Actions.size() && i < ActiveContext().ImitationAI.TorchCompactModel().Heads.size(); i++)
             {
-                const auto& head = G.ImitationAITorchCompactModel.Heads[i];
+                const auto& head = ActiveContext().ImitationAI.TorchCompactModel().Heads[i];
                 const int action = prediction.Actions[i];
                 const char* className = action >= 0 && action < static_cast<int>(head.Classes.size())
                     ? head.Classes[static_cast<std::size_t>(action)].c_str()
@@ -3412,36 +3456,42 @@ InputState ApplyImitationAIInput(
 
         return input;
     }
-    if (G.ImitationAICompactModelLoaded)
+    if (ActiveContext().ImitationAI.HasCompactModel())
     {
         std::vector<double> features;
         if (!BuildCompactRuntimeImitationFeatures(
-                G.ImitationAICompactModel,
+                ActiveContext().ImitationAI.CompactModel(),
                 sample,
                 objectScanCache,
                 instanceID,
                 player,
                 features))
         {
-            ResetImitationAIFireTapState(instanceID, player);
+            ActiveContext().ImitationAI.ResetPlayer(instanceID, player);
             return traceFallback("compactFeatures");
         }
         const NsmbImitationAI::CompactActionPrediction prediction =
-            NsmbImitationAI::PredictCompactActionPolicy(G.ImitationAICompactModel, features);
-        melonDS::u32 held = prediction.Held & G.ImitationAIAllowedHeldMask;
-        const bool firePressIntent = CompactPredictionHasFirePress(G.ImitationAICompactModel, prediction);
+            NsmbImitationAI::PredictCompactActionPolicy(ActiveContext().ImitationAI.CompactModel(), features);
+        melonDS::u32 held = prediction.Held & ActiveContext().AI.Imitation.AllowedHeldMask;
+        const bool firePressIntent = CompactPredictionHasFirePress(ActiveContext().ImitationAI.CompactModel(), prediction);
         std::int64_t guardHazardDx = 0;
         std::int64_t guardHazardDy = 0;
         const bool hazardGuardAdjusted =
             ApplyImitationAIHazardGuard(sample, objectScanCache, player, held, guardHazardDx, guardHazardDy);
         const char* fireTapPhase = "none";
-        held = ApplyImitationAIFireTapRelease(instanceID, player, held, firePressIntent, fireTapPhase);
+        held = ActiveContext().ImitationAI.ApplyFireTapRelease(
+            instanceID,
+            player,
+            held,
+            ActiveContext().AI.Imitation.AllowedHeldMask,
+            firePressIntent,
+            fireTapPhase);
         InputState input = NeutralInputPreservingTouch(fallback);
         input.KeyMask = (~held) & 0x0FFFu;
 
-        if (G.ImitationAITraceEnabled &&
-            (G.ImitationAITraceInterval <= 1 ||
-                (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
+        if (ActiveContext().AI.Imitation.TraceEnabled &&
+            (ActiveContext().AI.Imitation.TraceInterval <= 1 ||
+                (frame % static_cast<melonDS::u32>(ActiveContext().AI.Imitation.TraceInterval)) == 0))
         {
             std::printf(
                 "NSMB ImitationAI: inst=%d frame=%u player=%d model=compact held=0x%03X keyMask=0x%03X features=%zu hazardGuard=%d hazardDx=%lld hazardDy=%lld fireTap=%s actions=",
@@ -3455,9 +3505,9 @@ InputState ApplyImitationAIInput(
                 static_cast<long long>(guardHazardDx),
                 static_cast<long long>(guardHazardDy),
                 fireTapPhase);
-            for (std::size_t i = 0; i < prediction.Actions.size() && i < G.ImitationAICompactModel.Heads.size(); i++)
+            for (std::size_t i = 0; i < prediction.Actions.size() && i < ActiveContext().ImitationAI.CompactModel().Heads.size(); i++)
             {
-                const auto& head = G.ImitationAICompactModel.Heads[i];
+                const auto& head = ActiveContext().ImitationAI.CompactModel().Heads[i];
                 const int action = prediction.Actions[i];
                 const char* className = action >= 0 && action < static_cast<int>(head.Classes.size())
                     ? head.Classes[static_cast<std::size_t>(action)].c_str()
@@ -3480,7 +3530,7 @@ InputState ApplyImitationAIInput(
     int filled = 0;
     int missing = 0;
     if (!BuildRuntimeImitationFeatures(
-            G.ImitationAIModel,
+            ActiveContext().ImitationAI.LinearModel(),
             sample,
             objectScanCache,
             instanceID,
@@ -3495,8 +3545,8 @@ InputState ApplyImitationAIInput(
     }
 
     const NsmbImitationAI::Prediction prediction =
-        NsmbImitationAI::PredictLinearPolicy(G.ImitationAIModel, features, G.ImitationAIThreshold);
-    melonDS::u32 held = prediction.Held & G.ImitationAIAllowedHeldMask;
+        NsmbImitationAI::PredictLinearPolicy(ActiveContext().ImitationAI.LinearModel(), features, ActiveContext().AI.Imitation.Threshold);
+    melonDS::u32 held = prediction.Held & ActiveContext().AI.Imitation.AllowedHeldMask;
     auto keepHigherProbability = [&prediction, &held](int firstBit, int secondBit) {
         const melonDS::u32 firstMask = 1u << firstBit;
         const melonDS::u32 secondMask = 1u << secondBit;
@@ -3520,9 +3570,9 @@ InputState ApplyImitationAIInput(
     InputState input = NeutralInputPreservingTouch(fallback);
     input.KeyMask = (~held) & 0x0FFFu;
 
-    if (G.ImitationAITraceEnabled &&
-        (G.ImitationAITraceInterval <= 1 ||
-            (frame % static_cast<melonDS::u32>(G.ImitationAITraceInterval)) == 0))
+    if (ActiveContext().AI.Imitation.TraceEnabled &&
+        (ActiveContext().AI.Imitation.TraceInterval <= 1 ||
+            (frame % static_cast<melonDS::u32>(ActiveContext().AI.Imitation.TraceInterval)) == 0))
     {
         std::printf(
             "NSMB ImitationAI: inst=%d frame=%u player=%d held=0x%03X keyMask=0x%03X features=%d/%d threshold=%.3f hazardGuard=%d hazardDx=%lld hazardDy=%lld probs=",
@@ -3533,16 +3583,16 @@ InputState ApplyImitationAIInput(
             input.KeyMask,
             filled,
             filled + missing,
-            G.ImitationAIThreshold,
+            ActiveContext().AI.Imitation.Threshold,
             hazardGuardAdjusted ? 1 : 0,
             static_cast<long long>(guardHazardDx),
             static_cast<long long>(guardHazardDy));
-        for (std::size_t i = 0; i < prediction.Probabilities.size() && i < G.ImitationAIModel.Buttons.size(); i++)
+        for (std::size_t i = 0; i < prediction.Probabilities.size() && i < ActiveContext().ImitationAI.LinearModel().Buttons.size(); i++)
         {
             std::printf(
                 "%s%s=%.3f",
                 i == 0 ? "" : ",",
-                G.ImitationAIModel.Buttons[i].c_str(),
+                ActiveContext().ImitationAI.LinearModel().Buttons[i].c_str(),
                 prediction.Probabilities[i]);
         }
         std::printf("\n");
@@ -3551,19 +3601,16 @@ InputState ApplyImitationAIInput(
     return input;
 }
 
+// V1/V2/V3 record serialization and log dispatch.
 void PrepareAIPlayLogFireballOwnerTracking(int instanceID, const GameStateSample& sample)
 {
     if (instanceID < 0 || instanceID >= 16)
         return;
-    if (G.AIPlayLogFireballOwnerHandlerPtr[instanceID] != sample.FireballsHandlerPtr)
-    {
-        G.AIPlayLogFireballOwnerHandlerPtr[instanceID] = sample.FireballsHandlerPtr;
-        ResetAIFireballOwnerTracking(instanceID);
-    }
+    ActiveContext().AIObservationRuntime.UpdateFireballHandler(instanceID, sample.FireballsHandlerPtr);
     for (int i = 0; i < kAIFireballSlotCount; i++)
     {
         if (sample.FireballSlotActive[i] == 0)
-            G.AIPlayLogFireballOwnerValid[instanceID][i] = false;
+            ActiveContext().AIObservationRuntime.InvalidateFireballOwner(instanceID, i);
     }
 }
 
@@ -3828,7 +3875,7 @@ void WriteAIObservationV2Record(std::ostream& out, int instanceID, melonDS::u32 
         << ",\"recordingFrameIndex\":" << frame
         << ",\"frame\":" << frame
         << ",\"instance\":" << instanceID
-        << ",\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\""
+        << ",\"role\":\"" << (ActiveContext().NetRole == Role::Host ? "host" : "client") << "\""
         << ",\"localPlayer\":" << localPlayer
         << ",\"stage\":{\"id\":" << sample.StageID
         << ",\"group\":" << sample.StageGroup
@@ -3866,7 +3913,7 @@ void WriteAIObservationV2Record(std::ostream& out, int instanceID, melonDS::u32 
     {
         if (entry.LifecycleState != 1)
             continue;
-        if (writtenObjects >= G.AIPlayLogMaxObjects)
+        if (writtenObjects >= ActiveContext().Diagnostics.AIPlayLogMaxObjects)
             break;
         if (!firstEntity)
             record << ",";
@@ -3889,67 +3936,65 @@ void WriteAIObservationV2Record(std::ostream& out, int instanceID, melonDS::u32 
 
 void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
-    const bool writeV1 = !G.AIPlayLogPath.empty() && G.AIPlayLog;
-    const bool writeV2 = !G.AIObservationV2Path.empty() && G.AIObservationV2Log;
-    const bool writeV3 = !G.AIObservationV3Path.empty() && G.AIObservationV3Log;
+    const bool writeV1 = !ActiveContext().Diagnostics.AIPlayLogPath.empty() &&
+        ActiveContext().AIObservationRuntime.CanWriteLog(AIObservation::LogKind::V1);
+    const bool writeV2 = !ActiveContext().Diagnostics.AIObservationV2Path.empty() &&
+        ActiveContext().AIObservationRuntime.CanWriteLog(AIObservation::LogKind::V2);
+    const bool writeV3 = !ActiveContext().Diagnostics.AIObservationV3Path.empty() &&
+        ActiveContext().AIObservationRuntime.CanWriteLog(AIObservation::LogKind::V3);
     if ((!writeV1 && !writeV2 && !writeV3) || !nds || !nds->MainRAM)
         return;
-    if (frame < G.AIPlayLogStartFrame)
+    if (frame < ActiveContext().Diagnostics.AIPlayLogStartFrame)
         return;
-    if (G.AIPlayLogEndFrame != 0 && frame > G.AIPlayLogEndFrame)
+    if (ActiveContext().Diagnostics.AIPlayLogEndFrame != 0 && frame > ActiveContext().Diagnostics.AIPlayLogEndFrame)
         return;
-    if ((frame % static_cast<melonDS::u32>(G.AIPlayLogInterval)) != 0)
-        return;
-
-    const bool inGameplay = IsMarioVsLuigiGameplay(nds);
-    if (G.AIPlayLogGameplayOnly && !inGameplay)
+    if ((frame % static_cast<melonDS::u32>(ActiveContext().Diagnostics.AIPlayLogInterval)) != 0)
         return;
 
-    const GameStateSample sample = ReadGameStateSample(nds);
+    const bool inGameplay = ActiveHooks().IsGameplay(nds);
+    if (ActiveContext().Diagnostics.AIPlayLogGameplayOnly && !inGameplay)
+        return;
+
+    const GameStateSample sample = ActiveHooks().ReadGameState(nds);
     const GameStateObjectScanCache objectScanCache = BuildGameStateObjectScanCache(nds);
-    const int localPlayer = CurrentPacketBridgeLocalPlayer();
+    const int localPlayer = ActiveContext().LocalPlayer;
     PrepareAIPlayLogFireballOwnerTracking(instanceID, sample);
 
-    const bool v2StageAllowed = G.AIObservationV2StageFilter < 0 ||
-        (sample.StageGroup == 9 && sample.StageID == static_cast<melonDS::u32>(G.AIObservationV2StageFilter));
-    const bool v3StageAllowed = G.AIObservationV3StageFilter < 0 ||
-        (sample.StageGroup == 9 && sample.StageID == static_cast<melonDS::u32>(G.AIObservationV3StageFilter));
+    const bool v2StageAllowed = ActiveContext().Diagnostics.AIObservationV2StageFilter < 0 ||
+        (sample.StageGroup == 9 && sample.StageID == static_cast<melonDS::u32>(ActiveContext().Diagnostics.AIObservationV2StageFilter));
+    const bool v3StageAllowed = ActiveContext().Diagnostics.AIObservationV3StageFilter < 0 ||
+        (sample.StageGroup == 9 && sample.StageID == static_cast<melonDS::u32>(ActiveContext().Diagnostics.AIObservationV3StageFilter));
 
     if (writeV2 && v2StageAllowed)
     {
-        WriteAIObservationV2Record(G.AIObservationV2Log, instanceID, frame, sample, objectScanCache, localPlayer, false);
-        if (G.AIPlayLogFlushInterval > 0)
-        {
-            G.AIObservationV2LinesSinceFlush++;
-            if (G.AIObservationV2LinesSinceFlush >= G.AIPlayLogFlushInterval)
-            {
-                G.AIObservationV2Log.flush();
-                G.AIObservationV2LinesSinceFlush = 0;
-            }
-        }
+        WriteAIObservationV2Record(
+            ActiveContext().AIObservationRuntime.Log(AIObservation::LogKind::V2),
+            instanceID, frame, sample, objectScanCache, localPlayer, false);
+        ActiveContext().AIObservationRuntime.RecordLogLine(
+            AIObservation::LogKind::V2,
+            ActiveContext().Diagnostics.AIPlayLogFlushInterval);
     }
 
     if (writeV3 && v3StageAllowed)
     {
-        WriteAIObservationV2Record(G.AIObservationV3Log, instanceID, frame, sample, objectScanCache, localPlayer, true);
-        if (G.AIPlayLogFlushInterval > 0)
-        {
-            G.AIObservationV3LinesSinceFlush++;
-            if (G.AIObservationV3LinesSinceFlush >= G.AIPlayLogFlushInterval)
-            {
-                G.AIObservationV3Log.flush();
-                G.AIObservationV3LinesSinceFlush = 0;
-            }
-        }
+        WriteAIObservationV2Record(
+            ActiveContext().AIObservationRuntime.Log(AIObservation::LogKind::V3),
+            instanceID, frame, sample, objectScanCache, localPlayer, true);
+        ActiveContext().AIObservationRuntime.RecordLogLine(
+            AIObservation::LogKind::V3,
+            ActiveContext().Diagnostics.AIPlayLogFlushInterval);
     }
 
     if (!writeV1)
         return;
 
-    G.AIPlayLog << "{\"schema\":\"nsmb_mvl_ai_play_log_v1\""
+    std::ofstream& aiPlayLog =
+        ActiveContext().AIObservationRuntime.Log(AIObservation::LogKind::V1);
+
+    aiPlayLog << "{\"schema\":\"nsmb_mvl_ai_play_log_v1\""
         << ",\"instance\":" << instanceID
         << ",\"frame\":" << frame
-        << ",\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\""
+        << ",\"role\":\"" << (ActiveContext().NetRole == Role::Host ? "host" : "client") << "\""
         << ",\"localPlayer\":" << localPlayer
         << ",\"inGameplay\":" << (inGameplay ? 1 : 0)
         << ",\"stage\":{\"id\":" << sample.StageID
@@ -3959,43 +4004,43 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         << ",\"vsCoinCount\":" << sample.VsCoinCount
         << "}";
 
-    G.AIPlayLog << ",\"inputs\":{";
-    WriteAIInputJson(G.AIPlayLog, "console0", sample.InputConsole0Held, sample.InputConsole0Pressed);
-    G.AIPlayLog << ",";
-    WriteAIInputJson(G.AIPlayLog, "console1", sample.InputConsole1Held, sample.InputConsole1Pressed);
-    G.AIPlayLog << ",";
-    WriteAIInputJson(G.AIPlayLog, "player0", sample.InputPlayer0Held, sample.InputPlayer0Pressed);
-    G.AIPlayLog << ",";
-    WriteAIInputJson(G.AIPlayLog, "player1", sample.InputPlayer1Held, sample.InputPlayer1Pressed);
-    G.AIPlayLog << ",";
-    WriteAIAppliedInputJson(G.AIPlayLog, instanceID, 0);
-    G.AIPlayLog << ",";
-    WriteAIAppliedInputJson(G.AIPlayLog, instanceID, 1);
-    G.AIPlayLog << ",\"touchKnown\":0}";
+    aiPlayLog << ",\"inputs\":{";
+    WriteAIInputJson(aiPlayLog, "console0", sample.InputConsole0Held, sample.InputConsole0Pressed);
+    aiPlayLog << ",";
+    WriteAIInputJson(aiPlayLog, "console1", sample.InputConsole1Held, sample.InputConsole1Pressed);
+    aiPlayLog << ",";
+    WriteAIInputJson(aiPlayLog, "player0", sample.InputPlayer0Held, sample.InputPlayer0Pressed);
+    aiPlayLog << ",";
+    WriteAIInputJson(aiPlayLog, "player1", sample.InputPlayer1Held, sample.InputPlayer1Pressed);
+    aiPlayLog << ",";
+    WriteAIAppliedInputJson(aiPlayLog, instanceID, 0);
+    aiPlayLog << ",";
+    WriteAIAppliedInputJson(aiPlayLog, instanceID, 1);
+    aiPlayLog << ",\"touchKnown\":0}";
 
-    G.AIPlayLog << ",\"players\":[";
-    WriteAIPlayerJson(G.AIPlayLog, 0, sample);
-    G.AIPlayLog << ",";
-    WriteAIPlayerJson(G.AIPlayLog, 1, sample);
-    G.AIPlayLog << "]";
+    aiPlayLog << ",\"players\":[";
+    WriteAIPlayerJson(aiPlayLog, 0, sample);
+    aiPlayLog << ",";
+    WriteAIPlayerJson(aiPlayLog, 1, sample);
+    aiPlayLog << "]";
 
-    G.AIPlayLog << ",\"targets\":{\"bigStarCandidate\":{\"found\":" << sample.VsStarFound
+    aiPlayLog << ",\"targets\":{\"bigStarCandidate\":{\"found\":" << sample.VsStarFound
         << ",\"guid\":";
-    WriteJsonHex(G.AIPlayLog, sample.VsStarGUID);
-    G.AIPlayLog << ",\"base\":";
-    WriteJsonHex(G.AIPlayLog, sample.VsStarBase);
-    G.AIPlayLog << ",";
-    WriteAIVec3Json(G.AIPlayLog, "pos", sample.VsStarPosX, sample.VsStarPosY, sample.VsStarPosZ);
-    G.AIPlayLog << "},\"bigStarActor\":{\"found\":" << sample.VsStarActorFound
+    WriteJsonHex(aiPlayLog, sample.VsStarGUID);
+    aiPlayLog << ",\"base\":";
+    WriteJsonHex(aiPlayLog, sample.VsStarBase);
+    aiPlayLog << ",";
+    WriteAIVec3Json(aiPlayLog, "pos", sample.VsStarPosX, sample.VsStarPosY, sample.VsStarPosZ);
+    aiPlayLog << "},\"bigStarActor\":{\"found\":" << sample.VsStarActorFound
         << ",\"guid\":";
-    WriteJsonHex(G.AIPlayLog, sample.VsStarActorGUID);
-    G.AIPlayLog << ",\"base\":";
-    WriteJsonHex(G.AIPlayLog, sample.VsStarActorBase);
-    G.AIPlayLog << ",";
-    WriteAIVec3Json(G.AIPlayLog, "pos", sample.VsStarActorPosX, sample.VsStarActorPosY, sample.VsStarActorPosZ);
-    G.AIPlayLog << "}}";
+    WriteJsonHex(aiPlayLog, sample.VsStarActorGUID);
+    aiPlayLog << ",\"base\":";
+    WriteJsonHex(aiPlayLog, sample.VsStarActorBase);
+    aiPlayLog << ",";
+    WriteAIVec3Json(aiPlayLog, "pos", sample.VsStarActorPosX, sample.VsStarActorPosY, sample.VsStarActorPosZ);
+    aiPlayLog << "}}";
 
-    G.AIPlayLog << ",\"camera\":{\"found\":" << sample.StageCameraFound
+    aiPlayLog << ",\"camera\":{\"found\":" << sample.StageCameraFound
         << ",\"globalX0\":" << SignedU32(sample.StageCameraGlobalX0)
         << ",\"globalX1\":" << SignedU32(sample.StageCameraGlobalX1)
         << ",\"globalY0\":" << SignedU32(sample.StageCameraGlobalY0)
@@ -4006,7 +4051,7 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         << ",\"height1\":" << SignedU32(sample.StageCameraGlobalHeight1)
         << "}";
 
-    G.AIPlayLog << ",\"objectSummary\":{\"total\":" << sample.ObjectScanTotal
+    aiPlayLog << ",\"objectSummary\":{\"total\":" << sample.ObjectScanTotal
         << ",\"active\":" << sample.ObjectActiveCount
         << ",\"dead\":" << sample.ObjectDeadCount
         << ",\"notCreated\":" << sample.ObjectNotCreatedCount
@@ -4014,40 +4059,36 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         << ",\"skipRender\":" << sample.ObjectSkipRenderCount
         << "}";
 
-    G.AIPlayLog << ",\"specialObjects\":{\"fireballs\":{\"active\":" << sample.FireballsActiveCount
+    aiPlayLog << ",\"specialObjects\":{\"fireballs\":{\"active\":" << sample.FireballsActiveCount
         << ",\"handler\":";
-    WriteJsonHex(G.AIPlayLog, kFireballsHandlerAddr);
-    G.AIPlayLog << ",\"handlerPtr\":";
-    WriteJsonHex(G.AIPlayLog, sample.FireballsHandlerPtr);
-    if (instanceID >= 0 && instanceID < 16 && G.AIPlayLogFireballOwnerHandlerPtr[instanceID] != sample.FireballsHandlerPtr)
-    {
-        G.AIPlayLogFireballOwnerHandlerPtr[instanceID] = sample.FireballsHandlerPtr;
-        ResetAIFireballOwnerTracking(instanceID);
-    }
+    WriteJsonHex(aiPlayLog, kFireballsHandlerAddr);
+    aiPlayLog << ",\"handlerPtr\":";
+    WriteJsonHex(aiPlayLog, sample.FireballsHandlerPtr);
+    ActiveContext().AIObservationRuntime.UpdateFireballHandler(instanceID, sample.FireballsHandlerPtr);
     int activeFireballSlots = 0;
     for (int i = 0; i < kAIFireballSlotCount; i++)
     {
         if (sample.FireballSlotActive[i] != 0)
             activeFireballSlots++;
-        else if (instanceID >= 0 && instanceID < 16)
-            G.AIPlayLogFireballOwnerValid[instanceID][i] = false;
+        else
+            ActiveContext().AIObservationRuntime.InvalidateFireballOwner(instanceID, i);
     }
-    G.AIPlayLog << ",\"activeSlots\":" << activeFireballSlots;
-    G.AIPlayLog << ",\"words\":[";
+    aiPlayLog << ",\"activeSlots\":" << activeFireballSlots;
+    aiPlayLog << ",\"words\":[";
     for (int i = 0; i < kAISpecialHandlerWordCount; i++)
     {
         if (i != 0)
-            G.AIPlayLog << ",";
-        WriteJsonHex(G.AIPlayLog, sample.FireballsHandlerWords[i]);
+            aiPlayLog << ",";
+        WriteJsonHex(aiPlayLog, sample.FireballsHandlerWords[i]);
     }
-    G.AIPlayLog << "],\"slots\":[";
+    aiPlayLog << "],\"slots\":[";
     bool firstFireballSlot = true;
     for (int i = 0; i < kAIFireballSlotCount; i++)
     {
         if (sample.FireballSlotActive[i] == 0)
             continue;
         if (!firstFireballSlot)
-            G.AIPlayLog << ",";
+            aiPlayLog << ",";
         firstFireballSlot = false;
         int ownerConfidence = 0;
         int ownerHeuristic = 0;
@@ -4066,7 +4107,7 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             statelessOwnerHeuristic,
             ownerTracked);
         const bool sourceKindVerified = sample.FireballSlotKind[i] <= 3;
-        G.AIPlayLog << "{\"index\":" << i
+        aiPlayLog << "{\"index\":" << i
             << ",\"active\":" << sample.FireballSlotActive[i]
             << ",\"kind\":" << sample.FireballSlotKind[i]
             << ",\"sourceKind\":" << sample.FireballSlotKind[i]
@@ -4088,89 +4129,133 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             << ",\"statelessOwnerHeuristic\":" << statelessOwnerHeuristic
             << ",\"ownerVerified\":" << (sourceKindVerified ? 1 : 0)
             << ",\"stateBytesOffset\":";
-        WriteJsonHex(G.AIPlayLog, kAIFireballSlotActiveOffset, 2);
-        G.AIPlayLog << ",\"stateBytes\":[";
+        WriteJsonHex(aiPlayLog, kAIFireballSlotActiveOffset, 2);
+        aiPlayLog << ",\"stateBytes\":[";
         for (int j = 0; j < kAIFireballSlotStateByteCount; j++)
         {
             if (j != 0)
-                G.AIPlayLog << ",";
-            G.AIPlayLog << sample.FireballSlotStateBytes[i][j];
+                aiPlayLog << ",";
+            aiPlayLog << sample.FireballSlotStateBytes[i][j];
         }
-        G.AIPlayLog << "],\"debugWordsOffset\":";
-        WriteJsonHex(G.AIPlayLog, kAIFireballSlotDebugWordOffset, 2);
-        G.AIPlayLog << ",\"debugWords\":[";
+        aiPlayLog << "],\"debugWordsOffset\":";
+        WriteJsonHex(aiPlayLog, kAIFireballSlotDebugWordOffset, 2);
+        aiPlayLog << ",\"debugWords\":[";
         for (int j = 0; j < kAIFireballSlotDebugWordCount; j++)
         {
             if (j != 0)
-                G.AIPlayLog << ",";
-            WriteJsonHex(G.AIPlayLog, sample.FireballSlotDebugWords[i][j]);
+                aiPlayLog << ",";
+            WriteJsonHex(aiPlayLog, sample.FireballSlotDebugWords[i][j]);
         }
-        G.AIPlayLog << "]"
+        aiPlayLog << "]"
             << ",";
         WriteAIVec3Json(
-            G.AIPlayLog,
+            aiPlayLog,
             "pos",
             sample.FireballSlotPosX[i],
             sample.FireballSlotPosY[i],
             sample.FireballSlotPosZ[i]);
-        G.AIPlayLog << ",";
+        aiPlayLog << ",";
         WriteAIVec3Json(
-            G.AIPlayLog,
+            aiPlayLog,
             "prev",
             sample.FireballSlotPrevX[i],
             sample.FireballSlotPrevY[i],
             sample.FireballSlotPrevZ[i]);
-        G.AIPlayLog << ",";
+        aiPlayLog << ",";
         WriteAIVec3Json(
-            G.AIPlayLog,
+            aiPlayLog,
             "vel",
             sample.FireballSlotVelX[i],
             sample.FireballSlotVelY[i],
             sample.FireballSlotVelZ[i]);
-        G.AIPlayLog << ",\"relative\":{\"p0dx\":"
+        aiPlayLog << ",\"relative\":{\"p0dx\":"
             << AIWrappedDeltaX(SignedU32(sample.FireballSlotPosX[i]), SignedU32(sample.PlayerActor0PosX))
             << ",\"p0dy\":" << (SignedU32(sample.FireballSlotPosY[i]) - SignedU32(sample.PlayerActor0PosY))
             << ",\"p1dx\":" << AIWrappedDeltaX(SignedU32(sample.FireballSlotPosX[i]), SignedU32(sample.PlayerActor1PosX))
             << ",\"p1dy\":" << (SignedU32(sample.FireballSlotPosY[i]) - SignedU32(sample.PlayerActor1PosY))
             << "}}";
     }
-    G.AIPlayLog << "]},\"projectiles\":{\"handler\":";
-    WriteJsonHex(G.AIPlayLog, kProjectilesHandlerAddr);
-    G.AIPlayLog << ",\"words\":[";
+    aiPlayLog << "]},\"projectiles\":{\"handler\":";
+    WriteJsonHex(aiPlayLog, kProjectilesHandlerAddr);
+    aiPlayLog << ",\"words\":[";
     for (int i = 0; i < kAISpecialHandlerWordCount; i++)
     {
         if (i != 0)
-            G.AIPlayLog << ",";
-        WriteJsonHex(G.AIPlayLog, sample.ProjectilesHandlerWords[i]);
+            aiPlayLog << ",";
+        WriteJsonHex(aiPlayLog, sample.ProjectilesHandlerWords[i]);
     }
-    G.AIPlayLog << "]}}";
+    aiPlayLog << "]}}";
 
-    WriteAIVisualSummaryJson(G.AIPlayLog, objectScanCache, sample);
+    WriteAIVisualSummaryJson(aiPlayLog, objectScanCache, sample);
 
-    G.AIPlayLog << ",\"objects\":[";
+    aiPlayLog << ",\"objects\":[";
     int writtenObjects = 0;
     for (const GameStateObjectScanEntry& entry : objectScanCache.Entries)
     {
         if (entry.LifecycleState != 1)
             continue;
-        if (writtenObjects >= G.AIPlayLogMaxObjects)
+        if (writtenObjects >= ActiveContext().Diagnostics.AIPlayLogMaxObjects)
             break;
         if (writtenObjects != 0)
-            G.AIPlayLog << ",";
-        WriteAIObjectJson(G.AIPlayLog, entry, sample);
+            aiPlayLog << ",";
+        WriteAIObjectJson(aiPlayLog, entry, sample);
         writtenObjects++;
     }
-    G.AIPlayLog << "],\"hash\":";
-    WriteJsonHex(G.AIPlayLog, static_cast<melonDS::u32>(sample.Hash & 0xFFFFFFFFull));
-    G.AIPlayLog << "}\n";
-    if (G.AIPlayLogFlushInterval > 0)
-    {
-        G.AIPlayLogLinesSinceFlush++;
-        if (G.AIPlayLogLinesSinceFlush >= G.AIPlayLogFlushInterval)
-        {
-            G.AIPlayLog.flush();
-            G.AIPlayLogLinesSinceFlush = 0;
-        }
-    }
+    aiPlayLog << "],\"hash\":";
+    WriteJsonHex(aiPlayLog, static_cast<melonDS::u32>(sample.Hash & 0xFFFFFFFFull));
+    aiPlayLog << "}\n";
+    ActiveContext().AIObservationRuntime.RecordLogLine(
+        AIObservation::LogKind::V1,
+        ActiveContext().Diagnostics.AIPlayLogFlushInterval);
 }
 
+} // namespace
+
+// Public integration API.
+const char *ObjectCategory(melonDS::u16 objectID, melonDS::u32 settings) {
+  return AIObjectCategory(objectID, settings);
+}
+
+GameStateModel::AITerrainDerivedSummary
+DeriveTerrainSummary(const GameStateModel::AIPlayerTileProbeSample &probe,
+                     bool contactGround, bool contactWallLeft,
+                     bool contactWallRight) {
+  return DeriveAITerrainSummaryFromGrid(probe, contactGround, contactWallLeft,
+                                        contactWallRight);
+}
+
+bool TargetHasFloorBelow(const GameStateModel::AIPlayerTileProbeSample &probe,
+                         melonDS::u32 selfX, melonDS::u32 selfY,
+                         melonDS::u32 targetX, melonDS::u32 targetY) {
+  return AITerrainTargetHasFloorBelow(probe, selfX, selfY, targetX, targetY);
+}
+
+bool ProvidesImitationInput(const Context &context, int player) {
+  if (!context.ImitationAI.IsEnabled() || !context.ImitationAI.HasModel())
+    return false;
+  if (context.AI.Imitation.HostOnly && context.NetRole != Role::Host)
+    return false;
+  if (context.AI.Imitation.ClientOnly && context.NetRole != Role::Client)
+    return false;
+
+  NsmbRuleAI::Config config;
+  config.Enabled = true;
+  config.PlayerSpec = context.AI.Imitation.PlayerSpec;
+  return NsmbRuleAI::ControlsPlayer(config, player, context.LocalPlayer);
+}
+
+InputState ApplyImitationInput(Context context, const Hooks &hooks,
+                               int instanceID, melonDS::u32 frame,
+                               melonDS::NDS *nds, int player,
+                               const InputState &fallback) {
+  const ScopedContext active(context, hooks);
+  return ApplyImitationAIInput(instanceID, frame, nds, player, fallback);
+}
+
+void TracePlayLog(Context context, const Hooks &hooks, int instanceID,
+                  melonDS::u32 frame, melonDS::NDS *nds) {
+  const ScopedContext active(context, hooks);
+  TraceAIPlayLog(instanceID, frame, nds);
+}
+
+} // namespace NsmbMvlNetplay::AIObservation

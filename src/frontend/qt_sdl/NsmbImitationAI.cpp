@@ -943,6 +943,183 @@ bool LoadTorchCompactPolicyModel(
     return true;
 }
 
+bool Runtime::LoadModel(const std::string& path, ModelLoadErrors& errors)
+{
+    errors = {};
+    LoadedModelType = ModelType::None;
+    Linear = {};
+    Compact = {};
+    TorchCompact = {};
+
+    if (LoadTorchCompactPolicyModel(path, TorchCompact, errors.TorchCompact))
+    {
+        LoadedModelType = ModelType::TorchCompact;
+        return true;
+    }
+    if (LoadCompactActionPolicyModel(path, Compact, errors.Compact))
+    {
+        LoadedModelType = ModelType::Compact;
+        return true;
+    }
+    if (LoadLinearPolicyModel(path, Linear, errors.Linear))
+    {
+        LoadedModelType = ModelType::Linear;
+        return true;
+    }
+    return false;
+}
+
+ModelInitializationResult Runtime::InitializeModel(bool enabled, const std::string& path)
+{
+    ModelInitializationResult result;
+    result.RequestedEnabled = enabled;
+    SetEnabled(enabled);
+    if (!IsEnabled())
+        return result;
+
+    if (path.empty())
+    {
+        result.ModelPathEmpty = true;
+        Disable();
+        return result;
+    }
+
+    result.Loaded = LoadModel(path, result.Errors);
+    if (!result.Loaded)
+        Disable();
+    return result;
+}
+
+ModelDescription Runtime::DescribeModel() const
+{
+    ModelDescription description;
+    description.Type = LoadedModelType;
+    switch (LoadedModelType)
+    {
+    case ModelType::TorchCompact:
+        description.FeatureCount = TorchCompact.FeatureCount();
+        description.OutputCount = TorchCompact.Heads.size();
+        description.Schema = TorchCompact.Schema;
+        description.DetailSchema = TorchCompact.LabelSchema;
+        break;
+    case ModelType::Compact:
+        description.FeatureCount = Compact.FeatureCount();
+        description.OutputCount = Compact.Heads.size();
+        description.Schema = Compact.Schema;
+        description.DetailSchema = Compact.LabelSchema;
+        break;
+    case ModelType::Linear:
+        description.FeatureCount = Linear.FeatureCount();
+        description.OutputCount = Linear.ButtonCount();
+        description.Schema = Linear.Schema;
+        description.DetailSchema = Linear.FeatureSchemaID;
+        break;
+    case ModelType::None:
+        break;
+    }
+    return description;
+}
+
+void Runtime::ResetPlayer(int instanceID, int player)
+{
+    if (!ValidPlayer(instanceID, player))
+        return;
+    Players[instanceID][player] = {};
+}
+
+std::uint32_t Runtime::ApplyFireTapRelease(
+    int instanceID,
+    int player,
+    std::uint32_t held,
+    std::uint32_t allowedHeldMask,
+    bool firePressIntent,
+    const char*& phase)
+{
+    phase = "none";
+    if (!ValidPlayer(instanceID, player))
+        return held;
+
+    constexpr std::uint32_t kHeldY = 1u << 11;
+    PlayerState& state = Players[instanceID][player];
+    if ((allowedHeldMask & kHeldY) == 0)
+    {
+        state.FireTapPressNext = false;
+        state.LastHeld = held;
+        state.LastHeldValid = true;
+        return held;
+    }
+
+    if (state.FireTapPressNext)
+    {
+        held |= kHeldY;
+        state.FireTapPressNext = false;
+        phase = "press";
+    }
+    else
+    {
+        const bool yHeldNow = (held & kHeldY) != 0;
+        const bool yHeldLast = state.LastHeldValid && (state.LastHeld & kHeldY) != 0;
+        if (firePressIntent && yHeldNow && yHeldLast)
+        {
+            held &= ~kHeldY;
+            state.FireTapPressNext = true;
+            phase = "release";
+        }
+    }
+
+    state.LastHeld = held;
+    state.LastHeldValid = true;
+    return held;
+}
+
+std::uint32_t Runtime::ApplyNeutralHold(
+    int instanceID,
+    int player,
+    std::uint32_t frame,
+    std::uint32_t held,
+    int neutralHoldFrames,
+    std::uint32_t allowedHeldMask,
+    bool& adjusted)
+{
+    adjusted = false;
+    if (!ValidPlayer(instanceID, player))
+        return held;
+
+    PlayerState& state = Players[instanceID][player];
+    if (held != 0)
+    {
+        state.LastNonZeroHeldValid = true;
+        state.LastNonZero = {held, frame};
+        return held;
+    }
+    if (neutralHoldFrames <= 0 || !state.LastNonZeroHeldValid)
+        return held;
+    if (frame >= state.LastNonZero.Frame &&
+        frame - state.LastNonZero.Frame <= static_cast<std::uint32_t>(neutralHoldFrames))
+    {
+        adjusted = true;
+        return state.LastNonZero.Held & allowedHeldMask;
+    }
+    return held;
+}
+
+const Runtime::HeldRecord* Runtime::CachedHeld(int instanceID, int player) const
+{
+    if (!ValidPlayer(instanceID, player))
+        return nullptr;
+    const PlayerState& state = Players[instanceID][player];
+    return state.CachedHeldValid ? &state.Cached : nullptr;
+}
+
+void Runtime::CacheHeld(int instanceID, int player, std::uint32_t frame, std::uint32_t held)
+{
+    if (!ValidPlayer(instanceID, player))
+        return;
+    PlayerState& state = Players[instanceID][player];
+    state.CachedHeldValid = true;
+    state.Cached = {held, frame};
+}
+
 std::uint16_t HeldFromPrediction(const std::vector<double>& probabilities, double threshold)
 {
     std::uint16_t held = 0;

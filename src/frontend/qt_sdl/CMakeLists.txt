@@ -11,8 +11,51 @@ set(SOURCES_QT_SDL
     EmuInstanceAudio.cpp
     EmuInstanceInput.cpp
     EmuThread.cpp
-    NsmbNetplayPoC.cpp
-    NsmbNetplayPoC.h
+    NsmbMvlNetplayRuntime.cpp
+    NsmbMvlNetplayRuntime.h
+    NsmbNetplayConfig.cpp
+    NsmbNetplayConfig.h
+    NsmbPacketBridgeRuntime.cpp
+    NsmbPacketBridgeRuntime.h
+    NsmbPacketBridgeIntegration.cpp
+    NsmbPacketBridgeIntegration.h
+    NsmbMvlRuntime.cpp
+    NsmbMvlRuntime.h
+    NsmbMvlLifecycle.cpp
+    NsmbMvlLifecycle.h
+    NsmbMvlGameHooks.cpp
+    NsmbMvlGameHooks.h
+    NsmbInputTimeline.cpp
+    NsmbInputTimeline.h
+    NsmbInputProtocol.cpp
+    NsmbInputProtocol.h
+    NsmbInputDelivery.cpp
+    NsmbInputDelivery.h
+    NsmbNetplayProtocol.cpp
+    NsmbNetplayProtocol.h
+    NsmbNetplayTransport.cpp
+    NsmbNetplayTransport.h
+    NsmbNetplaySession.cpp
+    NsmbNetplaySession.h
+    NsmbNetplayDiagnostics.cpp
+    NsmbNetplayDiagnostics.h
+    NsmbGameplayDiagnostics.cpp
+    NsmbGameplayDiagnostics.h
+    NsmbNetplayCoordinator.cpp
+    NsmbNetplayCoordinator.h
+    NsmbTestStateHarness.cpp
+    NsmbTestStateHarness.h
+    NsmbGameState.cpp
+    NsmbGameStateSync.cpp
+    NsmbGameStateSync.h
+    NsmbGameStateReader.cpp
+    NsmbGameStateWriter.cpp
+    NsmbGameState.h
+    NsmbGameStateWriter.h
+    NsmbRollbackStore.cpp
+    NsmbRollbackStore.h
+    NsmbRollbackRuntime.cpp
+    NsmbRollbackRuntime.h
     NsmbAiObservation.cpp
     NsmbAiObservation.h
     NsmbImitationAI.cpp
@@ -70,8 +113,6 @@ set(SOURCES_QT_SDL
     NetplayDialog.cpp
 )
 
-set_source_files_properties(NsmbAiObservation.cpp PROPERTIES HEADER_FILE_ONLY ON)
-
 option(USE_QT6 "Use Qt 6 instead of Qt 5" ON)
 
 if (USE_QT6)
@@ -122,8 +163,283 @@ target_include_directories(nsmb_mvl_compact_cpp_predict PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
+if (BUILD_TESTING)
+    add_executable(nsmb_netplay_config_tests
+        NsmbNetplayConfig.cpp
+        NsmbNetplayConfig.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_netplay_config_tests.cpp
+    )
+    target_include_directories(nsmb_netplay_config_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    set_target_properties(nsmb_netplay_config_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-netplay-config COMMAND nsmb_netplay_config_tests)
+
+    add_executable(nsmb_input_timeline_tests
+        NsmbInputTimeline.cpp
+        NsmbInputTimeline.h
+        NsmbMvlNetplayRuntime.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_input_timeline_tests.cpp
+    )
+    target_include_directories(nsmb_input_timeline_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_input_timeline_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-input-timeline COMMAND nsmb_input_timeline_tests)
+
+    add_executable(nsmb_input_protocol_tests
+        NsmbInputProtocol.cpp
+        NsmbInputProtocol.h
+        NsmbMvlNetplayRuntime.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_input_protocol_tests.cpp
+    )
+    target_include_directories(nsmb_input_protocol_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_input_protocol_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-input-protocol COMMAND nsmb_input_protocol_tests)
+
+    add_executable(nsmb_input_delivery_tests
+        NsmbInputDelivery.cpp
+        NsmbInputDelivery.h
+        NsmbInputProtocol.cpp
+        NsmbInputProtocol.h
+        NsmbMvlNetplayRuntime.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_input_delivery_tests.cpp
+    )
+    target_include_directories(nsmb_input_delivery_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_input_delivery_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-input-delivery COMMAND nsmb_input_delivery_tests)
+
+    add_executable(nsmb_session_protocol_tests
+        NsmbNetplayProtocol.cpp
+        NsmbNetplayProtocol.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_session_protocol_tests.cpp
+    )
+    target_include_directories(nsmb_session_protocol_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_session_protocol_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-session-protocol COMMAND nsmb_session_protocol_tests)
+
+    add_executable(nsmb_session_policy_tests
+        NsmbNetplayProtocol.cpp
+        NsmbNetplayProtocol.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_session_policy_tests.cpp
+    )
+    target_include_directories(nsmb_session_policy_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_session_policy_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-session-policy COMMAND nsmb_session_policy_tests)
+
+    add_executable(nsmb_packet_classifier_tests
+        NsmbNetplayProtocol.cpp
+        NsmbNetplayProtocol.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_packet_classifier_tests.cpp
+    )
+    target_include_directories(nsmb_packet_classifier_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_packet_classifier_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-packet-classifier COMMAND nsmb_packet_classifier_tests)
+
+    add_executable(nsmb_game_state_tests
+        NsmbGameState.cpp
+        NsmbGameState.h
+        NsmbGameStateWriter.h
+        NsmbNetplayProtocol.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_game_state_tests.cpp
+    )
+    target_include_directories(nsmb_game_state_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_game_state_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-game-state COMMAND nsmb_game_state_tests)
+
+    add_executable(nsmb_rule_ai_tests
+        NsmbRuleAI.cpp
+        NsmbRuleAI.h
+        NsmbGameState.h
+        NsmbGameStateReader.h
+        NsmbMvlNetplayRuntime.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_rule_ai_tests.cpp
+    )
+    target_include_directories(nsmb_rule_ai_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_rule_ai_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-rule-ai COMMAND nsmb_rule_ai_tests)
+
+    add_executable(nsmb_imitation_ai_tests
+        NsmbImitationAI.cpp
+        NsmbImitationAI.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_imitation_ai_tests.cpp
+    )
+    target_include_directories(nsmb_imitation_ai_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    set_target_properties(nsmb_imitation_ai_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-imitation-ai COMMAND nsmb_imitation_ai_tests)
+
+    add_executable(nsmb_mvl_runtime_tests
+        NsmbMvlRuntime.cpp
+        NsmbMvlRuntime.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_mvl_runtime_tests.cpp
+    )
+    target_include_directories(nsmb_mvl_runtime_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_mvl_runtime_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-mvl-runtime COMMAND nsmb_mvl_runtime_tests)
+
+    add_executable(nsmb_rollback_store_tests
+        NsmbRollbackStore.cpp
+        NsmbRollbackStore.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_rollback_store_tests.cpp
+    )
+    target_include_directories(nsmb_rollback_store_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_rollback_store_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-rollback-store COMMAND nsmb_rollback_store_tests)
+endif()
+
 add_subdirectory("../../net"
     ${CMAKE_BINARY_DIR}/net)
+
+if (BUILD_TESTING)
+    add_executable(nsmb_packet_bridge_runtime_tests
+        NsmbPacketBridgeRuntime.cpp
+        NsmbPacketBridgeRuntime.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_packet_bridge_runtime_tests.cpp
+    )
+    target_include_directories(nsmb_packet_bridge_runtime_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_packet_bridge_runtime_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-packet-bridge-runtime COMMAND nsmb_packet_bridge_runtime_tests)
+
+    add_executable(nsmb_netplay_diagnostics_tests
+        NsmbNetplayDiagnostics.cpp
+        NsmbNetplayDiagnostics.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_netplay_diagnostics_tests.cpp
+    )
+    target_include_directories(nsmb_netplay_diagnostics_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    target_link_libraries(nsmb_netplay_diagnostics_tests PRIVATE
+        ${QT_LINK_LIBS}
+    )
+    set_target_properties(nsmb_netplay_diagnostics_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-netplay-diagnostics COMMAND nsmb_netplay_diagnostics_tests)
+
+    add_executable(nsmb_netplay_coordinator_tests
+        NsmbNetplayCoordinator.cpp
+        NsmbNetplayCoordinator.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_netplay_coordinator_tests.cpp
+    )
+    target_include_directories(nsmb_netplay_coordinator_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_netplay_coordinator_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-netplay-coordinator COMMAND nsmb_netplay_coordinator_tests)
+
+    add_executable(nsmb_netplay_transport_tests
+        NsmbNetplayTransport.cpp
+        NsmbNetplayTransport.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_netplay_transport_tests.cpp
+    )
+    target_include_directories(nsmb_netplay_transport_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    target_link_libraries(nsmb_netplay_transport_tests PRIVATE net-utils)
+    if (WIN32)
+        target_link_libraries(nsmb_netplay_transport_tests PRIVATE winmm)
+    endif()
+    set_target_properties(nsmb_netplay_transport_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-netplay-transport COMMAND nsmb_netplay_transport_tests)
+endif()
 
 target_link_libraries(melonDS PRIVATE net-utils)
 

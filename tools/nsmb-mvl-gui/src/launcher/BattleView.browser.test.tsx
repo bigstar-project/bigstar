@@ -385,7 +385,7 @@ describe('対戦ビュー', () => {
           basic_matches: false,
           frame: 240,
           instance: 0,
-          line: 'NSMB PoC: game state mismatch inst=0 frame=240 local=00000000000000AA remote=00000000000000BB basic=0 playerGlobal=1 wifiCandidate=0 renderCandidate=1',
+          line: 'NSMB MvL Netplay: game state mismatch inst=0 frame=240 local=00000000000000AA remote=00000000000000BB basic=0 playerGlobal=1 wifiCandidate=0 renderCandidate=1',
           local_hash: '00000000000000AA',
           player_global_matches: true,
           remote_hash: '00000000000000BB',
@@ -400,7 +400,7 @@ describe('対戦ビュー', () => {
       .element(screen.getByText('ゲーム状態ミスマッチ', { exact: true }))
       .toBeVisible();
     await expect
-      .element(screen.getByText(/NSMB PoC: game state mismatch/))
+      .element(screen.getByText(/NSMB MvL Netplay: game state mismatch/))
       .toBeVisible();
   });
 });

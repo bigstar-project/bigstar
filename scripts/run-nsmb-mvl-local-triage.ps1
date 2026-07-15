@@ -230,7 +230,7 @@ function New-MelonEnv {
         MELONDS_NSML_TEST = "1"
         MELONDS_NSML_TEST_INSTANCES = "1"
         MELONDS_NSML_TEST_FRAMES = "$Frames"
-        MELONDS_NSML_POC = "1"
+        MELONDS_NSML_NETPLAY = "1"
         MELONDS_NSML_ROLE = $Role
         MELONDS_NSML_PORT = "$Port"
         MELONDS_NSML_LOCAL_INSTANCE = $localInstance
@@ -269,7 +269,6 @@ function New-MelonEnv {
         MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_START_FRAME = "840"
         MELONDS_NSML_MVL_STAGE = "$Stage"
         MELONDS_NSML_MVL_STAGE_SEQUENCE = $MvlStageSequence
-        MELONDS_NSML_DIRECT_MVL_BOOT_STAGE = "$Stage"
         MELONDS_NSML_MVL_COURSE_MODE = $MvlCourseMode
         MELONDS_NSML_MVL_WINS = "$MvlWins"
         MELONDS_NSML_MVL_BIG_STARS = "$MvlBigStars"

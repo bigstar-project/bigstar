@@ -1,0 +1,414 @@
+#pragma once
+
+#include "NsmbGameState.h"
+#include "NsmbNetplayConfig.h"
+
+#include <chrono>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <iosfwd>
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace NsmbImitationAI {
+struct ModelDescription;
+struct ModelInitializationResult;
+} // namespace NsmbImitationAI
+
+namespace NsmbMvlNetplay::Diagnostics {
+
+constexpr std::size_t kDiagnosticRingCapacity = 720;
+
+struct DiagnosticPlayerSnapshot {
+  melonDS::u32 Found = 0;
+  melonDS::u32 Base = 0;
+  melonDS::u32 GUID = 0;
+  melonDS::u32 Settings = 0;
+  melonDS::u32 StateType = 0;
+  melonDS::u32 Flags = 0;
+  melonDS::u32 PosX = 0;
+  melonDS::u32 PosY = 0;
+  melonDS::u32 PosZ = 0;
+  melonDS::u32 PrevX = 0;
+  melonDS::u32 PrevY = 0;
+  melonDS::u32 PrevZ = 0;
+  melonDS::u32 VelX = 0;
+  melonDS::u32 VelY = 0;
+  melonDS::u32 VelZ = 0;
+  melonDS::u32 ActionFlag = 0;
+  melonDS::u32 SubActionFlag = 0;
+  melonDS::u32 PhysicsFlag = 0;
+  melonDS::u32 DamageCooldown = 0;
+  melonDS::u32 TransitionFlag = 0;
+  melonDS::u32 CollisionFlag = 0;
+  melonDS::u32 EnvironmentFlag = 0;
+  melonDS::u32 LinkedActor = 0;
+  melonDS::u32 TransitionStep = 0;
+  melonDS::u32 UpdateLocked = 0;
+  melonDS::u32 CharacterIDBase = 0;
+  melonDS::u32 TransitioningFlag = 0;
+  melonDS::u32 CameraFocusMode = 0;
+  melonDS::u32 DefeatedFlag = 0;
+  melonDS::u32 PlayerBaseID = 0;
+  melonDS::u32 VisibleFlag = 0;
+  melonDS::u32 TransitFunc = 0;
+  melonDS::u32 TransitArg = 0;
+  melonDS::u32 Powerup = 0;
+  melonDS::u32 InventoryPowerup = 0;
+  melonDS::u32 Dead = 0;
+  melonDS::u32 Character = 0;
+  melonDS::u32 TransitionStatus = 0;
+  melonDS::u32 Lives = 0;
+  melonDS::u32 BattleStars = 0;
+  melonDS::u32 Coins = 0;
+  melonDS::u32 Score = 0;
+  melonDS::u32 DisplayedStars = 0;
+  melonDS::u32 Deaths = 0;
+  melonDS::u32 CollectedStars = 0;
+};
+
+struct DiagnosticFrameSnapshot {
+  bool Valid = false;
+  melonDS::u32 Frame = 0;
+  melonDS::u32 Instance = 0;
+  melonDS::u32 StageID = 0;
+  melonDS::u32 StageGroup = 0;
+  melonDS::u32 VsMode = 0;
+  melonDS::u32 LocalPlayerID = 0;
+  melonDS::u32 SceneCurrentSceneID = 0;
+  melonDS::u32 SceneNextSceneID = 0;
+  melonDS::u32 StageActorFreezeFlag = 0;
+  melonDS::u32 PlayerCount = 0;
+  melonDS::u32 InputConsole0Held = 0;
+  melonDS::u32 InputConsole1Held = 0;
+  melonDS::u32 InputPlayer0Held = 0;
+  melonDS::u32 InputPlayer1Held = 0;
+  melonDS::u32 LastSentInputFrame = 0;
+  melonDS::u32 LastReceivedInputFrame = 0;
+  melonDS::u64 PlayerGlobalHash = 0;
+  melonDS::u64 PlayerGlobalHash0 = 0;
+  melonDS::u64 PlayerGlobalHash1 = 0;
+  melonDS::u64 PlayerActorHash0 = 0;
+  melonDS::u64 PlayerActorHash1 = 0;
+  melonDS::u32 StageCameraGlobalX0 = 0;
+  melonDS::u32 StageCameraGlobalX1 = 0;
+  melonDS::u32 StageCameraGlobalY0 = 0;
+  melonDS::u32 StageCameraGlobalY1 = 0;
+  melonDS::u32 StageCameraGlobalWidth0 = 0;
+  melonDS::u32 StageCameraGlobalWidth1 = 0;
+  melonDS::u32 StageCameraGlobalHeight0 = 0;
+  melonDS::u32 StageCameraGlobalHeight1 = 0;
+  DiagnosticPlayerSnapshot Player[2];
+};
+
+struct DiagnosticMovingHazardSnapshot {
+  melonDS::u32 GUID = 0;
+  melonDS::u32 Base = 0;
+  melonDS::u32 PosX = 0;
+  melonDS::u32 PosY = 0;
+  melonDS::u32 VelX = 0;
+  melonDS::u32 VelY = 0;
+  melonDS::u32 StateType = 0;
+  melonDS::u32 Flags = 0;
+};
+
+struct PlayerLifeState {
+  melonDS::u32 Lives[2]{};
+  melonDS::u32 Deaths[2]{};
+  melonDS::u32 Dead[2]{};
+  melonDS::u32 Transition[2]{};
+};
+
+struct PlayerLifeObservation {
+  bool Accepted = false;
+  bool Changed = false;
+  bool HadPrevious = false;
+  PlayerLifeState Previous;
+};
+
+void AppendJsonHex32(std::ostream &out, const char *key, melonDS::u32 value);
+void AppendJsonHex64(std::ostream &out, const char *key, melonDS::u64 value);
+void AppendDiagnosticPlayerJson(std::ostream &out,
+                                const DiagnosticPlayerSnapshot &player);
+void AppendDiagnosticFrameJson(std::ostream &out,
+                               const DiagnosticFrameSnapshot &snapshot);
+void AppendGameStatePlayerJson(std::ostream &out,
+                               const GameStateModel::GameStateSample &sample,
+                               int player);
+void AppendDiagnosticPlayerContextJson(
+    std::ostream &out, const DiagnosticFrameSnapshot &snapshot,
+    const DiagnosticFrameSnapshot *previous, int player);
+bool IsPlayerScreenPositionAnomalous(
+    const DiagnosticFrameSnapshot &snapshot,
+    const DiagnosticFrameSnapshot *previous, int player);
+std::string JsonEscape(const std::string &value);
+void AppendDiagnosticRingJson(
+    std::ostream &out,
+    const std::vector<DiagnosticFrameSnapshot> &snapshots);
+std::string FormatStartReadyEvent(
+    const char *role, const char *direction, melonDS::u32 localFrame,
+    melonDS::u32 remoteFrame, melonDS::u32 noFrameLimit,
+    melonDS::u32 logicalStart, melonDS::u32 lastSentInputFrame,
+    melonDS::u32 lastReceivedInputFrame, std::size_t localQueue,
+    std::size_t remoteQueue, std::size_t delayedInputs);
+std::string FormatDiagnosticStartupEvent(
+    const char *role, int ringFrames, bool stateSync, bool stateSyncExtended,
+    int stateSyncInterval, const std::string &diagnosticsPath,
+    const std::string &eventsPath);
+std::string FormatDiagnosticPlayerSnapshotEvent(
+    const char *event, const char *role, int instanceID,
+    const DiagnosticFrameSnapshot &snapshot,
+    const DiagnosticFrameSnapshot *previous, int player,
+    const std::vector<DiagnosticFrameSnapshot> &ring);
+std::string FormatDiagnosticPostWindowEvent(
+    const char *role, int instanceID, melonDS::u32 frame,
+    melonDS::u32 triggerUntilFrame,
+    const std::vector<DiagnosticFrameSnapshot> &ring);
+std::string FormatPlayerGlobalMismatchEvent(
+    const char *role, int instanceID, melonDS::u32 frame,
+    const GameStateModel::GameStateSyncHashes &local,
+    const GameStateModel::GameStateSyncHashes &remote,
+    const DiagnosticFrameSnapshot *latest,
+    const GameStateModel::GameStateSample *remoteSample,
+    const std::vector<DiagnosticFrameSnapshot> &ring);
+std::string FormatPlayerLifeEvent(
+    const char *role, const char *reason, int instanceID, melonDS::u32 frame,
+    int player, const GameStateModel::GameStateSample &sample,
+    const std::vector<DiagnosticMovingHazardSnapshot> &nearbyHazards,
+    bool includeRing, const std::vector<DiagnosticFrameSnapshot> &ring);
+std::string FormatTestStartupReport(
+    std::uint64_t unixMs, const Config::BootstrapConfig &bootstrap,
+    const Config::DiagnosticsConfig &diagnostics,
+    const Config::HarnessConfig &harness,
+    const Config::StateSyncConfig &stateSync,
+    const Config::PacketBridgeConfig &packetBridge,
+    const Config::MvlConfig &mvl, std::size_t ramDumpRangeCount,
+    int currentStage, melonDS::u32 currentSceneSettings);
+std::string FormatNetplayStartupReport(
+    std::uint64_t unixMs, const char *role,
+    const Config::ConnectionConfig &connection,
+    const Config::HarnessConfig &harness,
+    const Config::PacketBridgeConfig &packetBridge,
+    const Config::InputConfig &input, const Config::RollbackConfig &rollback,
+    const char *rollbackBackend, const Config::MvlConfig &mvl,
+    int currentStage, melonDS::u32 currentSceneSettings);
+std::string FormatImitationModelInitializationReport(
+    const std::string &modelPath,
+    const NsmbImitationAI::ModelInitializationResult &result);
+std::string FormatAIStartupReport(
+    const Config::AIConfig &ai, bool imitationEnabled,
+    const NsmbImitationAI::ModelDescription &model);
+
+bool ShouldCaptureRamDumpFrame(
+    melonDS::u32 frame, int interval,
+    const std::vector<std::pair<melonDS::u32, melonDS::u32>> &ranges);
+bool ShouldCaptureScreenshotFrame(const Config::DiagnosticsConfig &config,
+                                  melonDS::u32 frame);
+struct ScreenshotFrame {
+  bool FramebufferAvailable = false;
+  const void *TopBuffer = nullptr;
+  const void *BottomBuffer = nullptr;
+  melonDS::u32 DisplayControlA = 0;
+  melonDS::u32 DisplayControlB = 0;
+  melonDS::u16 DisplayStatus = 0;
+  melonDS::u16 PowerControl = 0;
+  melonDS::u16 BlendControlA = 0;
+  melonDS::u16 BlendY_A = 0;
+  melonDS::u16 BlendControlB = 0;
+  melonDS::u16 BlendY_B = 0;
+  melonDS::u8 NetState = 0;
+  melonDS::u16 NetFlags = 0;
+};
+void CaptureScreenshot(const Config::DiagnosticsConfig &config,
+                       int instanceID, melonDS::u32 frame,
+                       const ScreenshotFrame &screenshot);
+void CaptureRamDumpIfNeeded(
+    const Config::DiagnosticsConfig &config,
+    const std::vector<std::pair<melonDS::u32, melonDS::u32>> &ranges,
+    int instanceID, melonDS::u32 frame, const melonDS::u8 *mainRAM,
+    melonDS::u32 mainRAMLength);
+
+enum class RuntimePatchLogKind : std::size_t {
+  ForceDeathCounters,
+  ForcePowerups,
+  ForceInventoryPowerups,
+  ForceStarCounters,
+  Count,
+};
+
+class BeforeHookPhaseTrace {
+public:
+  enum class Phase {
+    Init,
+    StartSync,
+    LoadState,
+    RuntimeConfig,
+    ProbeRestore,
+    JitPatch,
+    Rollback,
+    Boot,
+    Patch,
+    PacketBridgeSetup,
+    TestSnap,
+    Setup,
+    ActorState,
+    Barrier,
+    Checkpoint,
+    Scratch,
+    Network,
+    Gate,
+    RemoteWait,
+  };
+
+  BeforeHookPhaseTrace(bool enabled, int thresholdUs, int instanceID,
+                       melonDS::u32 frame);
+  ~BeforeHookPhaseTrace();
+  void SetFrame(melonDS::u32 frame);
+  void Mark(Phase phase);
+
+private:
+  using Clock = std::chrono::steady_clock;
+  static long long ElapsedUs(Clock::time_point start, Clock::time_point end);
+
+  bool Enabled = false;
+  int ThresholdUs = 0;
+  int InstanceID = -1;
+  melonDS::u32 Frame = 0;
+  Clock::time_point Start;
+  Clock::time_point Last;
+  long long InitUs = 0;
+  long long StartSyncUs = 0;
+  long long LoadStateUs = 0;
+  long long RuntimeConfigUs = 0;
+  long long ProbeRestoreUs = 0;
+  long long JitPatchUs = 0;
+  long long RollbackUs = 0;
+  long long BootUs = 0;
+  long long PatchUs = 0;
+  long long PacketBridgeSetupUs = 0;
+  long long TestSnapUs = 0;
+  long long SetupUs = 0;
+  long long ActorStateUs = 0;
+  long long BarrierUs = 0;
+  long long CheckpointUs = 0;
+  long long ScratchUs = 0;
+  long long NetworkUs = 0;
+  long long GateUs = 0;
+  long long RemoteWaitUs = 0;
+};
+
+class Runtime {
+public:
+  using TimePoint = std::chrono::steady_clock::time_point;
+
+  struct ActiveFrameSample {
+    bool Recorded = false;
+    bool Spike = false;
+    std::uint64_t ElapsedUs = 0;
+    melonDS::u32 RollbackRestoreDelta = 0;
+    melonDS::u32 RollbackResimulateDelta = 0;
+  };
+
+  struct ActiveFrameSummary {
+    bool Started = false;
+    melonDS::u32 StartFrame = 0;
+    melonDS::u32 Frames = 0;
+    std::int64_t ElapsedMs = 0;
+    melonDS::u32 Samples = 0;
+    std::uint64_t TotalUs = 0;
+    std::uint64_t MaxUs = 0;
+    melonDS::u32 MaxFrame = 0;
+    melonDS::u32 Over16ms = 0;
+    melonDS::u32 Over25ms = 0;
+    melonDS::u32 Over33ms = 0;
+  };
+
+  Runtime();
+  ~Runtime();
+
+  Runtime(const Runtime &) = delete;
+  Runtime &operator=(const Runtime &) = delete;
+
+  bool ConfigureFrameHeartbeat(int interval, const std::string &path);
+  bool PublishFrameHeartbeat(int instanceID, melonDS::u32 frame, bool active);
+  bool ConfigureHashLog(const std::string &path, bool screenHashEnabled);
+  bool RecordFrameHash(int instanceID, melonDS::u32 frame,
+                       melonDS::u64 stateHash, melonDS::u64 screenHash);
+  bool WriteDiagnosticEvent(const std::string &path,
+                            const std::string &json);
+  void StartTestTimer(TimePoint now);
+  std::int64_t TestElapsedMs(TimePoint now) const;
+  bool StartActiveTimer(int instanceID, melonDS::u32 frame, TimePoint now);
+  bool IsActiveTimerStarted(int instanceID) const;
+  ActiveFrameSample RecordActiveFrameTiming(
+      int instanceID, melonDS::u32 frame, TimePoint now, bool traceSpikes,
+      std::uint64_t spikeThresholdUs, melonDS::u32 rollbackRestoreCount,
+      melonDS::u32 rollbackResimulateCount);
+  ActiveFrameSummary ActiveFrameTimingSummary(int instanceID,
+                                              melonDS::u32 endFrame,
+                                              TimePoint now) const;
+  bool ShouldTraceGameplayHeartbeat(int instanceID, melonDS::u32 frame,
+                                    melonDS::u32 startFrame, int interval);
+  std::optional<DiagnosticFrameSnapshot>
+  LatestDiagnosticSnapshot(int instanceID) const;
+  void RecordDiagnosticSnapshot(int instanceID,
+                                const DiagnosticFrameSnapshot &snapshot);
+  std::vector<DiagnosticFrameSnapshot>
+  DiagnosticSnapshotWindow(int instanceID, std::size_t frameCount) const;
+  void ScheduleDiagnosticPostTrigger(int instanceID,
+                                     melonDS::u32 untilFrame);
+  std::optional<melonDS::u32>
+  TakeDueDiagnosticPostTrigger(int instanceID, melonDS::u32 frame);
+  bool ShouldEmitDiagnosticMismatch(int instanceID, melonDS::u32 frame,
+                                    melonDS::u32 cooldownFrames);
+  bool ShouldEmitDiagnosticLifeEvent(int instanceID, int player,
+                                     melonDS::u32 frame,
+                                     bool transitionOnly,
+                                     melonDS::u32 cooldownFrames);
+  bool ShouldEmitDiagnosticPitTransition(int instanceID, int player,
+                                         melonDS::u32 frame,
+                                         melonDS::u32 cooldownFrames);
+  bool ShouldEmitDiagnosticPositionAnomaly(int instanceID, int player,
+                                           melonDS::u32 frame,
+                                           melonDS::u32 cooldownFrames);
+  PlayerLifeObservation ObservePlayerLifeState(int instanceID,
+                                               const PlayerLifeState &current);
+  bool TakeRuntimePatchLog(int instanceID, RuntimePatchLogKind kind);
+  void ResetRuntimePatchLog(int instanceID, RuntimePatchLogKind kind);
+  void StartHangDiagnostics(const Config::DiagnosticsConfig &config, bool host);
+  void Stop();
+
+  void TracePhase(const char *event, const char *phase, int instanceID = -1,
+                  melonDS::u32 frame = 0, melonDS::u32 logicalFrame = 0,
+                  melonDS::u32 sendFrame = 0);
+  void UpdateNetplaySnapshot(melonDS::u32 lastSentFrame,
+                             melonDS::u32 lastReceivedFrame,
+                             melonDS::u32 frameForLead,
+                             melonDS::u32 noFrameLimit, std::size_t localQueue,
+                             std::size_t remoteQueue, std::size_t delayedQueue,
+                             int peerState, int connectingPeerState);
+  void ResetNetplaySnapshot(melonDS::u32 noFrameLimit);
+
+  void RecordENetService(int result);
+  void RecordENetEvent(int type, melonDS::u32 data);
+  void RecordENetReceive(std::uint64_t unixMs);
+  void RecordENetSend(int result, std::size_t bytes, std::uint64_t unixMs);
+
+  void BeginRemoteWait(melonDS::u32 targetFrame, std::uint64_t unixMs);
+  void ProgressRemoteWait(std::uint64_t unixMs);
+  void EndRemoteWait();
+
+  void UpdateGameSnapshot(int instanceID, melonDS::u32 frame,
+                          const GameStateModel::GameStateSample &sample,
+                          std::uint64_t unixMs);
+
+private:
+  struct Impl;
+  std::unique_ptr<Impl> State;
+};
+
+} // namespace NsmbMvlNetplay::Diagnostics

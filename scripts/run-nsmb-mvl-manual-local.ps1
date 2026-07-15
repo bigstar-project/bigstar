@@ -15,7 +15,6 @@ param(
     [int]$NetworkPumpSleepUs = 250,
     [switch]$LowDelayWan,
     [switch]$LowLatencyRollback,
-    [switch]$PlanDActorSnapshot,
     [switch]$Rollback,
     [string]$RollbackBackend = "",
     [string]$RollbackTinyCoreFlags = "",
@@ -25,13 +24,6 @@ param(
     [int]$RollbackInputWaitUs = 0,
     [int]$RollbackMaxResimFrames = 0,
     [switch]$RollbackResimulate,
-    [int]$PlayerStateSyncInterval = 2,
-    [int]$PlayerStateMaxPredictFrames = 1,
-    [int]$WorldStateSyncInterval = 2,
-    [int]$WorldStateMaxPredictFrames = 1,
-    [int]$WorldStateActorRescanInterval = 30,
-    [switch]$WorldStateSkipEffects,
-    [switch]$WorldStateApplyActorSnapshot,
     [switch]$WorldStateTraceObjectLifecycles,
     [switch]$WorldStateTraceActorInternals,
     [switch]$WorldStateTraceEffects,
@@ -113,10 +105,6 @@ if ($AllowJit -and $NoJit) {
     throw "AllowJit and NoJit cannot be used together"
 }
 
-if ($LowLatencyRollback -and $PlanDActorSnapshot) {
-    throw "LowLatencyRollback and PlanDActorSnapshot cannot be enabled together"
-}
-
 function Set-MelonTomlValue {
     param(
         [string]$Text,
@@ -170,20 +158,6 @@ if ($LowLatencyRollback) {
     $RollbackResimulate = $true
 }
 
-if ($PlanDActorSnapshot) {
-    if (-not $PSBoundParameters.ContainsKey('InputDelayFrames')) { $InputDelayFrames = 0 }
-    if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 4 }
-    if (-not $PSBoundParameters.ContainsKey('NetworkPumpThread')) { $NetworkPumpThread = $true }
-    if (-not $PSBoundParameters.ContainsKey('NetworkPumpSleepUs')) { $NetworkPumpSleepUs = 50 }
-    if (-not $PSBoundParameters.ContainsKey('StallTimeoutMs')) { $StallTimeoutMs = 5000 }
-    if (-not $PSBoundParameters.ContainsKey('WorldStateApplyActorSnapshot')) { $WorldStateApplyActorSnapshot = $true }
-    if (-not $PSBoundParameters.ContainsKey('WorldStateSyncInterval')) { $WorldStateSyncInterval = 1 }
-    if (-not $PSBoundParameters.ContainsKey('WorldStateMaxPredictFrames')) { $WorldStateMaxPredictFrames = 2 }
-    if (-not $PSBoundParameters.ContainsKey('PlayerStateMaxPredictFrames')) { $PlayerStateMaxPredictFrames = 1 }
-    if (-not $PSBoundParameters.ContainsKey('GameplayHeartbeatInterval')) { $GameplayHeartbeatInterval = 120 }
-}
-
-$isNsmbTinyCoreRollback = $RollbackBackend -eq "nsmbtinycore" -or $RollbackBackend -eq "nsmb-tiny-core"
 $isTinyCorePreimageRollback = $RollbackBackend -eq "tinycorepreimage" -or $RollbackBackend -eq "tiny-core-preimage"
 
 if ($LowLatencyRollback -and $isTinyCorePreimageRollback) {
@@ -191,15 +165,6 @@ if ($LowLatencyRollback -and $isTinyCorePreimageRollback) {
     if (-not $PSBoundParameters.ContainsKey('RollbackWindow')) { $RollbackWindow = 32 }
     if (-not $PSBoundParameters.ContainsKey('RollbackCheckpointInterval')) { $RollbackCheckpointInterval = 1 }
     if (-not $PSBoundParameters.ContainsKey('RollbackInputWaitUs')) { $RollbackInputWaitUs = 1500 }
-    if (-not $PSBoundParameters.ContainsKey('NetworkPumpThread')) { $NetworkPumpThread = $true }
-    if (-not $PSBoundParameters.ContainsKey('NetworkPumpSleepUs')) { $NetworkPumpSleepUs = 50 }
-}
-
-if ($LowLatencyRollback -and $isNsmbTinyCoreRollback) {
-    if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 1 }
-    if (-not $PSBoundParameters.ContainsKey('RollbackCheckpointInterval')) { $RollbackCheckpointInterval = 1 }
-    if (-not $PSBoundParameters.ContainsKey('RollbackInputWaitUs')) { $RollbackInputWaitUs = 2500 }
-    if (-not $PSBoundParameters.ContainsKey('RollbackMaxResimFrames')) { $RollbackMaxResimFrames = 1 }
     if (-not $PSBoundParameters.ContainsKey('NetworkPumpThread')) { $NetworkPumpThread = $true }
     if (-not $PSBoundParameters.ContainsKey('NetworkPumpSleepUs')) { $NetworkPumpSleepUs = 50 }
 }
@@ -353,24 +318,6 @@ if ($ForcePlayerStarCounters) {
         "-ForcePlayerCollectedStars1", "$ForcePlayerCollectedStars1"
     )
 }
-if ($PlanDActorSnapshot) {
-    $common += @(
-        "-PlayerStateSync",
-        "-PlayerStateApply",
-        "-PlayerStateGlobals",
-        "-PlayerStateSyncInterval", "$PlayerStateSyncInterval",
-        "-PlayerStateMaxPredictFrames", "$PlayerStateMaxPredictFrames",
-        "-WorldStateSync",
-        "-WorldStateApply",
-        "-WorldStateSpawnItem",
-        "-WorldStateApplyMovingHazard",
-        "-WorldStateApplyEffects",
-        "-WorldStateApplyActorSnapshot",
-        "-WorldStateSyncInterval", "$WorldStateSyncInterval",
-        "-WorldStateMaxPredictFrames", "$WorldStateMaxPredictFrames",
-        "-WorldStateActorRescanInterval", "$WorldStateActorRescanInterval"
-    )
-}
 if ($WorldStateTraceObjectLifecycles) {
     $common += @(
         "-WorldStateTraceObjectLifecycles",
@@ -384,9 +331,6 @@ if ($WorldStateTraceActorInternals) {
 }
 if ($WorldStateTraceEffects) {
     $common += "-WorldStateTraceEffects"
-}
-if ($WorldStateSkipEffects) {
-    $common += "-WorldStateSkipEffects"
 }
 if ($NoFrameLimit) {
     $common += "-NoFrameLimit"
@@ -454,48 +398,19 @@ if ($LowLatencyRollback) {
         Remove-Item Env:\MELONDS_NSML_FPS_SPIKE_TRACE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PERF_SPIKE_PHASE_TRACE -ErrorAction SilentlyContinue
     }
-    if ($isNsmbTinyCoreRollback) {
-        $env:MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
-        $env:MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
-        $env:MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
-        $env:MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
-        $env:MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
-        $env:MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
-        $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
-        $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
-        $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
-        if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x241" }
-        $env:MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "$RollbackTinyCoreFlags"
-    } elseif ($isTinyCorePreimageRollback) {
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL -ErrorAction SilentlyContinue
+    if ($isTinyCorePreimageRollback) {
         $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
         $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
         $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
         if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x241" }
         $env:MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "$RollbackTinyCoreFlags"
     } else {
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_SUPPRESS_PU_DEBUG -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS -ErrorAction SilentlyContinue
     }
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK -ErrorAction SilentlyContinue
-}
-if ($PlanDActorSnapshot) {
-    $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "33"
-    $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
-    $env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE = "1"
 }
 if ($RollbackInputWaitUs -gt 0) {
     $env:MELONDS_NSML_ROLLBACK_INPUT_WAIT_US = "$RollbackInputWaitUs"
@@ -647,7 +562,7 @@ if (-not $ClientOnly) {
                 throw "host wrapper exited before netplay init. See $hostOut / $hostErr"
             }
             if (Test-Path $hostReadyLog) {
-                if (Select-String -Path $hostReadyLog -Pattern "NSMB PoC: enabled role=host" -Quiet) {
+                if (Select-String -Path $hostReadyLog -Pattern "NSMB MvL Netplay: enabled role=host" -Quiet) {
                     $hostReady = $true
                     break
                 }
@@ -703,9 +618,6 @@ if ($HostAIObservationV3Log -or $ClientAIObservationV3Log) {
 }
 Write-Host "trace gameState=$([bool]$GameStateTrace) interval=$GameStateTraceInterval extended=$([bool]$GameStateTraceExtended) lifeChanges=$([bool]$TracePlayerLifeChanges) defeated=$([bool]$TracePlayerDefeated)"
 Write-Host "recordInput=$([bool]$RecordInput) recordDir=$(if ($RecordInput) { $InputRecordDir } else { 'disabled' }) recordStart=$InputRecordStartFrame recordEnd=$InputRecordEndFrame"
-if ($PlanDActorSnapshot) {
-    Write-Host "Plan-D actor/global/world snapshot enabled playerInterval=$PlayerStateSyncInterval playerPredict=$PlayerStateMaxPredictFrames worldInterval=$WorldStateSyncInterval worldPredict=$WorldStateMaxPredictFrames worldRescan=$WorldStateActorRescanInterval itemSpawn=1 actorSnapshot=$([bool]$WorldStateApplyActorSnapshot)"
-}
 Write-Host "mvlWins=$MvlWins mvlBigStars=$MvlBigStars mvlLives=$MvlLives mvlStage=$(if ($MvlStage -ge 0) { $MvlStage } else { 'auto/default' }) mvlSceneSettings=$(if ($MvlSceneSettings) { $MvlSceneSettings } else { 'derived' }) mvlCourseMode=$MvlCourseMode generateConfiguredRoms=$($GenerateMvlConfiguredRoms.IsPresent) mvlMatchSeed=$(if ($MvlMatchSeed) { $MvlMatchSeed } else { 'auto' })"
 if ($Rollback) {
     $backendLabel = if ($RollbackBackend -ne "") { $RollbackBackend } else { "savestate" }

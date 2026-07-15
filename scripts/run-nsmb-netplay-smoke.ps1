@@ -39,7 +39,8 @@ function Start-MelonTestProcess {
     $env:MELONDS_NSML_HASH_LOG = $HashLog
     $env:MELONDS_NSML_HASH_INTERVAL = "30"
     $env:MELONDS_NSML_WAIT_TIMEOUT_MS = "5000"
-    $env:MELONDS_NSML_POC = "1"
+    $env:MELONDS_NSML_NETPLAY = "1"
+    Remove-Item Env:\MELONDS_NSML_POC -ErrorAction SilentlyContinue
     $env:MELONDS_NSML_ROLE = $Role
     $env:MELONDS_NSML_PORT = "$Port"
     $env:MELONDS_NSML_LOCAL_INSTANCE = "0"
@@ -90,7 +91,7 @@ $clientProc = Start-MelonTestProcess -Role "client" -Stdout $clientOut -HashLog 
 Complete-MelonTestProcess $clientProc
 Complete-MelonTestProcess $hostProc
 
-if (-not (Select-String -Path $hostOut -Pattern "NSMB PoC: peer connected" -Quiet)) {
+if (-not (Select-String -Path $hostOut -Pattern "NSMB MvL Netplay: peer connected" -Quiet)) {
     throw "host did not report peer connection. See $hostOut"
 }
 

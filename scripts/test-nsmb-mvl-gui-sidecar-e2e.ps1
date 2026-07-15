@@ -98,7 +98,7 @@ function Assert-MelonLogPassed {
             throw "$Role melonDS log contains failure pattern: $pattern"
         }
     }
-    if (!$Text.Contains("NSMB PoC: peer connected")) {
+    if (!$Text.Contains("NSMB MvL Netplay: peer connected")) {
         throw "$Role melonDS log did not reach ENet peer connected"
     }
     if (!$Text.Contains("NSMB InputNetplay: remote gameplay start ready accepted")) {

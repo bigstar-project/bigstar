@@ -43,7 +43,7 @@ function Get-LastMatchLine {
 
 function Get-Backend {
     param([string]$Text)
-    $line = Get-FirstMatchLine -Text $Text -Pattern "NSMB PoC: enabled"
+    $line = Get-FirstMatchLine -Text $Text -Pattern "NSMB MvL Netplay: enabled"
     if ($line -match "rollbackBackend=([^ ]+)") {
         return $Matches[1]
     }

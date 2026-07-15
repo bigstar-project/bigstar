@@ -1,12 +1,13 @@
 /*
-    Experimental NSMB Mario vs Luigi input-lockstep PoC.
+    Experimental NSMB Mario vs Luigi netplay runtime.
 
     This is intentionally isolated from melonDS' regular LAN/local MP paths.
-    It only overrides per-frame controller input when MELONDS_NSML_POC=1.
+    It only overrides per-frame controller input when
+    MELONDS_NSML_NETPLAY=1 (or the legacy MELONDS_NSML_POC=1 alias).
 */
 
-#ifndef NSMBNETPLAYPOC_H
-#define NSMBNETPLAYPOC_H
+#ifndef NSMBMVLNETPLAYRUNTIME_H
+#define NSMBMVLNETPLAYRUNTIME_H
 
 #include "types.h"
 
@@ -15,7 +16,7 @@ namespace melonDS
 class NDS;
 }
 
-namespace NsmbNetplayPoC
+namespace NsmbMvlNetplay
 {
 
 struct InputState

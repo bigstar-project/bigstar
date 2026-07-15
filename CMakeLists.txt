@@ -26,6 +26,7 @@ include(CheckSymbolExists)
 include(CheckLibraryExists)
 include(CMakeDependentOption)
 include(CheckIPOSupported)
+include(CTest)
 
 include(SetupCCache)
 include(Sanitizers)

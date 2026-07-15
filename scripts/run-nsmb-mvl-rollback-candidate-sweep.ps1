@@ -40,14 +40,6 @@ New-Item -ItemType Directory -Force $runRoot | Out-Null
 $envKeys = @(
     "MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL",
     "MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE",
-    "MELONDS_NSML_ROLLBACK_NSMB_WIDE_RANGES",
-    "MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES",
-    "MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES",
-    "MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE",
-    "MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES",
-    "MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES",
-    "MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL",
-    "MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL",
     "MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS",
     "MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES",
     "MELONDS_NSML_ROLLBACK_INPUT_WAIT_US",
@@ -129,123 +121,6 @@ $candidates = @(
             MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
             MELONDS_NSML_FPS_SPIKE_TRACE = "1"
         }
-    },
-    [pscustomobject]@{
-        Name = "nsmbtinycore-expanded"
-        Backend = "nsmbtinycore"
-        Env = @{
-            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
-            MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "0x200"
-            MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
-            MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
-            MELONDS_NSML_FPS_SPIKE_TRACE = "1"
-        }
-    },
-    [pscustomobject]@{
-        Name = "nsmbtinycore-proclist-arena-noheap"
-        Backend = "nsmbtinycore"
-        Env = @{
-            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
-            MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
-            MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "0x200"
-            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
-            MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
-            MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
-            MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
-            MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
-            MELONDS_NSML_FPS_SPIKE_TRACE = "1"
-        }
-    },
-    [pscustomobject]@{
-        Name = "nsmbtinycore-wide-proclist-arena-noheap"
-        Backend = "nsmbtinycore"
-        Env = @{
-            MELONDS_NSML_ROLLBACK_NSMB_WIDE_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
-            MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
-            MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "0x200"
-            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
-            MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
-            MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
-            MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
-            MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
-            MELONDS_NSML_FPS_SPIKE_TRACE = "1"
-        }
-    },
-    [pscustomobject]@{
-        Name = "nsmbtinycore-proclist-arena-gpu2d-noheap"
-        Backend = "nsmbtinycore"
-        Env = @{
-            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
-            MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
-            MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "0x241"
-            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
-            MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
-            MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
-            MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
-            MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
-            MELONDS_NSML_FPS_SPIKE_TRACE = "1"
-        }
-    },
-    [pscustomobject]@{
-        Name = "nsmbtinycore-proclist-heap900"
-        Backend = "nsmbtinycore"
-        Env = @{
-            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL = "900"
-            MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
-            MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "0x200"
-            MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
-            MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
-            MELONDS_NSML_FPS_SPIKE_TRACE = "1"
-        }
-    },
-    [pscustomobject]@{
-        Name = "nsmbranges-proclist-arena-gpu2d-noheap"
-        Backend = "nsmbranges"
-        Env = @{
-            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_ACTOR_ARENA_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_ARM9_STACK_RANGE = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "0"
-            MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
-            MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
-            MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
-            MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
-            MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
-            MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
-            MELONDS_NSML_FPS_SPIKE_TRACE = "1"
-        }
-    },
-    [pscustomobject]@{
-        Name = "nsmbcoreranges-proclist-heap900"
-        Backend = "nsmbcoreranges"
-        Env = @{
-            MELONDS_NSML_ROLLBACK_NSMB_DELTA_DISCOVERED_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_PROCESS_LIST_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_RANGES = "1"
-            MELONDS_NSML_ROLLBACK_NSMB_HEAP_SCAN_INTERVAL = "900"
-            MELONDS_NSML_ROLLBACK_NSMB_SCAN_INTERVAL = "30"
-            MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
-            MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "25"
-            MELONDS_NSML_FPS_SPIKE_TRACE = "1"
-        }
     }
 )
 
@@ -288,10 +163,6 @@ foreach ($item in $candidates) {
         SlowFrameThresholdMs = $SlowFrameThresholdMs
         MaxConsecutiveSlowFrames = $MaxConsecutiveSlowFrames
         LogDir = $candidateLogRel
-    }
-    if ($item.Backend -eq "nsmbtinycore" -or $item.Backend -eq "nsmbranges") {
-        $candidateParams.RollbackCheckpointInterval = 1
-        $candidateParams.InputMaxFrameLead = 1
     }
     if ($MaxRollbackFrameMs -gt 0.0) {
         $candidateParams.MaxRollbackFrameMs = $MaxRollbackFrameMs

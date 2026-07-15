@@ -110,7 +110,8 @@ EmuInstance::EmuInstance(int inst) : deleting(false),
         if (parsedTargetFPS > 0.0)
             targetFPS = parsedTargetFPS;
     }
-    if (getenv("MELONDS_NSML_TEST") || getenv("MELONDS_NSML_POC"))
+    if (getenv("MELONDS_NSML_TEST") || getenv("MELONDS_NSML_NETPLAY") ||
+        getenv("MELONDS_NSML_POC"))
         std::printf("NSMB Test: targetFPS %.2f limitFPS=%d\n", targetFPS, doLimitFPS ? 1 : 0);
     curFPS = targetFPS;
 
@@ -1320,7 +1321,8 @@ bool EmuInstance::updateConsole() noexcept
         getenv("MELONDS_NSML_PACKET_CAPTURE_LOG") ||
         (getenv("MELONDS_NSML_PACKET_BRIDGE") && !packetBridgeAllowsJIT))
         jitargs = std::nullopt;
-    if (getenv("MELONDS_NSML_TEST") || getenv("MELONDS_NSML_POC"))
+    if (getenv("MELONDS_NSML_TEST") || getenv("MELONDS_NSML_NETPLAY") ||
+        getenv("MELONDS_NSML_POC"))
     {
         std::printf("NSMB Test: JIT %s packetBridge=%d packetBridgeAllowJit=%d\n",
             jitargs ? "enabled" : "disabled",

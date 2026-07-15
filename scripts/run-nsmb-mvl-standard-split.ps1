@@ -65,26 +65,6 @@ param(
     [int]$ForcePlayerCollectedStars0 = 0,
     [int]$ForcePlayerCollectedStars1 = 0,
     [switch]$NoCameraFallbackRom,
-    [switch]$ForceStageCameraSlot,
-    [switch]$ForceStageCameraSlotVerticalOnly,
-    [int]$ForceStageCameraSlotStartFrame = 850,
-    [int]$ForceStageCameraSlotEndFrame = 1008,
-    [int]$ForceStageCameraSlotSource = 0,
-    [int]$ForceStageCameraSlotDest = 1,
-    [switch]$ForceStageCameraObjectX,
-    [int]$ForceStageCameraObjectXStartFrame = 0,
-    [int]$ForceStageCameraObjectXEndFrame = 0,
-    [string]$ForceStageCameraObjectXValue = "0",
-    [string]$ForceStageCameraObjectZValue = "",
-    [switch]$ForceStageCameraObjectXWriteDisplay,
-    [switch]$ForceStageCameraObjectXWriteSlot,
-    [int]$ForceStageCameraObjectXSlot = 1,
-    [switch]$ForceStageFXSettings,
-    [switch]$ForceStageFXSettingsHostOnly,
-    [switch]$ForceStageFXSettingsClientOnly,
-    [int]$ForceStageFXSettingsStartFrame = 0,
-    [int]$ForceStageFXSettingsEndFrame = 0,
-    [string]$ForceStageFXSettingsValue = "0x8000",
     [switch]$RenderCameraAlias,
     [int]$RenderCameraAliasSourcePlayer = 1,
     [int]$RenderCameraAliasDestPlayer = 0,
@@ -290,48 +270,6 @@ if ($ForcePlayerStarCounters) {
         "-ForcePlayerCollectedStars0", "$ForcePlayerCollectedStars0",
         "-ForcePlayerCollectedStars1", "$ForcePlayerCollectedStars1"
     )
-}
-if ($ForceStageCameraSlot) {
-    $common += @(
-        "-ForceStageCameraSlot",
-        "-ForceStageCameraSlotStartFrame", "$ForceStageCameraSlotStartFrame",
-        "-ForceStageCameraSlotEndFrame", "$ForceStageCameraSlotEndFrame",
-        "-ForceStageCameraSlotSource", "$ForceStageCameraSlotSource",
-        "-ForceStageCameraSlotDest", "$ForceStageCameraSlotDest"
-    )
-    if ($ForceStageCameraSlotVerticalOnly) {
-        $common += "-ForceStageCameraSlotVerticalOnly"
-    }
-}
-if ($ForceStageCameraObjectX) {
-    $common += @(
-        "-ForceStageCameraObjectX",
-        "-ForceStageCameraObjectXStartFrame", "$ForceStageCameraObjectXStartFrame",
-        "-ForceStageCameraObjectXEndFrame", "$ForceStageCameraObjectXEndFrame",
-        "-ForceStageCameraObjectXValue", "$ForceStageCameraObjectXValue",
-        "-ForceStageCameraObjectZValue", "$ForceStageCameraObjectZValue",
-        "-ForceStageCameraObjectXSlot", "$ForceStageCameraObjectXSlot"
-    )
-    if ($ForceStageCameraObjectXWriteDisplay) {
-        $common += "-ForceStageCameraObjectXWriteDisplay"
-    }
-    if ($ForceStageCameraObjectXWriteSlot) {
-        $common += "-ForceStageCameraObjectXWriteSlot"
-    }
-}
-if ($ForceStageFXSettings) {
-    $common += @(
-        "-ForceStageFXSettings",
-        "-ForceStageFXSettingsStartFrame", "$ForceStageFXSettingsStartFrame",
-        "-ForceStageFXSettingsEndFrame", "$ForceStageFXSettingsEndFrame",
-        "-ForceStageFXSettingsValue", "$ForceStageFXSettingsValue"
-    )
-    if ($ForceStageFXSettingsHostOnly) {
-        $common += "-ForceStageFXSettingsHostOnly"
-    }
-    if ($ForceStageFXSettingsClientOnly) {
-        $common += "-ForceStageFXSettingsClientOnly"
-    }
 }
 if ($RenderCameraAlias) {
     $common += @(

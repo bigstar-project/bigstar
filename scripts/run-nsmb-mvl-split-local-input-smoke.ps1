@@ -20,12 +20,6 @@ param(
     [int]$InputDelayFrames = 16,
     [string]$MvlStageSequence = "",
     [string]$MvlMatchSeedSequence = "",
-    [switch]$DirectMvlBootLoadSM,
-    [switch]$DirectMvlBootPatchLoadSMOnly,
-    [switch]$DirectMvlBootCallUpdateSM,
-    [switch]$DirectMvlBootCallStartLoad,
-    [switch]$DirectMvlBootCallCourseSelect,
-    [switch]$DirectMvlBootCallObjectCourseSelect,
     [int]$InputMaxFrameLead = 2,
     [switch]$InputNetplayTrace,
     [int]$InputSendDelayFrames = 0,
@@ -65,19 +59,6 @@ param(
     [int]$StateSyncInterval = 60,
     [switch]$StateSyncExtended,
     [string]$StateApplyMode = "",
-    [switch]$PlayerStateSync,
-    [switch]$PlayerStateApply,
-    [switch]$PlayerStateGlobals,
-    [int]$PlayerStateSyncInterval = 1,
-    [int]$PlayerStateMaxPredictFrames = 2,
-    [switch]$WorldStateSync,
-    [switch]$WorldStateApply,
-    [switch]$WorldStateSpawnItem,
-    [switch]$WorldStateSkipStar,
-    [switch]$WorldStateApplyMovingHazard,
-    [switch]$WorldStateApplyEffects,
-    [switch]$WorldStateApplyActorSnapshot,
-    [switch]$WorldStateSkipEffects,
     [switch]$WorldStateTraceMovingHazards,
     [switch]$WorldStateTraceObjectLifecycles,
     [switch]$WorldStateTraceActorInternals,
@@ -86,10 +67,6 @@ param(
     [int]$WorldStateTraceObjectLifecyclesStartFrame = 0,
     [int]$WorldStateTraceObjectLifecyclesEndFrame = 0,
     [switch]$RequireNoUnexpectedWorldLifecycleDiff,
-    [switch]$WorldStateSkipMovingHazard,
-    [int]$WorldStateSyncInterval = 2,
-    [int]$WorldStateMaxPredictFrames = 1,
-    [int]$WorldStateActorRescanInterval = 0,
     [switch]$SkipGameStateComparison,
     [switch]$SkipMovementProbe,
     [switch]$RequireActorSnapshotMovement,
@@ -99,7 +76,6 @@ param(
     [int]$ActorSnapshotMaxDriftY = -1,
     [int]$ActorSnapshotMaxConsecutiveDriftRows = 0,
     [switch]$RequireWorldSnapshotSync,
-    [switch]$RequireWorldItemSpawn,
     [int]$WorldSnapshotStartFrame = 900,
     [int]$WorldSnapshotMaxStarDriftX = 0,
     [int]$WorldSnapshotMaxStarDriftY = 0,
@@ -157,12 +133,6 @@ param(
     [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
     [int]$ForcePlayerInventoryPowerup0 = 0,
     [int]$ForcePlayerInventoryPowerup1 = 0,
-    [switch]$ForceStageActorFreezeFlag,
-    [switch]$ForceStageActorFreezeFlagHostOnly,
-    [switch]$ForceStageActorFreezeFlagClientOnly,
-    [int]$ForceStageActorFreezeFlagStartFrame = 0,
-    [int]$ForceStageActorFreezeFlagEndFrame = 0,
-    [string]$ForceStageActorFreezeFlagValue = "0",
     [int]$HostStartupDelayMs = 1200,
     [string]$LogDir = "logs\nsmb-mvl-split-local-input-smoke",
     [string]$HostPacketReplayFile = "",
@@ -261,7 +231,6 @@ if ($RollbackInputWaitUs -gt 0) {
 } else {
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_INPUT_WAIT_US -ErrorAction SilentlyContinue
 }
-$isNsmbTinyCoreRollback = $RollbackBackend -eq "nsmbtinycore" -or $RollbackBackend -eq "nsmb-tiny-core"
 $isTinyCorePreimageRollback = $RollbackBackend -eq "tinycorepreimage" -or $RollbackBackend -eq "tiny-core-preimage"
 if ($Rollback -and -not $PSBoundParameters.ContainsKey('RollbackResimulate')) {
     $RollbackResimulate = $true
@@ -271,17 +240,12 @@ if ($RollbackSkipIntermediateResimCheckpoints) {
 } else {
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIM_SKIP_INTERMEDIATE_CHECKPOINTS -ErrorAction SilentlyContinue
 }
-if ($Rollback -and ($isTinyCorePreimageRollback -or $isNsmbTinyCoreRollback)) {
+if ($Rollback -and $isTinyCorePreimageRollback) {
     $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
     $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
     $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
     if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x241" }
     $env:MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "$RollbackTinyCoreFlags"
-} elseif ($Rollback -and $RollbackBackend -match "^(nsmbcoreranges|nsmb-core-ranges)$") {
-    $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
-    Remove-Item Env:\MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET -ErrorAction SilentlyContinue
-    Remove-Item Env:\MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER -ErrorAction SilentlyContinue
-    Remove-Item Env:\MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS -ErrorAction SilentlyContinue
 } else {
     Remove-Item Env:\MELONDS_NSML_SUPPRESS_PU_DEBUG -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET -ErrorAction SilentlyContinue
@@ -377,24 +341,6 @@ if ($MvlStageSequence -ne "") {
 if ($MvlMatchSeedSequence -ne "") {
     $common += @("-MvlMatchSeedSequence", "$MvlMatchSeedSequence")
 }
-if ($DirectMvlBootLoadSM) {
-    $common += "-DirectMvlBootLoadSM"
-}
-if ($DirectMvlBootPatchLoadSMOnly) {
-    $common += "-DirectMvlBootPatchLoadSMOnly"
-}
-if ($DirectMvlBootCallUpdateSM) {
-    $common += "-DirectMvlBootCallUpdateSM"
-}
-if ($DirectMvlBootCallStartLoad) {
-    $common += "-DirectMvlBootCallStartLoad"
-}
-if ($DirectMvlBootCallCourseSelect) {
-    $common += "-DirectMvlBootCallCourseSelect"
-}
-if ($DirectMvlBootCallObjectCourseSelect) {
-    $common += "-DirectMvlBootCallObjectCourseSelect"
-}
 if (-not $UseLanMP) {
     $common += "-NoLanMP"
 }
@@ -449,67 +395,22 @@ if ($StateSync) {
         $common += @("-StateApplyMode", "$StateApplyMode")
     }
 }
-if ($PlayerStateSync) {
-    $common += @(
-        "-PlayerStateSync",
-        "-PlayerStateSyncInterval", "$PlayerStateSyncInterval",
-        "-PlayerStateMaxPredictFrames", "$PlayerStateMaxPredictFrames"
-    )
-    if ($PlayerStateApply) {
-        $common += "-PlayerStateApply"
-    }
-    if ($PlayerStateGlobals) {
-        $common += "-PlayerStateGlobals"
-    }
+if ($WorldStateTraceMovingHazards) {
+    $common += "-WorldStateTraceMovingHazards"
 }
-if ($WorldStateSync) {
+if ($WorldStateTraceObjectLifecycles) {
     $common += @(
-        "-WorldStateSync",
-        "-WorldStateSyncInterval", "$WorldStateSyncInterval",
-        "-WorldStateMaxPredictFrames", "$WorldStateMaxPredictFrames",
-        "-WorldStateActorRescanInterval", "$WorldStateActorRescanInterval"
+        "-WorldStateTraceObjectLifecycles",
+        "-WorldStateTraceObjectLifecyclesInterval", "$WorldStateTraceObjectLifecyclesInterval",
+        "-WorldStateTraceObjectLifecyclesStartFrame", "$WorldStateTraceObjectLifecyclesStartFrame",
+        "-WorldStateTraceObjectLifecyclesEndFrame", "$WorldStateTraceObjectLifecyclesEndFrame"
     )
-    if ($WorldStateApply) {
-        $common += "-WorldStateApply"
-    }
-    if ($WorldStateSpawnItem) {
-        $common += "-WorldStateSpawnItem"
-    }
-    if ($WorldStateSkipStar) {
-        $common += "-WorldStateSkipStar"
-    }
-    if ($WorldStateSkipMovingHazard) {
-        $common += "-WorldStateSkipMovingHazard"
-    }
-    if ($WorldStateApplyMovingHazard) {
-        $common += "-WorldStateApplyMovingHazard"
-    }
-    if ($WorldStateApplyEffects) {
-        $common += "-WorldStateApplyEffects"
-    }
-    if ($WorldStateApplyActorSnapshot) {
-        $common += "-WorldStateApplyActorSnapshot"
-    }
-    if ($WorldStateSkipEffects) {
-        $common += "-WorldStateSkipEffects"
-    }
-    if ($WorldStateTraceMovingHazards) {
-        $common += "-WorldStateTraceMovingHazards"
-    }
-    if ($WorldStateTraceObjectLifecycles) {
-        $common += @(
-            "-WorldStateTraceObjectLifecycles",
-            "-WorldStateTraceObjectLifecyclesInterval", "$WorldStateTraceObjectLifecyclesInterval",
-            "-WorldStateTraceObjectLifecyclesStartFrame", "$WorldStateTraceObjectLifecyclesStartFrame",
-            "-WorldStateTraceObjectLifecyclesEndFrame", "$WorldStateTraceObjectLifecyclesEndFrame"
-        )
-    }
-    if ($WorldStateTraceActorInternals) {
-        $common += "-WorldStateTraceActorInternals"
-    }
-    if ($WorldStateTraceEffects) {
-        $common += "-WorldStateTraceEffects"
-    }
+}
+if ($WorldStateTraceActorInternals) {
+    $common += "-WorldStateTraceActorInternals"
+}
+if ($WorldStateTraceEffects) {
+    $common += "-WorldStateTraceEffects"
 }
 if ($AllowJit) {
     $common += "-AllowJit"
@@ -528,20 +429,6 @@ if ($NoDrawScreen) {
 }
 if ($NoAudioSync) {
     $common += "-NoAudioSync"
-}
-if ($ForceStageActorFreezeFlag) {
-    $common += @(
-        "-ForceStageActorFreezeFlag",
-        "-ForceStageActorFreezeFlagStartFrame", "$ForceStageActorFreezeFlagStartFrame",
-        "-ForceStageActorFreezeFlagEndFrame", "$ForceStageActorFreezeFlagEndFrame",
-        "-ForceStageActorFreezeFlagValue", "$ForceStageActorFreezeFlagValue"
-    )
-    if ($ForceStageActorFreezeFlagHostOnly) {
-        $common += "-ForceStageActorFreezeFlagHostOnly"
-    }
-    if ($ForceStageActorFreezeFlagClientOnly) {
-        $common += "-ForceStageActorFreezeFlagClientOnly"
-    }
 }
 if ($InputNetplayTrace) {
     $common += "-InputNetplayTrace"
@@ -935,18 +822,6 @@ if ($MaxActiveFrameMs -gt 0.0 -or $MaxActiveFrameOver25ms -ge 0 -or $MaxActiveFr
 if ($MinRollbackResims -ge 0) {
     Assert-RollbackResimCount -Role "host" -Text $hostMelonText
     Assert-RollbackResimCount -Role "client" -Text $clientMelonText
-}
-
-if ($RequireWorldItemSpawn) {
-    $spawnLines = @($clientMelonText -split "`r?`n" | Where-Object { $_ -match "^NSMB WorldItem: spawn " })
-    $activeLines = @($clientMelonText -split "`r?`n" | Where-Object { $_ -match "^NSMB WorldItem: active " })
-    if ($spawnLines.Count -eq 0) {
-        throw "client world item spawn check failed: no spawn log"
-    }
-    if ($activeLines.Count -eq 0) {
-        throw "client world item spawn check failed: no active confirmation log"
-    }
-    Write-Host "client world item spawn check passed: spawnLogs=$($spawnLines.Count) activeLogs=$($activeLines.Count)"
 }
 
 function Convert-TraceHexToInt64 {

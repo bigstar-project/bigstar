@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
+#include <limits>
 
 namespace NsmbRuleAI
 {
@@ -57,7 +59,7 @@ std::string Upper(std::string value)
     return value;
 }
 
-void PressButton(NsmbNetplayPoC::InputState& input, int bit)
+void PressButton(NsmbMvlNetplay::InputState& input, int bit)
 {
     if (bit >= 0 && bit < 12)
         input.KeyMask &= ~(1u << bit);
@@ -83,6 +85,22 @@ std::int64_t SignedCoordinate(melonDS::u32 value)
     return static_cast<std::int64_t>(static_cast<std::int32_t>(value));
 }
 
+std::int64_t WrappedHorizontalDelta(int horizontalWrapWidth, melonDS::u32 target, melonDS::u32 self)
+{
+    std::int64_t dx = SignedCoordinate(target) - SignedCoordinate(self);
+    const std::int64_t wrapWidth = horizontalWrapWidth;
+    if (wrapWidth <= 0)
+        return dx;
+
+    const std::int64_t halfWidth = wrapWidth / 2;
+    dx %= wrapWidth;
+    if (dx > halfWidth)
+        dx -= wrapWidth;
+    else if (dx < -halfWidth)
+        dx += wrapWidth;
+    return dx;
+}
+
 std::int32_t CoordinateDelta(melonDS::u32 target, melonDS::u32 self)
 {
     return static_cast<std::int32_t>(
@@ -91,18 +109,301 @@ std::int32_t CoordinateDelta(melonDS::u32 target, melonDS::u32 self)
 
 std::int32_t HorizontalDelta(const Config& config, melonDS::u32 target, melonDS::u32 self)
 {
-    std::int64_t dx = SignedCoordinate(target) - SignedCoordinate(self);
-    const std::int64_t wrapWidth = config.HorizontalWrapWidth;
-    if (wrapWidth > 0)
+    return static_cast<std::int32_t>(
+        WrappedHorizontalDelta(config.HorizontalWrapWidth, target, self));
+}
+
+bool IsRuntimeHazardCategory(const char* category)
+{
+    return std::strcmp(category, "moving_hazard") == 0 || std::strcmp(category, "hazard") == 0 ||
+           std::strcmp(category, "enemy_goomba") == 0 || std::strcmp(category, "enemy_koopa") == 0;
+}
+
+int RuntimeHazardCategoryID(const char* category)
+{
+    if (std::strcmp(category, "moving_hazard") == 0)
+        return 1;
+    if (std::strcmp(category, "hazard") == 0)
+        return 2;
+    if (std::strcmp(category, "enemy_goomba") == 0)
+        return 3;
+    if (std::strcmp(category, "enemy_koopa") == 0)
+        return 4;
+    return 0;
+}
+
+const char* ObjectCategory(ObjectCategoryFunction objectCategory, melonDS::u16 objectID,
+                           melonDS::u32 settings)
+{
+    return objectCategory ? objectCategory(objectID, settings) : "";
+}
+
+RuntimeHazardThreat FindRuntimeHazard(
+    const RuntimeHazardConfig& config,
+    const NsmbMvlNetplay::GameStateReader::GameStateObjectScanCache& objectScanCache,
+    melonDS::u32 selfX, melonDS::u32 selfY, melonDS::u32 selfVelX,
+    ObjectCategoryFunction objectCategory)
+{
+    RuntimeHazardThreat best {};
+    std::int64_t bestScore = 0;
+    auto abs64 = [](std::int64_t value) { return value < 0 ? -value : value; };
+
+    const std::int64_t selfVx = SignedCoordinate(selfVelX);
+    for (const auto& entry : objectScanCache.Entries)
     {
-        const std::int64_t halfWidth = wrapWidth / 2;
-        dx %= wrapWidth;
-        if (dx > halfWidth)
-            dx -= wrapWidth;
-        else if (dx < -halfWidth)
-            dx += wrapWidth;
+        if (entry.LifecycleState != 1)
+            continue;
+        const char* category = ObjectCategory(objectCategory, entry.ObjectID, entry.Actor.Settings);
+        if (!IsRuntimeHazardCategory(category))
+            continue;
+
+        const std::int64_t dx =
+            WrappedHorizontalDelta(config.HorizontalWrapWidth, entry.Actor.PosX, selfX);
+        const std::int64_t dy = SignedCoordinate(entry.Actor.PosY) - SignedCoordinate(selfY);
+        if (abs64(dx) > config.HorizontalRange || abs64(dy) > config.VerticalRange)
+        {
+            continue;
+        }
+
+        const std::int64_t hazardVx = SignedCoordinate(entry.Actor.VelX);
+        const std::int64_t relVx = hazardVx - selfVx;
+        const bool closing = (dx < 0 && relVx > 0) || (dx > 0 && relVx < 0);
+        const bool veryClose = abs64(dx) <= config.CloseRange || abs64(dy) <= 0x10000;
+        std::int64_t score = abs64(dx) + abs64(dy) * 2;
+        if (closing)
+            score -= config.HorizontalRange;
+        if (veryClose)
+            score -= config.CloseRange;
+
+        if (!best.Found || score < bestScore)
+        {
+            best.Found = true;
+            best.Closing = closing;
+            best.VeryClose = veryClose;
+            best.Dx = dx;
+            best.Dy = dy;
+            best.VelX = hazardVx;
+            best.VelY = SignedCoordinate(entry.Actor.VelY);
+            best.CategoryID = RuntimeHazardCategoryID(category);
+            best.ObjectID = entry.ObjectID;
+            best.Settings = entry.Actor.Settings;
+            bestScore = score;
+        }
     }
-    return static_cast<std::int32_t>(dx);
+    return best;
+}
+
+NsmbMvlNetplay::GameStateReader::ObjectScanSample NearestDroppedBattleStar(
+    const Config& config,
+    const NsmbMvlNetplay::GameStateReader::GameStateObjectScanCache& objectScanCache,
+    melonDS::u32 selfX, melonDS::u32 selfY, const FrameStateServices& services)
+{
+    NsmbMvlNetplay::GameStateReader::ObjectScanSample best {};
+    std::int64_t bestScore = 0;
+    for (const auto& entry : objectScanCache.Entries)
+    {
+        if (entry.LifecycleState != 1)
+            continue;
+        const char* category =
+            ObjectCategory(services.ObjectCategory, entry.ObjectID, entry.Actor.Settings);
+        if (std::strcmp(category, "dropped_star_item") != 0)
+            continue;
+        const std::int64_t dx =
+            WrappedHorizontalDelta(config.HorizontalWrapWidth, entry.Actor.PosX, selfX);
+        const std::int64_t dy = SignedCoordinate(entry.Actor.PosY) - SignedCoordinate(selfY);
+        const std::int64_t score = dx * dx + dy * dy;
+        if (!best.Found || score < bestScore)
+        {
+            best = entry.Actor;
+            bestScore = score;
+        }
+    }
+    return best;
+}
+
+bool PlayerContactGround(melonDS::u32 collisionFlag)
+{
+    return (collisionFlag & (0x00000001u | 0x00002000u | 0x00008000u | 0x08000000u)) != 0;
+}
+
+void FillProbeSummary(PlayerFrameState& out,
+                      const NsmbMvlNetplay::GameStateModel::AIPlayerTileProbeSample& probe,
+                      melonDS::u32 collisionFlag, const FrameStateServices& services)
+{
+    const bool contactGround = PlayerContactGround(collisionFlag);
+    const bool contactWallLeft = (collisionFlag & (0x00000008u | 0x00000400u | 0x20000000u)) != 0;
+    const bool contactWallRight = (collisionFlag & (0x00000010u | 0x00000800u | 0x40000000u)) != 0;
+    const auto summary =
+        services.DeriveTerrainSummary
+            ? services.DeriveTerrainSummary(probe, contactGround, contactWallLeft, contactWallRight)
+            : NsmbMvlNetplay::GameStateModel::AITerrainDerivedSummary {};
+    out.GroundBelowSolid = summary.EffectiveGroundBelowSolid != 0;
+    out.BlockedAhead = summary.BlockedAhead != 0;
+    out.HoleAhead = summary.EffectiveHoleAhead != 0;
+    out.BlockedLeft = summary.BlockedLeft != 0;
+    out.HoleLeft = summary.EffectiveHoleLeft != 0;
+    out.FarHoleLeft = summary.FarHoleLeft != 0;
+    out.BlockedRight = summary.BlockedRight != 0;
+    out.HoleRight = summary.EffectiveHoleRight != 0;
+    out.FarHoleRight = summary.FarHoleRight != 0;
+}
+
+bool TargetHasFloorBelow(const FrameStateServices& services,
+                         const NsmbMvlNetplay::GameStateModel::AIPlayerTileProbeSample& probe,
+                         melonDS::u32 selfX, melonDS::u32 selfY, melonDS::u32 targetX,
+                         melonDS::u32 targetY)
+{
+    return !services.TargetHasFloorBelow ||
+           services.TargetHasFloorBelow(probe, selfX, selfY, targetX, targetY);
+}
+
+void FillHazard(PlayerFrameState& out, const Config& config,
+                const NsmbMvlNetplay::GameStateModel::GameStateSample& sample,
+                const NsmbMvlNetplay::GameStateReader::GameStateObjectScanCache& objectScanCache,
+                int player, melonDS::u32 x, melonDS::u32 y, melonDS::u32 vx,
+                const FrameStateServices& services)
+{
+    const std::int64_t closeRange =
+        std::max<std::int64_t>(0x10000, (config.HazardHorizontalRange * 3) / 4);
+    RuntimeHazardThreat best = FindRuntimeHazard(
+        RuntimeHazardConfig {config.HorizontalWrapWidth, config.HazardHorizontalRange,
+                             config.HazardVerticalRange, closeRange},
+        objectScanCache, x, y, vx, services.ObjectCategory);
+    auto abs64 = [](std::int64_t value) { return value < 0 ? -value : value; };
+    auto scoreThreat = [&abs64, &config, closeRange](const RuntimeHazardThreat& candidate) {
+        std::int64_t score = abs64(candidate.Dx) + abs64(candidate.Dy) * 2;
+        if (candidate.Closing)
+            score -= config.HazardHorizontalRange;
+        if (candidate.VeryClose)
+            score -= closeRange;
+        return score;
+    };
+    std::int64_t bestScore = best.Found ? scoreThreat(best) : 0;
+    const std::int64_t selfVx = SignedCoordinate(vx);
+    for (int slot = 0; slot < NsmbMvlNetplay::GameStateModel::kAIFireballSlotCount; slot++)
+    {
+        if (sample.FireballSlotActive[slot] == 0)
+            continue;
+        if (sample.FireballSlotKind[slot] == static_cast<melonDS::u32>(player))
+            continue;
+        const std::int64_t dx =
+            WrappedHorizontalDelta(config.HorizontalWrapWidth, sample.FireballSlotPosX[slot], x);
+        const std::int64_t dy =
+            SignedCoordinate(sample.FireballSlotPosY[slot]) - SignedCoordinate(y);
+        if (abs64(dx) > config.HazardHorizontalRange || abs64(dy) > config.HazardVerticalRange)
+        {
+            continue;
+        }
+        const std::int64_t fireVx = SignedCoordinate(sample.FireballSlotVelX[slot]);
+        const std::int64_t relVx = fireVx - selfVx;
+        RuntimeHazardThreat candidate {};
+        candidate.Found = true;
+        candidate.Closing = (dx < 0 && relVx > 0) || (dx > 0 && relVx < 0);
+        candidate.VeryClose = abs64(dx) <= closeRange || abs64(dy) <= 0x10000;
+        candidate.Dx = dx;
+        candidate.Dy = dy;
+        candidate.VelX = fireVx;
+        candidate.VelY = SignedCoordinate(sample.FireballSlotVelY[slot]);
+        const std::int64_t score = scoreThreat(candidate);
+        if (!best.Found || score < bestScore)
+        {
+            best = candidate;
+            bestScore = score;
+        }
+    }
+    out.HazardFound = best.Found;
+    out.HazardClosing = best.Closing;
+    out.HazardVeryClose = best.VeryClose;
+    out.HazardDx = static_cast<std::int32_t>(
+        std::clamp<std::int64_t>(best.Dx, std::numeric_limits<std::int32_t>::min(),
+                                 std::numeric_limits<std::int32_t>::max()));
+    out.HazardDy = static_cast<std::int32_t>(
+        std::clamp<std::int64_t>(best.Dy, std::numeric_limits<std::int32_t>::min(),
+                                 std::numeric_limits<std::int32_t>::max()));
+    out.HazardVelX = static_cast<std::int32_t>(
+        std::clamp<std::int64_t>(best.VelX, std::numeric_limits<std::int32_t>::min(),
+                                 std::numeric_limits<std::int32_t>::max()));
+    out.HazardVelY = static_cast<std::int32_t>(
+        std::clamp<std::int64_t>(best.VelY, std::numeric_limits<std::int32_t>::min(),
+                                 std::numeric_limits<std::int32_t>::max()));
+    out.HazardCategoryID = best.CategoryID;
+}
+
+FrameState BuildFrameState(
+    const Config& config, const NsmbMvlNetplay::GameStateModel::GameStateSample& sample,
+    const NsmbMvlNetplay::GameStateReader::GameStateObjectScanCache& objectScanCache,
+    bool inGameplay, const FrameStateServices& services)
+{
+    FrameState state {};
+    state.InGameplay = inGameplay;
+    state.Players[0].Found = sample.PlayerActor0Found != 0;
+    state.Players[0].X = sample.PlayerActor0PosX;
+    state.Players[0].Y = sample.PlayerActor0PosY;
+    state.Players[0].VelX = static_cast<std::int32_t>(sample.PlayerActor0VelX);
+    state.Players[0].Dead = sample.Player0Dead != 0;
+    state.Players[0].BattleStars = sample.Player0BattleStars;
+    FillProbeSummary(state.Players[0], sample.PlayerActor0TileProbe,
+                     sample.PlayerActor0CollisionFlag, services);
+    FillHazard(state.Players[0], config, sample, objectScanCache, 0, sample.PlayerActor0PosX,
+               sample.PlayerActor0PosY, sample.PlayerActor0VelX, services);
+    state.Players[1].Found = sample.PlayerActor1Found != 0;
+    state.Players[1].X = sample.PlayerActor1PosX;
+    state.Players[1].Y = sample.PlayerActor1PosY;
+    state.Players[1].VelX = static_cast<std::int32_t>(sample.PlayerActor1VelX);
+    state.Players[1].Dead = sample.Player1Dead != 0;
+    state.Players[1].BattleStars = sample.Player1BattleStars;
+    FillProbeSummary(state.Players[1], sample.PlayerActor1TileProbe,
+                     sample.PlayerActor1CollisionFlag, services);
+    FillHazard(state.Players[1], config, sample, objectScanCache, 1, sample.PlayerActor1PosX,
+               sample.PlayerActor1PosY, sample.PlayerActor1VelX, services);
+    state.StarFound = sample.VsStarFound != 0;
+    state.StarX = sample.VsStarPosX;
+    state.StarY = sample.VsStarPosY;
+    state.StarActorFound = sample.VsStarActorFound != 0;
+    state.StarActorX = sample.VsStarActorPosX;
+    state.StarActorY = sample.VsStarActorPosY;
+    state.Players[0].StarActorFloorSupported =
+        !state.StarActorFound ||
+        TargetHasFloorBelow(services, sample.PlayerActor0TileProbe, sample.PlayerActor0PosX,
+                            sample.PlayerActor0PosY, state.StarActorX, state.StarActorY);
+    state.Players[1].StarActorFloorSupported =
+        !state.StarActorFound ||
+        TargetHasFloorBelow(services, sample.PlayerActor1TileProbe, sample.PlayerActor1PosX,
+                            sample.PlayerActor1PosY, state.StarActorX, state.StarActorY);
+    state.Players[0].StarCandidateFloorSupported =
+        !state.StarFound ||
+        TargetHasFloorBelow(services, sample.PlayerActor0TileProbe, sample.PlayerActor0PosX,
+                            sample.PlayerActor0PosY, state.StarX, state.StarY);
+    state.Players[1].StarCandidateFloorSupported =
+        !state.StarFound ||
+        TargetHasFloorBelow(services, sample.PlayerActor1TileProbe, sample.PlayerActor1PosX,
+                            sample.PlayerActor1PosY, state.StarX, state.StarY);
+    const auto droppedStar0 = NearestDroppedBattleStar(
+        config, objectScanCache, sample.PlayerActor0PosX, sample.PlayerActor0PosY, services);
+    const auto droppedStar1 = NearestDroppedBattleStar(
+        config, objectScanCache, sample.PlayerActor1PosX, sample.PlayerActor1PosY, services);
+    state.Players[0].DroppedStarFound = droppedStar0.Found != 0;
+    state.Players[0].DroppedStarX = droppedStar0.PosX;
+    state.Players[0].DroppedStarY = droppedStar0.PosY;
+    state.Players[0].DroppedStarFloorSupported =
+        !state.Players[0].DroppedStarFound ||
+        TargetHasFloorBelow(services, sample.PlayerActor0TileProbe, sample.PlayerActor0PosX,
+                            sample.PlayerActor0PosY, state.Players[0].DroppedStarX,
+                            state.Players[0].DroppedStarY);
+    state.Players[1].DroppedStarFound = droppedStar1.Found != 0;
+    state.Players[1].DroppedStarX = droppedStar1.PosX;
+    state.Players[1].DroppedStarY = droppedStar1.PosY;
+    state.Players[1].DroppedStarFloorSupported =
+        !state.Players[1].DroppedStarFound ||
+        TargetHasFloorBelow(services, sample.PlayerActor1TileProbe, sample.PlayerActor1PosX,
+                            sample.PlayerActor1PosY, state.Players[1].DroppedStarX,
+                            state.Players[1].DroppedStarY);
+    state.MovingHazardFound = sample.MovingHazardFound != 0;
+    state.MovingHazardX = sample.MovingHazardPosX;
+    state.MovingHazardY = sample.MovingHazardPosY;
+    state.MovingHazardVelX = sample.MovingHazardVelX;
+    state.MovingHazardVelY = sample.MovingHazardVelY;
+    return state;
 }
 
 int SignWithDeadzone(std::int32_t value, int deadzone)
@@ -178,9 +479,9 @@ StarSafety EvaluateStarSafety(
     return safety;
 }
 
-NsmbNetplayPoC::InputState NeutralInputPreservingTouch(const NsmbNetplayPoC::InputState& source)
+NsmbMvlNetplay::InputState NeutralInputPreservingTouch(const NsmbMvlNetplay::InputState& source)
 {
-    NsmbNetplayPoC::InputState input {};
+    NsmbMvlNetplay::InputState input {};
     input.KeyMask = 0xFFF;
     input.Touching = source.Touching;
     input.TouchX = source.TouchX;
@@ -188,14 +489,14 @@ NsmbNetplayPoC::InputState NeutralInputPreservingTouch(const NsmbNetplayPoC::Inp
     return input;
 }
 
-NsmbNetplayPoC::InputState DecideInput(
+NsmbMvlNetplay::InputState DecideInput(
     const Config& config,
     const FrameState& state,
     int instanceID,
     melonDS::u32 frame,
     int player,
     int localPlayer,
-    const NsmbNetplayPoC::InputState& fallback)
+    const NsmbMvlNetplay::InputState& fallback)
 {
     if (!ControlsPlayer(config, player, localPlayer) || frame < config.StartFrame)
         return fallback;
@@ -619,7 +920,7 @@ NsmbNetplayPoC::InputState DecideInput(
         mode = horizontalIntent == 0 ? "airHold" : "airRecover";
     }
 
-    NsmbNetplayPoC::InputState input = NeutralInputPreservingTouch(fallback);
+    NsmbMvlNetplay::InputState input = NeutralInputPreservingTouch(fallback);
     if (horizontalIntent > 0)
         PressButton(input, kButtonRight);
     else if (horizontalIntent < 0)

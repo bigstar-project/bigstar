@@ -15,8 +15,8 @@ param(
     [int]$RamDumpInterval = 0,
     [string]$StateSaveDir = "",
     [int]$StateSaveFrame = 0,
-    [int]$VsStarSnapFrame = 0,
-    [int]$VsStarSnapPlayerSlot = 0,
+    [string]$StateLoadDir = "",
+    [int]$StateLoadFrame = -1,
     [switch]$AllowJit,
     [switch]$NoFrameLimit,
     [switch]$NoScreenshots,
@@ -26,8 +26,6 @@ param(
     [switch]$QuietLog,
     [int]$ActiveFpsStartFrame = 0,
     [switch]$Visible,
-    [int]$PlayerSnapToStarFrame = 0,
-    [int]$PlayerSnapToStarSlot = 0,
     [int]$PlayerStickToStarStartFrame = 0,
     [int]$PlayerStickToStarEndFrame = 0,
     [int]$PlayerStickToStarSlot = 0,
@@ -46,6 +44,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($FrameBarrier -and $SerialRun) {
+    throw "FrameBarrier and SerialRun are mutually exclusive: frame barrier requires both instances at the same frame, while serial run completes one instance before advancing the other."
+}
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
@@ -79,6 +81,7 @@ foreach ($suffix in @(".sav", ".sav.2")) {
 }
 
 foreach ($name in @(
+    "MELONDS_NSML_NETPLAY",
     "MELONDS_NSML_POC",
     "MELONDS_NSML_ROLE",
     "MELONDS_NSML_PEER",
@@ -103,8 +106,6 @@ foreach ($name in @(
     "MELONDS_NSML_STATE_LOAD_FRAME",
     "MELONDS_NSML_STATE_SAVE_DIR",
     "MELONDS_NSML_STATE_SAVE_FRAME",
-    "MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME",
-    "MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT",
     "MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME",
     "MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME",
     "MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT",
@@ -120,17 +121,6 @@ foreach ($name in @(
     "MELONDS_NSML_WRITE_TRACE_START_FRAME",
     "MELONDS_NSML_WRITE_TRACE_END_FRAME",
     "MELONDS_NSML_BAD_JUMP_TRACE",
-    "MELONDS_NSML_DIRECT_MVL_BOOT",
-    "MELONDS_NSML_DIRECT_MVL_BOOT_FRAME",
-    "MELONDS_NSML_DIRECT_MVL_BOOT_SCENE",
-    "MELONDS_NSML_DIRECT_MVL_BOOT_STAGE",
-    "MELONDS_NSML_DIRECT_MVL_BOOT_PLAYER_ID",
-    "MELONDS_NSML_DIRECT_MVL_BOOT_LOAD_SM",
-    "MELONDS_NSML_DIRECT_MVL_BOOT_PATCH_LOAD_SM_ONLY",
-    "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_UPDATE_SM",
-    "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_START_LOAD",
-    "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_COURSE_SELECT",
-    "MELONDS_NSML_DIRECT_MVL_BOOT_CALL_OBJECT_COURSE_SELECT",
     "MELONDS_NSML_DISABLE_JIT",
     "MELONDS_NSML_ALLOW_JIT",
     "MELONDS_NSML_DISABLE_HASH",
@@ -248,19 +238,16 @@ if ($StateSaveDir -and $StateSaveFrame -gt 0) {
     Remove-Item Env:\MELONDS_NSML_STATE_SAVE_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_STATE_SAVE_FRAME -ErrorAction SilentlyContinue
 }
-if ($VsStarSnapFrame -gt 0) {
-    $env:MELONDS_NSML_VS_STAR_SNAP_FRAME = "$VsStarSnapFrame"
-    $env:MELONDS_NSML_VS_STAR_SNAP_PLAYER_SLOT = "$VsStarSnapPlayerSlot"
+if ($StateLoadDir) {
+    $env:MELONDS_NSML_STATE_LOAD_DIR = (Resolve-Path $StateLoadDir).Path
+    if ($StateLoadFrame -lt 0) {
+        $env:MELONDS_NSML_STATE_LOAD_FRAME = "0"
+    } else {
+        $env:MELONDS_NSML_STATE_LOAD_FRAME = "$StateLoadFrame"
+    }
 } else {
-    Remove-Item Env:\MELONDS_NSML_VS_STAR_SNAP_FRAME -ErrorAction SilentlyContinue
-    Remove-Item Env:\MELONDS_NSML_VS_STAR_SNAP_PLAYER_SLOT -ErrorAction SilentlyContinue
-}
-if ($PlayerSnapToStarFrame -gt 0) {
-    $env:MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME = "$PlayerSnapToStarFrame"
-    $env:MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT = "$PlayerSnapToStarSlot"
-} else {
-    Remove-Item Env:\MELONDS_NSML_PLAYER_SNAP_TO_STAR_FRAME -ErrorAction SilentlyContinue
-    Remove-Item Env:\MELONDS_NSML_PLAYER_SNAP_TO_STAR_SLOT -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_STATE_LOAD_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_STATE_LOAD_FRAME -ErrorAction SilentlyContinue
 }
 if ($PlayerStickToStarStartFrame -gt 0) {
     $env:MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME = "$PlayerStickToStarStartFrame"
