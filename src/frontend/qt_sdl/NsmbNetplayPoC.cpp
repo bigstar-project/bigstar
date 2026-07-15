@@ -141,14 +141,12 @@ using GameStateReader::FindObjectByIDAndSettingsLoose;
 using GameStateReader::FindObjectPairByIDSortedX;
 using GameStateReader::FindPlayerActors;
 using GameStateReader::FindVsBattleStarCandidate;
-using GameStateReader::GetPlayerActorCached;
 using GameStateReader::HasActiveObjectScanCache;
 using GameStateReader::HashFramebuffers;
 using GameStateReader::HashMainRAMRange;
 using GameStateReader::HashNDS;
 using GameStateReader::ReadObjectByBase;
 using GameStateReader::ReadAIPlayerTileProbeSample;
-using GameStateReader::ReadPlayerActorByBase;
 using GameStateReader::ReadPlayerCollisionMgrSample;
 using GameStateReader::ReadPlayerHitboxSample;
 using GameStateReader::SummarizeObjectLifecycle;
@@ -189,49 +187,26 @@ constexpr melonDS::u32 kNetRandomCallCountAddr = 0x02088A48;
 constexpr melonDS::u32 kNetRandomValueAddr = 0x02088A68;
 constexpr melonDS::u32 kGameRandomCallCountAddr = 0x02085A54;
 constexpr melonDS::u32 kGameRandomValueAddr = 0x02085A70;
-constexpr melonDS::u32 kInputConsoleKeysAddr = 0x02087650;
-constexpr melonDS::u32 kInputPlayerKeysHeldAddr = 0x02087660;
 constexpr melonDS::u32 kInputKeyXMask = 1u << 10;
 constexpr melonDS::u16 kMvlStockItemTouchX = 217;
 constexpr melonDS::u16 kMvlStockItemTouchY = 153;
-constexpr melonDS::u32 kStageActorFreezeFlagAddr = 0x020CA28C;
 constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208B324;
 constexpr melonDS::u32 kGamePlayerPowerupAddr = 0x0208B324;
 constexpr melonDS::u32 kGamePlayerDeadAddr = 0x0208B328;
 constexpr melonDS::u32 kGamePlayerInventoryPowerupAddr = 0x0208B32C;
-constexpr melonDS::u32 kGamePlayerCharacterAddr = 0x0208B330;
 constexpr melonDS::u32 kGamePlayerTransitionStatusAddr = 0x0208B354; // Game::playerVSPipeState
-constexpr melonDS::u32 kGamePlayerCountAddr = 0x0208B348;
 constexpr melonDS::u32 kGamePlayerLivesAddr = 0x0208B364;
 constexpr melonDS::u32 kGamePlayerBattleStarsAddr = 0x0208B36C;
-constexpr melonDS::u32 kGamePlayerCoinsAddr = 0x0208B37C;
-constexpr melonDS::u32 kGamePlayerScoreAddr = 0x0208B384;
 constexpr melonDS::u32 kGamePlayerDisplayedStarsAddr = 0x0208B38C;
 constexpr melonDS::u32 kGamePlayerDeathsAddr = 0x0208B394;
 constexpr melonDS::u32 kGamePlayerCollectedStarsAddr = 0x0208B39C;
 constexpr melonDS::u32 kGameCandidateWifiBlockAddr = 0x0208B7A0;
 constexpr melonDS::u32 kGameCandidateRenderBlockAddr = 0x023F8300;
 constexpr melonDS::u16 kPlayerObjectID = 0x0015;
-constexpr melonDS::u32 kPlayerBaseActionFlagOffset = 0x778;
-constexpr melonDS::u32 kPlayerBaseSubActionFlagOffset = 0x77C;
-constexpr melonDS::u32 kPlayerBasePhysicsFlagOffset = 0x780;
-constexpr melonDS::u32 kPlayerBaseTransitionFlagOffset = 0x784;
-constexpr melonDS::u32 kPlayerBaseCollisionFlagOffset = 0x788;
-constexpr melonDS::u32 kPlayerBaseEnvironmentFlagOffset = 0x790;
-constexpr melonDS::u32 kPlayerBaseDamageCooldownOffset = 0x79C;
-constexpr melonDS::u32 kPlayerBaseUpdateLockedOffset = 0x7A8;
 constexpr melonDS::u32 kPlayerActorPlayerIDOffset = 0x11E;
-constexpr melonDS::u32 kPlayerBaseCharacterIDOffset = 0x7AA;
 constexpr melonDS::u32 kPlayerBasePowerupStateOffset = 0x7AB;
 constexpr melonDS::u32 kPlayerBasePowerupFormStateOffset = 0x7AC;
 constexpr melonDS::u32 kPlayerBasePowerupSubStateOffset = 0x7AD;
-constexpr melonDS::u32 kPlayerBaseTransitioningFlagOffset = 0x7B0;
-constexpr melonDS::u32 kPlayerBaseCameraFocusModeOffset = 0x7B2;
-constexpr melonDS::u32 kPlayerBaseDefeatedFlagOffset = 0x7B3;
-constexpr melonDS::u32 kPlayerBasePlayerIDOffset = 0x7B4;
-constexpr melonDS::u32 kPlayerBaseVisibleFlagOffset = 0x7B5;
-constexpr melonDS::u32 kPlayerBaseTransitionStepOffset = 0xBAD;
-constexpr melonDS::u32 kPlayerBaseLinkedActorOffset = 0x688;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
 constexpr melonDS::u16 kVsBattleStarRelatedObjectID = 0x0021;
@@ -296,10 +271,6 @@ constexpr melonDS::u16 kThwompAltObjectID = 0x0026;
 constexpr melonDS::u16 kFirebarObjectID = 0x0041;
 constexpr melonDS::u16 kBobOmbObjectID = 0x0023;
 constexpr melonDS::u16 kItemSpawnEffectObjectID = 0x00F0;
-constexpr melonDS::u32 kStageCameraXAddr = 0x020CAE1C;
-constexpr melonDS::u32 kStageCameraYAddr = 0x020CAD94;
-constexpr melonDS::u32 kStageCameraWidthAddr = 0x020CADA4;
-constexpr melonDS::u32 kStageCameraHeightAddr = 0x020CAD8C;
 constexpr melonDS::u32 kA2DJGameLoadLevelAddr = 0x020068A8;
 constexpr melonDS::u32 kA2DEActorSpawnActorAddr = 0x020A0B64;
 constexpr melonDS::u32 kDirectBootTrampolineAddr = 0x023C0000;
@@ -4029,78 +4000,6 @@ void EmitDiagnosticPositionAnomalyEvent(
     WriteDiagnosticEventLocked(json.str());
 }
 
-void ReadDiagnosticPlayerSnapshot(
-    int instanceID,
-    melonDS::u32 frame,
-    melonDS::NDS* nds,
-    int player,
-    DiagnosticPlayerSnapshot& out)
-{
-    out = {};
-    if (!nds || !nds->MainRAM || player < 0 || player > 1)
-        return;
-
-    ObjectScanSample actor;
-    const melonDS::u32 cachedBase = G.GameSync.PlayerActorBaseCache[instanceID][player];
-    const melonDS::u32 cachedGUID = G.GameSync.PlayerActorGUIDCache[instanceID][player];
-    if (cachedBase != 0)
-        ReadPlayerActorByBase(nds, cachedBase, cachedGUID, actor);
-    if (!actor.Found && (frame % 60) == 0)
-        actor = GetPlayerActorCached(instanceID, player, nds, G.GameSync);
-
-    out.Found = actor.Found;
-    out.Base = actor.Base;
-    out.GUID = actor.GUID;
-    out.Settings = actor.Settings;
-    out.StateType = actor.StateType;
-    out.Flags = actor.Flags;
-    out.PosX = actor.PosX;
-    out.PosY = actor.PosY;
-    out.PosZ = actor.PosZ;
-    out.PrevX = actor.PrevX;
-    out.PrevY = actor.PrevY;
-    out.PrevZ = actor.PrevZ;
-    out.VelX = actor.VelX;
-    out.VelY = actor.VelY;
-    out.VelZ = actor.VelZ;
-
-    if (actor.Found && IsValidMainRAMRange(nds, actor.Base, kPlayerBaseTransitionStepOffset + 1))
-    {
-        out.ActionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseActionFlagOffset);
-        out.SubActionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseSubActionFlagOffset);
-        out.PhysicsFlag = nds->ARM9Read32(actor.Base + kPlayerBasePhysicsFlagOffset);
-        out.DamageCooldown = nds->ARM9Read16(actor.Base + kPlayerBaseDamageCooldownOffset);
-        out.TransitionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseTransitionFlagOffset);
-        out.CollisionFlag = nds->ARM9Read32(actor.Base + kPlayerBaseCollisionFlagOffset);
-        out.EnvironmentFlag = nds->ARM9Read32(actor.Base + kPlayerBaseEnvironmentFlagOffset);
-        out.LinkedActor = nds->ARM9Read32(actor.Base + kPlayerBaseLinkedActorOffset);
-        out.TransitionStep = nds->ARM9Read8(actor.Base + kPlayerBaseTransitionStepOffset);
-        out.UpdateLocked = nds->ARM9Read8(actor.Base + kPlayerBaseUpdateLockedOffset);
-        out.CharacterIDBase = nds->ARM9Read8(actor.Base + kPlayerBaseCharacterIDOffset);
-        out.TransitioningFlag = nds->ARM9Read8(actor.Base + kPlayerBaseTransitioningFlagOffset);
-        out.CameraFocusMode = nds->ARM9Read8(actor.Base + kPlayerBaseCameraFocusModeOffset);
-        out.DefeatedFlag = nds->ARM9Read8(actor.Base + kPlayerBaseDefeatedFlagOffset);
-        out.PlayerBaseID = nds->ARM9Read8(actor.Base + kPlayerBasePlayerIDOffset);
-        out.VisibleFlag = nds->ARM9Read8(actor.Base + kPlayerBaseVisibleFlagOffset);
-        out.TransitFunc = nds->ARM9Read32(actor.Base + 0x990);
-        out.TransitArg = nds->ARM9Read32(actor.Base + 0x994);
-    }
-
-    const melonDS::u32 p = static_cast<melonDS::u32>(player);
-    out.Powerup = nds->ARM9Read8(kGamePlayerPowerupAddr + p);
-    out.InventoryPowerup = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr + p);
-    out.Dead = nds->ARM9Read8(kGamePlayerDeadAddr + p);
-    out.Character = nds->ARM9Read8(kGamePlayerCharacterAddr + p);
-    out.TransitionStatus = nds->ARM9Read32(kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32) * p);
-    out.Lives = nds->ARM9Read32(kGamePlayerLivesAddr + sizeof(melonDS::u32) * p);
-    out.BattleStars = nds->ARM9Read32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32) * p);
-    out.Coins = nds->ARM9Read32(kGamePlayerCoinsAddr + sizeof(melonDS::u32) * p);
-    out.Score = nds->ARM9Read32(kGamePlayerScoreAddr + sizeof(melonDS::u32) * p);
-    out.DisplayedStars = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32) * p);
-    out.Deaths = nds->ARM9Read32(kGamePlayerDeathsAddr + sizeof(melonDS::u32) * p);
-    out.CollectedStars = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32) * p);
-}
-
 void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.Diagnostics.DiagnosticEventsEnabled || !nds || !nds->MainRAM)
@@ -4114,33 +4013,13 @@ void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonD
     snap.Valid = true;
     snap.Frame = frame;
     snap.Instance = static_cast<melonDS::u32>(instanceID);
-    snap.StageID = nds->ARM9Read32(kGameStageIDAddr);
-    snap.StageGroup = nds->ARM9Read32(kGameStageGroupAddr);
-    snap.VsMode = nds->ARM9Read32(kGameVsModeAddr);
-    snap.LocalPlayerID = nds->ARM9Read32(kGameLocalPlayerIDAddr);
-    snap.SceneCurrentSceneID = nds->ARM9Read16(kSceneCurrentSceneIDAddr);
-    snap.SceneNextSceneID = nds->ARM9Read16(kSceneNextSceneIDAddr);
-    snap.StageActorFreezeFlag = nds->ARM9Read8(kStageActorFreezeFlagAddr);
-    snap.PlayerCount = nds->ARM9Read32(kGamePlayerCountAddr);
-    snap.InputConsole0Held = nds->ARM9Read16(kInputConsoleKeysAddr + 0x0);
-    snap.InputConsole1Held = nds->ARM9Read16(kInputConsoleKeysAddr + 0x4);
-    snap.InputPlayer0Held = nds->ARM9Read16(kInputPlayerKeysHeldAddr + 0x0);
-    snap.InputPlayer1Held = nds->ARM9Read16(kInputPlayerKeysHeldAddr + 0x2);
+    GameStateReader::ReadDiagnosticFrameSnapshot(nds, snap);
     snap.LastSentInputFrame = G.InputRuntime.LastSentInputFrame;
     snap.LastReceivedInputFrame = G.InputRuntime.LastReceivedInputFrame;
-    snap.PlayerGlobalHash = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0xC0);
-    snap.PlayerGlobalHash0 = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0x60);
-    snap.PlayerGlobalHash1 = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr + 0x60, 0x60);
-    snap.StageCameraGlobalX0 = nds->ARM9Read32(kStageCameraXAddr);
-    snap.StageCameraGlobalX1 = nds->ARM9Read32(kStageCameraXAddr + sizeof(melonDS::u32));
-    snap.StageCameraGlobalY0 = nds->ARM9Read32(kStageCameraYAddr);
-    snap.StageCameraGlobalY1 = nds->ARM9Read32(kStageCameraYAddr + sizeof(melonDS::u32));
-    snap.StageCameraGlobalWidth0 = nds->ARM9Read32(kStageCameraWidthAddr);
-    snap.StageCameraGlobalWidth1 = nds->ARM9Read32(kStageCameraWidthAddr + sizeof(melonDS::u32));
-    snap.StageCameraGlobalHeight0 = nds->ARM9Read32(kStageCameraHeightAddr);
-    snap.StageCameraGlobalHeight1 = nds->ARM9Read32(kStageCameraHeightAddr + sizeof(melonDS::u32));
-    ReadDiagnosticPlayerSnapshot(instanceID, frame, nds, 0, snap.Player[0]);
-    ReadDiagnosticPlayerSnapshot(instanceID, frame, nds, 1, snap.Player[1]);
+    GameStateReader::ReadDiagnosticPlayerSnapshot(
+        instanceID, frame, nds, 0, G.GameSync, snap.Player[0]);
+    GameStateReader::ReadDiagnosticPlayerSnapshot(
+        instanceID, frame, nds, 1, G.GameSync, snap.Player[1]);
     if (snap.Player[0].Found && IsValidMainRAMRange(nds, snap.Player[0].Base, 0xC00))
         snap.PlayerActorHash0 = HashMainRAMRange(nds, snap.Player[0].Base, 0xC00);
     if (snap.Player[1].Found && IsValidMainRAMRange(nds, snap.Player[1].Base, 0xC00))

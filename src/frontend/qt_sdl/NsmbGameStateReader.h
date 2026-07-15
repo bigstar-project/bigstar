@@ -9,6 +9,11 @@ namespace melonDS {
 class NDS;
 }
 
+namespace NsmbNetplayPoC::Diagnostics {
+struct DiagnosticFrameSnapshot;
+struct DiagnosticPlayerSnapshot;
+}
+
 namespace NsmbNetplayPoC::GameStateReader {
 
 struct ObjectScanSample {
@@ -134,6 +139,12 @@ ObjectLifecycleSummary SummarizeObjectLifecycle(melonDS::NDS *nds);
 ObjectScanSample GetPlayerActorCached(
     int instanceID, int player, melonDS::NDS *nds,
     GameStateModel::StateSyncRuntime &runtime);
+void ReadDiagnosticFrameSnapshot(
+    melonDS::NDS *nds, Diagnostics::DiagnosticFrameSnapshot &snapshot);
+void ReadDiagnosticPlayerSnapshot(
+    int instanceID, melonDS::u32 frame, melonDS::NDS *nds, int player,
+    GameStateModel::StateSyncRuntime &runtime,
+    Diagnostics::DiagnosticPlayerSnapshot &snapshot);
 std::vector<ObjectScanSample> GetWorldMovingHazardsCached(
     int instanceID, melonDS::u32 frame, melonDS::NDS *nds,
     GameStateModel::StateSyncRuntime &runtime, int actorRescanInterval);

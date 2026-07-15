@@ -1,4 +1,5 @@
 #include "NsmbGameStateReader.h"
+#include "NsmbNetplayDiagnostics.h"
 
 #include "NDS.h"
 
@@ -85,6 +86,7 @@ constexpr melonDS::u32 kPlayerBasePhysicsFlagOffset = 0x780;
 constexpr melonDS::u32 kPlayerBaseTransitionFlagOffset = 0x784;
 constexpr melonDS::u32 kPlayerBaseCollisionFlagOffset = 0x788;
 constexpr melonDS::u32 kPlayerBaseEnvironmentFlagOffset = 0x790;
+constexpr melonDS::u32 kPlayerBaseLinkedActorOffset = 0x688;
 constexpr melonDS::u32 kPlayerBaseDamageCooldownOffset = 0x79C;
 constexpr melonDS::u32 kPlayerBaseUpdateLockedOffset = 0x7A8;
 constexpr melonDS::u32 kPlayerBaseCharacterIDOffset = 0x7AA;
@@ -92,6 +94,9 @@ constexpr melonDS::u32 kPlayerBaseTransitioningFlagOffset = 0x7B0;
 constexpr melonDS::u32 kPlayerBaseCameraFocusModeOffset = 0x7B2;
 constexpr melonDS::u32 kPlayerBaseDefeatedFlagOffset = 0x7B3;
 constexpr melonDS::u32 kPlayerBaseVisibleFlagOffset = 0x7B5;
+constexpr melonDS::u32 kPlayerBaseTransitionStepOffset = 0xBAD;
+constexpr melonDS::u32 kPlayerBaseTransitFuncOffset = 0x990;
+constexpr melonDS::u32 kPlayerBaseTransitArgOffset = 0x994;
 constexpr melonDS::u32 kEffectVTableStart = 0x02126A24;
 constexpr melonDS::u32 kEffectVTablePtr = 0x02126A2C;
 constexpr melonDS::u32 kWorldEffectSlotBase = 0x021C3268;
@@ -2011,6 +2016,136 @@ ObjectScanSample GetPlayerActorCached(
   runtime.PlayerActorGUIDCache[instanceID][player] =
       actor.Found ? actor.GUID : 0;
   return actor;
+}
+
+void ReadDiagnosticFrameSnapshot(
+    melonDS::NDS *nds, Diagnostics::DiagnosticFrameSnapshot &snapshot) {
+  if (!nds || !nds->MainRAM)
+    return;
+
+  snapshot.StageID = nds->ARM9Read32(0x02085A14);
+  snapshot.StageGroup = nds->ARM9Read32(0x02085A18);
+  snapshot.VsMode = nds->ARM9Read32(0x02085A84);
+  snapshot.LocalPlayerID = nds->ARM9Read32(0x02085A7C);
+  snapshot.SceneCurrentSceneID = nds->ARM9Read16(0x0203BD34);
+  snapshot.SceneNextSceneID = nds->ARM9Read16(0x0203BD30);
+  snapshot.StageActorFreezeFlag = nds->ARM9Read8(0x020CA28C);
+  snapshot.PlayerCount = nds->ARM9Read32(kGamePlayerCountAddr);
+  snapshot.InputConsole0Held = nds->ARM9Read16(0x02087650);
+  snapshot.InputConsole1Held = nds->ARM9Read16(0x02087654);
+  snapshot.InputPlayer0Held = nds->ARM9Read16(0x02087660);
+  snapshot.InputPlayer1Held = nds->ARM9Read16(0x02087662);
+  snapshot.PlayerGlobalHash = HashMainRAMRange(nds, kGamePlayerPowerupAddr, 0xC0);
+  snapshot.PlayerGlobalHash0 = HashMainRAMRange(nds, kGamePlayerPowerupAddr, 0x60);
+  snapshot.PlayerGlobalHash1 =
+      HashMainRAMRange(nds, kGamePlayerPowerupAddr + 0x60, 0x60);
+  snapshot.StageCameraGlobalX0 = nds->ARM9Read32(0x020CAE1C);
+  snapshot.StageCameraGlobalX1 = nds->ARM9Read32(0x020CAE20);
+  snapshot.StageCameraGlobalY0 = nds->ARM9Read32(0x020CAD94);
+  snapshot.StageCameraGlobalY1 = nds->ARM9Read32(0x020CAD98);
+  snapshot.StageCameraGlobalWidth0 = nds->ARM9Read32(0x020CADA4);
+  snapshot.StageCameraGlobalWidth1 = nds->ARM9Read32(0x020CADA8);
+  snapshot.StageCameraGlobalHeight0 = nds->ARM9Read32(0x020CAD8C);
+  snapshot.StageCameraGlobalHeight1 = nds->ARM9Read32(0x020CAD90);
+}
+
+void ReadDiagnosticPlayerSnapshot(
+    int instanceID, melonDS::u32 frame, melonDS::NDS *nds, int player,
+    GameStateModel::StateSyncRuntime &runtime,
+    Diagnostics::DiagnosticPlayerSnapshot &snapshot) {
+  snapshot = {};
+  if (!nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16 ||
+      player < 0 || player > 1)
+    return;
+
+  ObjectScanSample actor;
+  const melonDS::u32 cachedBase =
+      runtime.PlayerActorBaseCache[instanceID][player];
+  const melonDS::u32 cachedGUID =
+      runtime.PlayerActorGUIDCache[instanceID][player];
+  if (cachedBase != 0)
+    ReadPlayerActorByBase(nds, cachedBase, cachedGUID, actor);
+  if (!actor.Found && (frame % 60) == 0)
+    actor = GetPlayerActorCached(instanceID, player, nds, runtime);
+
+  snapshot.Found = actor.Found;
+  snapshot.Base = actor.Base;
+  snapshot.GUID = actor.GUID;
+  snapshot.Settings = actor.Settings;
+  snapshot.StateType = actor.StateType;
+  snapshot.Flags = actor.Flags;
+  snapshot.PosX = actor.PosX;
+  snapshot.PosY = actor.PosY;
+  snapshot.PosZ = actor.PosZ;
+  snapshot.PrevX = actor.PrevX;
+  snapshot.PrevY = actor.PrevY;
+  snapshot.PrevZ = actor.PrevZ;
+  snapshot.VelX = actor.VelX;
+  snapshot.VelY = actor.VelY;
+  snapshot.VelZ = actor.VelZ;
+
+  if (actor.Found && IsValidMainRAMRange(
+                         nds, actor.Base, kPlayerBaseTransitionStepOffset + 1)) {
+    snapshot.ActionFlag =
+        nds->ARM9Read32(actor.Base + kPlayerBaseActionFlagOffset);
+    snapshot.SubActionFlag =
+        nds->ARM9Read32(actor.Base + kPlayerBaseSubActionFlagOffset);
+    snapshot.PhysicsFlag =
+        nds->ARM9Read32(actor.Base + kPlayerBasePhysicsFlagOffset);
+    snapshot.DamageCooldown =
+        nds->ARM9Read16(actor.Base + kPlayerBaseDamageCooldownOffset);
+    snapshot.TransitionFlag =
+        nds->ARM9Read32(actor.Base + kPlayerBaseTransitionFlagOffset);
+    snapshot.CollisionFlag =
+        nds->ARM9Read32(actor.Base + kPlayerBaseCollisionFlagOffset);
+    snapshot.EnvironmentFlag =
+        nds->ARM9Read32(actor.Base + kPlayerBaseEnvironmentFlagOffset);
+    snapshot.LinkedActor =
+        nds->ARM9Read32(actor.Base + kPlayerBaseLinkedActorOffset);
+    snapshot.TransitionStep =
+        nds->ARM9Read8(actor.Base + kPlayerBaseTransitionStepOffset);
+    snapshot.UpdateLocked =
+        nds->ARM9Read8(actor.Base + kPlayerBaseUpdateLockedOffset);
+    snapshot.CharacterIDBase =
+        nds->ARM9Read8(actor.Base + kPlayerBaseCharacterIDOffset);
+    snapshot.TransitioningFlag =
+        nds->ARM9Read8(actor.Base + kPlayerBaseTransitioningFlagOffset);
+    snapshot.CameraFocusMode =
+        nds->ARM9Read8(actor.Base + kPlayerBaseCameraFocusModeOffset);
+    snapshot.DefeatedFlag =
+        nds->ARM9Read8(actor.Base + kPlayerBaseDefeatedFlagOffset);
+    snapshot.PlayerBaseID =
+        nds->ARM9Read8(actor.Base + kPlayerBasePlayerIDOffset);
+    snapshot.VisibleFlag =
+        nds->ARM9Read8(actor.Base + kPlayerBaseVisibleFlagOffset);
+    snapshot.TransitFunc =
+        nds->ARM9Read32(actor.Base + kPlayerBaseTransitFuncOffset);
+    snapshot.TransitArg =
+        nds->ARM9Read32(actor.Base + kPlayerBaseTransitArgOffset);
+  }
+
+  const melonDS::u32 p = static_cast<melonDS::u32>(player);
+  snapshot.Powerup = nds->ARM9Read8(kGamePlayerPowerupAddr + p);
+  snapshot.InventoryPowerup =
+      nds->ARM9Read8(kGamePlayerInventoryPowerupAddr + p);
+  snapshot.Dead = nds->ARM9Read8(kGamePlayerDeadAddr + p);
+  snapshot.Character = nds->ARM9Read8(kGamePlayerCharacterAddr + p);
+  snapshot.TransitionStatus = nds->ARM9Read32(
+      kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32) * p);
+  snapshot.Lives =
+      nds->ARM9Read32(kGamePlayerLivesAddr + sizeof(melonDS::u32) * p);
+  snapshot.BattleStars = nds->ARM9Read32(
+      kGamePlayerBattleStarsAddr + sizeof(melonDS::u32) * p);
+  snapshot.Coins =
+      nds->ARM9Read32(kGamePlayerCoinsAddr + sizeof(melonDS::u32) * p);
+  snapshot.Score =
+      nds->ARM9Read32(kGamePlayerScoreAddr + sizeof(melonDS::u32) * p);
+  snapshot.DisplayedStars = nds->ARM9Read32(
+      kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32) * p);
+  snapshot.Deaths =
+      nds->ARM9Read32(kGamePlayerDeathsAddr + sizeof(melonDS::u32) * p);
+  snapshot.CollectedStars = nds->ARM9Read32(
+      kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32) * p);
 }
 
 std::vector<ObjectScanSample> GetWorldMovingHazardsCached(
