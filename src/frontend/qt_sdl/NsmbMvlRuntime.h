@@ -44,6 +44,9 @@ struct ResultSnapshot {
 };
 
 int ResolveResultWinner(const ResultSnapshot &result);
+bool IsFrameInRange(melonDS::u32 frame, melonDS::u32 startFrame,
+                    melonDS::u32 endFrame);
+bool IsRoleAllowed(bool isHost, bool hostOnly, bool clientOnly);
 
 class Runtime {
 public:

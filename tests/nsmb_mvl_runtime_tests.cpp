@@ -7,6 +7,8 @@
 namespace {
 
 using NsmbNetplayPoC::Config::MvlConfig;
+using NsmbNetplayPoC::MvlRuntime::IsFrameInRange;
+using NsmbNetplayPoC::MvlRuntime::IsRoleAllowed;
 using NsmbNetplayPoC::MvlRuntime::ResolveResultWinner;
 using NsmbNetplayPoC::MvlRuntime::ResultSnapshot;
 using NsmbNetplayPoC::MvlRuntime::Runtime;
@@ -126,6 +128,24 @@ void TestResultWinnerPolicy() {
   Require(ResolveResultWinner(result) == 1, "fewer deaths wins last");
 }
 
+void TestGameHookPolicy() {
+  Require(!IsFrameInRange(99, 100, 200) &&
+              IsFrameInRange(100, 100, 200) &&
+              IsFrameInRange(200, 100, 200) &&
+              !IsFrameInRange(201, 100, 200),
+          "runtime patch frame window is inclusive");
+  Require(IsFrameInRange(5000, 100, 0),
+          "zero end frame keeps a runtime patch active");
+  Require(IsRoleAllowed(true, true, false) &&
+              !IsRoleAllowed(false, true, false) &&
+              IsRoleAllowed(false, false, true) &&
+              !IsRoleAllowed(true, false, true),
+          "runtime patch role restrictions select one peer");
+  Require(!IsRoleAllowed(true, true, true) &&
+              !IsRoleAllowed(false, true, true),
+          "conflicting runtime patch role restrictions disable both peers");
+}
+
 } // namespace
 
 int main() {
@@ -133,6 +153,7 @@ int main() {
   TestRestartFramePolicy();
   TestInstanceMarkerOwnership();
   TestResultWinnerPolicy();
+  TestGameHookPolicy();
   std::cout << "NsmbMvlRuntime tests passed\n";
   return 0;
 }

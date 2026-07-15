@@ -240,6 +240,67 @@ enum class RuntimePatchLogKind : std::size_t {
   Count,
 };
 
+class BeforeHookPhaseTrace {
+public:
+  enum class Phase {
+    Init,
+    StartSync,
+    LoadState,
+    RuntimeConfig,
+    ProbeRestore,
+    JitPatch,
+    Rollback,
+    Boot,
+    Patch,
+    PacketBridgeSetup,
+    TestSnap,
+    Setup,
+    ActorState,
+    Barrier,
+    Checkpoint,
+    Scratch,
+    Network,
+    Gate,
+    RemoteWait,
+  };
+
+  BeforeHookPhaseTrace(bool enabled, int thresholdUs, int instanceID,
+                       melonDS::u32 frame);
+  ~BeforeHookPhaseTrace();
+  void SetFrame(melonDS::u32 frame);
+  void Mark(Phase phase);
+
+private:
+  using Clock = std::chrono::steady_clock;
+  static long long ElapsedUs(Clock::time_point start, Clock::time_point end);
+
+  bool Enabled = false;
+  int ThresholdUs = 0;
+  int InstanceID = -1;
+  melonDS::u32 Frame = 0;
+  Clock::time_point Start;
+  Clock::time_point Last;
+  long long InitUs = 0;
+  long long StartSyncUs = 0;
+  long long LoadStateUs = 0;
+  long long RuntimeConfigUs = 0;
+  long long ProbeRestoreUs = 0;
+  long long JitPatchUs = 0;
+  long long RollbackUs = 0;
+  long long BootUs = 0;
+  long long PatchUs = 0;
+  long long PacketBridgeSetupUs = 0;
+  long long TestSnapUs = 0;
+  long long SetupUs = 0;
+  long long ActorStateUs = 0;
+  long long BarrierUs = 0;
+  long long CheckpointUs = 0;
+  long long ScratchUs = 0;
+  long long NetworkUs = 0;
+  long long GateUs = 0;
+  long long RemoteWaitUs = 0;
+};
+
 class Runtime {
 public:
   using TimePoint = std::chrono::steady_clock::time_point;

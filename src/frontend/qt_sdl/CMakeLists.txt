@@ -19,6 +19,8 @@ set(SOURCES_QT_SDL
     NsmbPacketBridgeRuntime.h
     NsmbMvlRuntime.cpp
     NsmbMvlRuntime.h
+    NsmbMvlGameHooks.cpp
+    NsmbMvlGameHooks.h
     NsmbInputTimeline.cpp
     NsmbInputTimeline.h
     NsmbInputProtocol.cpp

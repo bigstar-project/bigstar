@@ -1211,6 +1211,125 @@ struct Runtime::Impl {
   }
 };
 
+BeforeHookPhaseTrace::BeforeHookPhaseTrace(bool enabled, int thresholdUs,
+                                           int instanceID,
+                                           melonDS::u32 frame)
+    : Enabled(enabled), ThresholdUs(thresholdUs), InstanceID(instanceID),
+      Frame(frame), Start(Clock::now()), Last(Start) {}
+
+BeforeHookPhaseTrace::~BeforeHookPhaseTrace() {
+  if (!Enabled)
+    return;
+
+  const auto now = Clock::now();
+  const auto tailUs = ElapsedUs(Last, now);
+  const auto totalUs = ElapsedUs(Start, now);
+  if (totalUs < std::min(ThresholdUs, 10000))
+    return;
+
+  std::printf(
+      "NSMB BeforeHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f startSyncMs=%.3f loadStateMs=%.3f runtimeConfigMs=%.3f probeRestoreMs=%.3f jitPatchMs=%.3f rollbackMs=%.3f bootMs=%.3f patchMs=%.3f packetBridgeSetupMs=%.3f testSnapMs=%.3f setupMs=%.3f actorStateMs=%.3f barrierMs=%.3f checkpointMs=%.3f scratchMs=%.3f networkMs=%.3f gateMs=%.3f remoteWaitMs=%.3f tailMs=%.3f\n",
+      InstanceID, Frame, static_cast<double>(totalUs) / 1000.0,
+      static_cast<double>(InitUs) / 1000.0,
+      static_cast<double>(StartSyncUs) / 1000.0,
+      static_cast<double>(LoadStateUs) / 1000.0,
+      static_cast<double>(RuntimeConfigUs) / 1000.0,
+      static_cast<double>(ProbeRestoreUs) / 1000.0,
+      static_cast<double>(JitPatchUs) / 1000.0,
+      static_cast<double>(RollbackUs) / 1000.0,
+      static_cast<double>(BootUs) / 1000.0,
+      static_cast<double>(PatchUs) / 1000.0,
+      static_cast<double>(PacketBridgeSetupUs) / 1000.0,
+      static_cast<double>(TestSnapUs) / 1000.0,
+      static_cast<double>(SetupUs) / 1000.0,
+      static_cast<double>(ActorStateUs) / 1000.0,
+      static_cast<double>(BarrierUs) / 1000.0,
+      static_cast<double>(CheckpointUs) / 1000.0,
+      static_cast<double>(ScratchUs) / 1000.0,
+      static_cast<double>(NetworkUs) / 1000.0,
+      static_cast<double>(GateUs) / 1000.0,
+      static_cast<double>(RemoteWaitUs) / 1000.0,
+      static_cast<double>(tailUs) / 1000.0);
+  std::fflush(stdout);
+}
+
+void BeforeHookPhaseTrace::SetFrame(melonDS::u32 frame) { Frame = frame; }
+
+void BeforeHookPhaseTrace::Mark(Phase phase) {
+  if (!Enabled)
+    return;
+
+  const auto now = Clock::now();
+  const auto elapsedUs = ElapsedUs(Last, now);
+  Last = now;
+  switch (phase) {
+  case Phase::Init:
+    InitUs += elapsedUs;
+    break;
+  case Phase::StartSync:
+    StartSyncUs += elapsedUs;
+    break;
+  case Phase::LoadState:
+    LoadStateUs += elapsedUs;
+    break;
+  case Phase::RuntimeConfig:
+    RuntimeConfigUs += elapsedUs;
+    break;
+  case Phase::ProbeRestore:
+    ProbeRestoreUs += elapsedUs;
+    break;
+  case Phase::JitPatch:
+    JitPatchUs += elapsedUs;
+    break;
+  case Phase::Rollback:
+    RollbackUs += elapsedUs;
+    break;
+  case Phase::Boot:
+    BootUs += elapsedUs;
+    break;
+  case Phase::Patch:
+    PatchUs += elapsedUs;
+    break;
+  case Phase::PacketBridgeSetup:
+    PacketBridgeSetupUs += elapsedUs;
+    break;
+  case Phase::TestSnap:
+    TestSnapUs += elapsedUs;
+    break;
+  case Phase::Setup:
+    SetupUs += elapsedUs;
+    break;
+  case Phase::ActorState:
+    ActorStateUs += elapsedUs;
+    break;
+  case Phase::Barrier:
+    BarrierUs += elapsedUs;
+    break;
+  case Phase::Checkpoint:
+    CheckpointUs += elapsedUs;
+    break;
+  case Phase::Scratch:
+    ScratchUs += elapsedUs;
+    break;
+  case Phase::Network:
+    NetworkUs += elapsedUs;
+    break;
+  case Phase::Gate:
+    GateUs += elapsedUs;
+    break;
+  case Phase::RemoteWait:
+    RemoteWaitUs += elapsedUs;
+    break;
+  }
+}
+
+long long BeforeHookPhaseTrace::ElapsedUs(Clock::time_point start,
+                                          Clock::time_point end) {
+  return std::max<long long>(
+      0, std::chrono::duration_cast<std::chrono::microseconds>(end - start)
+             .count());
+}
+
 Runtime::Runtime() : State(std::make_unique<Impl>()) {}
 
 Runtime::~Runtime() { Stop(); }

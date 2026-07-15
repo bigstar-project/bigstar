@@ -47,6 +47,15 @@ int ResolveResultWinner(const ResultSnapshot &result) {
   return -1;
 }
 
+bool IsFrameInRange(melonDS::u32 frame, melonDS::u32 startFrame,
+                    melonDS::u32 endFrame) {
+  return frame >= startFrame && (endFrame == 0 || frame <= endFrame);
+}
+
+bool IsRoleAllowed(bool isHost, bool hostOnly, bool clientOnly) {
+  return (!hostOnly || isHost) && (!clientOnly || !isHost);
+}
+
 bool Runtime::IsValidInstance(int instanceID) const {
   return instanceID >= 0 &&
          instanceID < static_cast<int>(Instances.size());
