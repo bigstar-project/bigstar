@@ -541,16 +541,13 @@ bool NSML_HasMarioVsLuigiRemotePacket(NDS* nds, u32 player, u32 tick)
     return packetIt != ndsIt->second.end() && packetIt->second.Valid[player];
 }
 
-static bool NSMLLiveReplayLatestBeforeFallbackEnabled(NDS* nds)
+static bool NSMLLiveReplayLatestBeforeFallbackEnabled()
 {
     static int enabled = -1;
-    static u32 startFrame = 0xFFFFFFFF;
     if (enabled < 0)
         enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE") ? 1 : 0;
-    if (startFrame == 0xFFFFFFFF)
-        startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_START_FRAME", 0);
 
-    return enabled != 0 && (!nds || nds->NumFrames >= startFrame);
+    return enabled != 0;
 }
 
 static bool NSMLFindLiveReplayPacketLocked(
@@ -576,7 +573,7 @@ static bool NSMLFindLiveReplayPacketLocked(
 
     if (fallbackWindow == 0)
     {
-        if (!NSMLLiveReplayLatestBeforeFallbackEnabled(nds))
+        if (!NSMLLiveReplayLatestBeforeFallbackEnabled())
             return false;
 
         u32 bestAge = 0x8000;
@@ -601,11 +598,7 @@ static bool NSMLFindLiveReplayPacketLocked(
         return true;
     }
 
-    static int nearestFallback = -1;
-    if (nearestFallback < 0)
-        nearestFallback = NSMLEnvFlag("MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST") ? 1 : 0;
-
-    if (NSMLLiveReplayLatestBeforeFallbackEnabled(nds))
+    if (NSMLLiveReplayLatestBeforeFallbackEnabled())
     {
         u32 bestAge = 0x8000;
         const NSMLPacketReplayEntry* bestEntry = nullptr;
@@ -642,16 +635,6 @@ static bool NSMLFindLiveReplayPacketLocked(
             return true;
         }
 
-        if (nearestFallback)
-        {
-            const u32 futureTick = (tick + age) & 0xFFFF;
-            auto futureIt = ndsIt->second.find(futureTick);
-            if (futureIt != ndsIt->second.end() && futureIt->second.Valid[player])
-            {
-                outPacket = futureIt->second.Packet[player];
-                return true;
-            }
-        }
     }
 
     return false;

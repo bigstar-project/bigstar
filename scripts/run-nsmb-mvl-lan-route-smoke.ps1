@@ -101,9 +101,7 @@ param(
     [int]$PacketBridgeForceGameLocalPlayerIDStartFrame = 0,
     [switch]$PacketBridgeForceGameLocalPlayerIDEarly,
     [int]$PacketBridgeLiveFallbackWindow = 0,
-    [switch]$PacketBridgeLiveFallbackNearest,
     [switch]$PacketBridgeLiveFallbackLatestBefore,
-    [int]$PacketBridgeLiveFallbackStartFrame = 0,
     [switch]$PacketBridgeReplayReturnLookupTick,
     [string]$PacketBridgeReplayOps = "",
     [switch]$PacketBridgeDirectCapture,
@@ -1316,20 +1314,10 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW -ErrorAction SilentlyContinue
         }
-        if ($PacketBridgeLiveFallbackNearest) {
-            $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST = "1"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST -ErrorAction SilentlyContinue
-        }
         if ($PacketBridgeLiveFallbackLatestBefore) {
             $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE = "1"
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE -ErrorAction SilentlyContinue
-        }
-        if ($PacketBridgeLiveFallbackStartFrame -gt 0) {
-            $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_START_FRAME = "$PacketBridgeLiveFallbackStartFrame"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_START_FRAME -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeReplayReturnLookupTick) {
             $env:MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK = "1"
@@ -1517,7 +1505,6 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_NET_RANDOM_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_NET_RANDOM_AUTO -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_OPS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_TRACE -ErrorAction SilentlyContinue
@@ -1538,14 +1525,8 @@ function Start-MelonLANProcess {
         if ($PacketBridgeLiveFallbackWindow -gt 0) {
             $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW = "$PacketBridgeLiveFallbackWindow"
         }
-        if ($PacketBridgeLiveFallbackNearest) {
-            $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST = "1"
-        }
         if ($PacketBridgeLiveFallbackLatestBefore) {
             $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE = "1"
-        }
-        if ($PacketBridgeLiveFallbackStartFrame -gt 0) {
-            $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_START_FRAME = "$PacketBridgeLiveFallbackStartFrame"
         }
         if ($PacketBridgeReplayReturnLookupTick) {
             $env:MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK = "1"
@@ -1714,9 +1695,7 @@ function Start-MelonLANProcess {
         "mvlAutoRestartAfterResult=$($env:MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT)"
         "mvlAutoRestartDelayFrames=$($env:MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES)"
         "packetBridgeLiveFallbackWindow=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW)"
-        "packetBridgeLiveFallbackNearest=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST)"
         "packetBridgeLiveFallbackLatestBefore=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE)"
-        "packetBridgeLiveFallbackStartFrame=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_START_FRAME)"
         "waitForPeer=$($env:MELONDS_NSML_WAIT_FOR_PEER)"
         "inputMaxFrameLead=$($env:MELONDS_NSML_INPUT_MAX_FRAME_LEAD)"
         "gameplayHeartbeatInterval=$($env:MELONDS_NSML_GAMEPLAY_HEARTBEAT_INTERVAL)"
@@ -2328,10 +2307,7 @@ if ($GameStateTrace -and -not $SkipMvlStateCheck -and ($GameStateTraceEndFrame -
             throw "client game state trace is empty: $clientGameStateTrace"
         }
 
-        $movementStartFrame = $PacketBridgeLiveFallbackStartFrame
-        if ($movementStartFrame -le 0) {
-            $movementStartFrame = $GameStateTraceStartFrame
-        }
+        $movementStartFrame = $GameStateTraceStartFrame
 
         $candidateRows = @($clientRows | Where-Object { [int]$_.frame -ge $movementStartFrame })
         if ($candidateRows.Count -eq 0) {
