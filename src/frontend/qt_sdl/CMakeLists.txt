@@ -15,6 +15,8 @@ set(SOURCES_QT_SDL
     NsmbNetplayPoC.h
     NsmbNetplayConfig.cpp
     NsmbNetplayConfig.h
+    NsmbMvlRuntime.cpp
+    NsmbMvlRuntime.h
     NsmbInputTimeline.cpp
     NsmbInputTimeline.h
     NsmbInputProtocol.cpp
@@ -313,6 +315,22 @@ if (BUILD_TESTING)
         AUTORCC OFF
     )
     add_test(NAME nsmb-imitation-ai COMMAND nsmb_imitation_ai_tests)
+
+    add_executable(nsmb_mvl_runtime_tests
+        NsmbMvlRuntime.cpp
+        NsmbMvlRuntime.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_mvl_runtime_tests.cpp
+    )
+    target_include_directories(nsmb_mvl_runtime_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_mvl_runtime_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-mvl-runtime COMMAND nsmb_mvl_runtime_tests)
 
     add_executable(nsmb_rollback_store_tests
         NsmbRollbackStore.cpp

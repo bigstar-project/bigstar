@@ -13,6 +13,7 @@
 
 #include "NsmbNetplayPoC.h"
 #include "NsmbNetplayConfig.h"
+#include "NsmbMvlRuntime.h"
 #include "NsmbNetplayCoordinator.h"
 #include "NsmbInputDelivery.h"
 #include "NsmbInputProtocol.h"
@@ -503,7 +504,6 @@ struct State
     bool TestAnnouncedQuit = false;
     Config::ConnectionConfig Connection;
     Role NetRole = Role::Host;
-    melonDS::u32 MvlAutoRestartStartupFrameBase = 0;
     Config::StateSyncConfig StateSync;
     SessionPolicy::Runtime Session;
     Coordination::Runtime Coordinator;
@@ -515,23 +515,10 @@ struct State
     std::vector<DelayedWireNSMLPacket> DelayedNSMLPackets;
     InputDelivery::Runtime Delivery;
     Config::MvlConfig Mvl;
+    MvlRuntime::Runtime MvlSeries;
     int MvlCurrentStage = 0;
     melonDS::u32 MvlCurrentStageSceneSettings = kMvlStageSceneDefaultSettings;
     bool MvlEntranceSpawnNormalizedLogged[16] {};
-    bool MvlAutoRestartInResult[16] {};
-    bool MvlAutoRestartResultScored[16] {};
-    bool MvlAutoRestartResultUnresolvedLogged[16] {};
-    melonDS::u32 MvlAutoRestartResultFrame[16] {};
-    melonDS::u32 MvlAutoRestartLastRestartFrame[16] {};
-    int MvlAutoRestartCount[16] {};
-    int MvlAutoRestartWins[16][2] {};
-    std::vector<char> MvlAutoRestartBootstrapCheckpoint[16];
-    melonDS::u32 MvlAutoRestartBootstrapCheckpointFrame[16] {};
-    bool MvlAutoRestartBootstrapCheckpointLogged[16] {};
-    std::vector<char> MvlAutoRestartCheckpoint[16];
-    melonDS::u32 MvlAutoRestartCheckpointFrame[16] {};
-    int MvlAutoRestartCheckpointStage[16] {};
-    bool MvlAutoRestartCheckpointLogged[16] {};
     Config::AIConfig AI;
     NsmbImitationAI::Runtime ImitationAI;
     bool DirectMvlBootApplied[16] {};
@@ -634,21 +621,9 @@ melonDS::u32 ComposeMvlSceneSettingsForStage(int stage)
     return ((0xB4u + clampedStage) << 16) | 0xFF00u;
 }
 
-int GameIndexForInstance(int instanceID)
-{
-    if (instanceID < 0 || instanceID >= 16)
-        return 0;
-    return std::max(0, G.MvlAutoRestartCount[instanceID]);
-}
-
 int MvlStageForGame(int instanceID)
 {
-    const int index = GameIndexForInstance(instanceID);
-    if (!G.Mvl.StageSequence.empty())
-        return G.Mvl.StageSequence[std::min(index, static_cast<int>(G.Mvl.StageSequence.size()) - 1)];
-    if (G.Mvl.CourseMode == "random" && G.Mvl.MatchSeedConfigured)
-        return static_cast<int>((G.Mvl.MatchSeed + static_cast<melonDS::u32>(index)) % 5u);
-    return std::clamp(G.MvlCurrentStage, 0, 4);
+    return G.MvlSeries.StageForGame(instanceID, G.Mvl, G.MvlCurrentStage);
 }
 
 void RefreshMvlGameSelectionForInstance(int instanceID)
@@ -662,18 +637,12 @@ void RefreshMvlGameSelectionForInstance(int instanceID)
 
 melonDS::u32 MatchSeedForGame(int instanceID)
 {
-    const int index = GameIndexForInstance(instanceID);
-    if (!G.Mvl.MatchSeedSequence.empty())
-        return G.Mvl.MatchSeedSequence[std::min(index, static_cast<int>(G.Mvl.MatchSeedSequence.size()) - 1)];
-    return G.Mvl.MatchSeed + static_cast<melonDS::u32>(index);
+    return G.MvlSeries.MatchSeedForGame(instanceID, G.Mvl);
 }
 
 melonDS::u32 MvlRestartPacketCutoffFrame()
 {
-    melonDS::u32 cutoff = 0;
-    for (melonDS::u32 frame : G.MvlAutoRestartLastRestartFrame)
-        cutoff = std::max(cutoff, frame);
-    return cutoff;
+    return G.MvlSeries.RestartPacketCutoffFrame();
 }
 
 void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
@@ -701,44 +670,28 @@ void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
     std::fflush(stdout);
 }
 
-melonDS::u32 MvlAutoRestartRelativeStartupFrame(melonDS::u32 value)
-{
-    if (value == 0 || value == kNoFrameLimit)
-        return value;
-    if (G.MvlAutoRestartStartupFrameBase != 0 && value >= G.MvlAutoRestartStartupFrameBase)
-        return value - G.MvlAutoRestartStartupFrameBase;
-    return value;
-}
-
-void RebaseMvlAutoRestartStartupFrame(melonDS::u32 restartFrame, melonDS::u32& value)
-{
-    if (value == 0 || value == kNoFrameLimit)
-        return;
-    value = restartFrame + MvlAutoRestartRelativeStartupFrame(value);
-}
-
 void RebaseMvlAutoRestartStartupFrames(int instanceID, melonDS::u32 restartFrame)
 {
     if (instanceID < 0 || instanceID >= 16)
         return;
 
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.Connection.StartFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.PacketBridge.WaitStartFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.PacketBridge.ForceTickStartFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.PacketBridge.ForceNetReadyStartFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.PacketBridge.ForceNetReadyEndFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.PacketBridge.ForceGameLocalPlayerIDStartFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.PacketBridge.ThrottleStartFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.Input.SendDelayStartFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.Input.SendDelayEndFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.Mvl.DirectBootFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.RuntimePatch.ScriptRemotePacketStartFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.RuntimePatch.ScriptRemotePacketEndFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.Mvl.CameraInitHold.StartFrame);
-    RebaseMvlAutoRestartStartupFrame(restartFrame, G.Mvl.CameraInitHold.EndFrame);
+    G.MvlSeries.RebaseStartupFrame(restartFrame, G.Connection.StartFrame);
+    G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.WaitStartFrame);
+    G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ForceTickStartFrame);
+    G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ForceNetReadyStartFrame);
+    G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ForceNetReadyEndFrame);
+    G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ForceGameLocalPlayerIDStartFrame);
+    G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ThrottleStartFrame);
+    G.MvlSeries.RebaseStartupFrame(restartFrame, G.Input.SendDelayStartFrame);
+    G.MvlSeries.RebaseStartupFrame(restartFrame, G.Input.SendDelayEndFrame);
+    G.MvlSeries.RebaseStartupFrame(restartFrame, G.Mvl.DirectBootFrame);
+    G.MvlSeries.RebaseStartupFrame(restartFrame, G.RuntimePatch.ScriptRemotePacketStartFrame);
+    G.MvlSeries.RebaseStartupFrame(restartFrame, G.RuntimePatch.ScriptRemotePacketEndFrame);
+    G.MvlSeries.RebaseStartupFrame(restartFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
+    G.MvlSeries.RebaseStartupFrame(restartFrame, G.Mvl.CameraInitHold.StartFrame);
+    G.MvlSeries.RebaseStartupFrame(restartFrame, G.Mvl.CameraInitHold.EndFrame);
 
-    G.MvlAutoRestartStartupFrameBase = restartFrame;
+    G.MvlSeries.SetStartupFrameBase(restartFrame);
     std::printf(
         "NSMB MvL auto restart: rebased startup frames inst=%d restartFrame=%u directBoot=%u netplayStart=%u packetJit=%u\n",
         instanceID,
@@ -749,24 +702,6 @@ void RebaseMvlAutoRestartStartupFrames(int instanceID, melonDS::u32 restartFrame
     std::fflush(stdout);
 }
 
-void RebaseMvlAutoRestartStartupFrameFromCheckpoint(
-    melonDS::u32 restoreFrame,
-    melonDS::u32 checkpointFrame,
-    melonDS::u32& value)
-{
-    if (value == 0 || value == kNoFrameLimit)
-        return;
-
-    const melonDS::u32 relative = MvlAutoRestartRelativeStartupFrame(value);
-    if (relative == 0 || relative == kNoFrameLimit)
-    {
-        value = relative;
-        return;
-    }
-
-    value = restoreFrame + (relative > checkpointFrame ? relative - checkpointFrame : 1u);
-}
-
 void RebaseMvlAutoRestartStartupFramesFromCheckpoint(
     int instanceID,
     melonDS::u32 restoreFrame,
@@ -775,23 +710,24 @@ void RebaseMvlAutoRestartStartupFramesFromCheckpoint(
     if (instanceID < 0 || instanceID >= 16)
         return;
 
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Connection.StartFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.WaitStartFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ForceTickStartFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ForceNetReadyStartFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ForceNetReadyEndFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ForceGameLocalPlayerIDStartFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ThrottleStartFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Input.SendDelayStartFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Input.SendDelayEndFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.DirectBootFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.ScriptRemotePacketStartFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.ScriptRemotePacketEndFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.CameraInitHold.StartFrame);
-    RebaseMvlAutoRestartStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.CameraInitHold.EndFrame);
+    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Connection.StartFrame);
+    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.WaitStartFrame);
+    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ForceTickStartFrame);
+    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ForceNetReadyStartFrame);
+    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ForceNetReadyEndFrame);
+    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ForceGameLocalPlayerIDStartFrame);
+    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ThrottleStartFrame);
+    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Input.SendDelayStartFrame);
+    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Input.SendDelayEndFrame);
+    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.DirectBootFrame);
+    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.ScriptRemotePacketStartFrame);
+    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.ScriptRemotePacketEndFrame);
+    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
+    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.CameraInitHold.StartFrame);
+    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.CameraInitHold.EndFrame);
 
-    G.MvlAutoRestartStartupFrameBase = restoreFrame > checkpointFrame ? restoreFrame - checkpointFrame : restoreFrame;
+    G.MvlSeries.SetStartupFrameBase(
+        restoreFrame > checkpointFrame ? restoreFrame - checkpointFrame : restoreFrame);
     std::printf(
         "NSMB MvL auto restart: rebased startup frames from checkpoint inst=%d restoreFrame=%u checkpointFrame=%u directBoot=%u netplayStart=%u packetJit=%u\n",
         instanceID,
@@ -3730,9 +3666,10 @@ void SaveMvlAutoRestartBootstrapCheckpointIfNeeded(int instanceID, melonDS::u32 
         return;
     if (instanceID < 0 || instanceID >= 16)
         return;
-    if (!G.MvlAutoRestartBootstrapCheckpoint[instanceID].empty())
+    MvlRuntime::InstanceState& restart = G.MvlSeries.Instances[instanceID];
+    if (!restart.BootstrapCheckpoint.Buffer.empty())
         return;
-    if (G.MvlAutoRestartCount[instanceID] != 0 || G.MvlAutoRestartInResult[instanceID])
+    if (restart.RestartCount != 0 || restart.InResult)
         return;
     const bool directBootReady = G.Mvl.DirectBootEnabled
         && !G.DirectMvlBootApplied[instanceID]
@@ -3753,22 +3690,22 @@ void SaveMvlAutoRestartBootstrapCheckpointIfNeeded(int instanceID, melonDS::u32 
     melonDS::Savestate state;
     if (state.Error || !nds->DoSavestate(&state) || state.Error)
     {
-        if (!G.MvlAutoRestartBootstrapCheckpointLogged[instanceID])
+        if (!restart.BootstrapCheckpoint.Logged)
         {
             std::printf("NSMB MvL auto restart: failed to save bootstrap checkpoint inst=%d frame=%u\n",
                 instanceID,
                 frame);
             std::fflush(stdout);
-            G.MvlAutoRestartBootstrapCheckpointLogged[instanceID] = true;
+            restart.BootstrapCheckpoint.Logged = true;
         }
         return;
     }
 
-    G.MvlAutoRestartBootstrapCheckpoint[instanceID].assign(
+    restart.BootstrapCheckpoint.Buffer.assign(
         reinterpret_cast<const char*>(state.Buffer()),
         reinterpret_cast<const char*>(state.Buffer()) + state.Length());
-    G.MvlAutoRestartBootstrapCheckpointFrame[instanceID] = frame;
-    G.MvlAutoRestartBootstrapCheckpointLogged[instanceID] = true;
+    restart.BootstrapCheckpoint.Frame = frame;
+    restart.BootstrapCheckpoint.Logged = true;
     std::printf("NSMB MvL auto restart: saved bootstrap checkpoint inst=%d frame=%u bytes=%u scene=%04X stageGroup=%u\n",
         instanceID,
         frame,
@@ -3825,24 +3762,25 @@ bool RestoreMvlAutoRestartBootstrapCheckpoint(int instanceID, melonDS::u32 frame
 {
     if (!nds || instanceID < 0 || instanceID >= 16)
         return false;
-    if (G.MvlAutoRestartBootstrapCheckpoint[instanceID].empty())
+    MvlRuntime::InstanceState& restart = G.MvlSeries.Instances[instanceID];
+    if (restart.BootstrapCheckpoint.Buffer.empty())
         return false;
 
     ResetMvlAutoRestartStartupHookState(instanceID);
     RebaseMvlAutoRestartStartupFramesFromCheckpoint(
         instanceID,
         frame,
-        G.MvlAutoRestartBootstrapCheckpointFrame[instanceID]);
+        restart.BootstrapCheckpoint.Frame);
     melonDS::Savestate state(
-        G.MvlAutoRestartBootstrapCheckpoint[instanceID].data(),
-        static_cast<melonDS::u32>(G.MvlAutoRestartBootstrapCheckpoint[instanceID].size()),
+        restart.BootstrapCheckpoint.Buffer.data(),
+        static_cast<melonDS::u32>(restart.BootstrapCheckpoint.Buffer.size()),
         false);
     if (state.Error || !nds->DoSavestate(&state) || state.Error)
     {
         std::printf("NSMB MvL auto restart: failed to restore bootstrap checkpoint inst=%d frame=%u bytes=%zu\n",
             instanceID,
             frame,
-            G.MvlAutoRestartBootstrapCheckpoint[instanceID].size());
+            restart.BootstrapCheckpoint.Buffer.size());
         std::fflush(stdout);
         return false;
     }
@@ -3863,7 +3801,7 @@ bool RestoreMvlAutoRestartBootstrapCheckpoint(int instanceID, melonDS::u32 frame
         instanceID,
         frame,
         requestedSeed,
-        G.MvlAutoRestartBootstrapCheckpoint[instanceID].size());
+        restart.BootstrapCheckpoint.Buffer.size());
     std::fflush(stdout);
     return true;
 }
@@ -3896,19 +3834,9 @@ bool ResetMvlAutoRestartConsoleForNextMatch(int instanceID, melonDS::u32 frame, 
     return true;
 }
 
-struct MvlResultSnapshot
+MvlRuntime::ResultSnapshot ReadMvlResultSnapshot(melonDS::NDS* nds)
 {
-    melonDS::u32 BattleStars[2] {};
-    melonDS::u32 DisplayedStars[2] {};
-    melonDS::u32 CollectedStars[2] {};
-    melonDS::u32 Lives[2] {};
-    melonDS::u32 Deaths[2] {};
-    melonDS::u32 Dead[2] {};
-};
-
-MvlResultSnapshot ReadMvlResultSnapshot(melonDS::NDS* nds)
-{
-    MvlResultSnapshot result {};
+    MvlRuntime::ResultSnapshot result {};
     if (!nds)
         return result;
 
@@ -3930,78 +3858,46 @@ MvlResultSnapshot ReadMvlResultSnapshot(melonDS::NDS* nds)
     return result;
 }
 
-int ResolveMvlResultWinner(const MvlResultSnapshot& result)
-{
-    auto higherWins = [](melonDS::u32 a, melonDS::u32 b) -> int {
-        if (a == b)
-            return -1;
-        return a > b ? 0 : 1;
-    };
-    auto lowerWins = [](melonDS::u32 a, melonDS::u32 b) -> int {
-        if (a == b)
-            return -1;
-        return a < b ? 0 : 1;
-    };
-
-    const bool player0Dead = result.Dead[0] != 0;
-    const bool player1Dead = result.Dead[1] != 0;
-    if (player0Dead != player1Dead)
-        return player0Dead ? 1 : 0;
-
-    if (int winner = higherWins(result.BattleStars[0], result.BattleStars[1]); winner >= 0)
-        return winner;
-    if (int winner = higherWins(result.DisplayedStars[0], result.DisplayedStars[1]); winner >= 0)
-        return winner;
-    if (int winner = higherWins(result.CollectedStars[0], result.CollectedStars[1]); winner >= 0)
-        return winner;
-
-    if (int winner = higherWins(result.Lives[0], result.Lives[1]); winner >= 0)
-        return winner;
-    if (int winner = lowerWins(result.Deaths[0], result.Deaths[1]); winner >= 0)
-        return winner;
-
-    return -1;
-}
-
 bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.Mvl.AutoRestartAfterResult || G.Mvl.TargetWins < 1 || !nds || instanceID < 0 || instanceID >= 16)
         return false;
+    MvlRuntime::InstanceState& restart = G.MvlSeries.Instances[instanceID];
 
     constexpr melonDS::u16 kResultsScene = 0x000A;
     const melonDS::u16 currentScene = nds->ARM9Read16(kSceneCurrentSceneIDAddr);
     if (currentScene != kResultsScene)
     {
-        if (G.MvlAutoRestartCount[instanceID] > 0
+        if (restart.RestartCount > 0
             && currentScene == 0x0003
             && nds->ARM9Read16(kScenePreviousSceneIDAddr) == kResultsScene
             && nds->ARM9Read16(kSceneNextSceneIDAddr) == 0x0003
-            && frame - G.MvlAutoRestartLastRestartFrame[instanceID] >= 30)
+            && frame - restart.LastRestartFrame >= 30)
         {
             nds->ARM9Write16(kSceneNextSceneIDAddr, 0x0181);
         }
-        G.MvlAutoRestartInResult[instanceID] = false;
-        G.MvlAutoRestartResultScored[instanceID] = false;
-        G.MvlAutoRestartResultUnresolvedLogged[instanceID] = false;
+        restart.InResult = false;
+        restart.ResultScored = false;
+        restart.ResultUnresolvedLogged = false;
         return false;
     }
 
-    if (!G.MvlAutoRestartInResult[instanceID])
+    if (!restart.InResult)
     {
-        G.MvlAutoRestartInResult[instanceID] = true;
-        G.MvlAutoRestartResultUnresolvedLogged[instanceID] = false;
-        G.MvlAutoRestartResultFrame[instanceID] = frame;
+        restart.InResult = true;
+        restart.ResultUnresolvedLogged = false;
+        restart.ResultFrame = frame;
         return false;
     }
 
-    if (!G.MvlAutoRestartResultScored[instanceID])
+    if (!restart.ResultScored)
     {
-        const MvlResultSnapshot result = ReadMvlResultSnapshot(nds);
-        const int winner = ResolveMvlResultWinner(result);
+        const MvlRuntime::ResultSnapshot result = ReadMvlResultSnapshot(nds);
+        const int winner = MvlRuntime::ResolveResultWinner(result);
         if (winner < 0)
         {
-            if (!G.MvlAutoRestartResultUnresolvedLogged[instanceID]
-                && frame - G.MvlAutoRestartResultFrame[instanceID] >= G.Mvl.AutoRestartDelayFrames)
+            if (!restart.ResultUnresolvedLogged
+                && frame - restart.ResultFrame >= G.Mvl.AutoRestartDelayFrames)
             {
                 std::printf(
                     "NSMB MvL auto restart: result unresolved inst=%d frame=%u stars=%u/%u displayed=%u/%u collected=%u/%u lives=%u/%u deaths=%u/%u dead=%u/%u matchWins=%d/%d target=%d\n",
@@ -4019,16 +3915,16 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
                     result.Deaths[1],
                     result.Dead[0],
                     result.Dead[1],
-                    G.MvlAutoRestartWins[instanceID][0],
-                    G.MvlAutoRestartWins[instanceID][1],
+                    restart.Wins[0],
+                    restart.Wins[1],
                     G.Mvl.TargetWins);
                 std::fflush(stdout);
-                G.MvlAutoRestartResultUnresolvedLogged[instanceID] = true;
+                restart.ResultUnresolvedLogged = true;
             }
             return false;
         }
-        G.MvlAutoRestartWins[instanceID][winner]++;
-        G.MvlAutoRestartResultScored[instanceID] = true;
+        restart.Wins[winner]++;
+        restart.ResultScored = true;
         std::printf(
             "NSMB MvL auto restart: result inst=%d frame=%u winner=%d stars=%u/%u displayed=%u/%u collected=%u/%u lives=%u/%u deaths=%u/%u dead=%u/%u matchWins=%d/%d target=%d\n",
             instanceID,
@@ -4046,20 +3942,20 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
             result.Deaths[1],
             result.Dead[0],
             result.Dead[1],
-            G.MvlAutoRestartWins[instanceID][0],
-            G.MvlAutoRestartWins[instanceID][1],
+            restart.Wins[0],
+            restart.Wins[1],
             G.Mvl.TargetWins);
         std::fflush(stdout);
     }
 
-    const int leadingWins = std::max(G.MvlAutoRestartWins[instanceID][0], G.MvlAutoRestartWins[instanceID][1]);
+    const int leadingWins = std::max(restart.Wins[0], restart.Wins[1]);
     if (leadingWins >= G.Mvl.TargetWins)
         return false;
-    if (frame - G.MvlAutoRestartResultFrame[instanceID] < G.Mvl.AutoRestartDelayFrames)
+    if (frame - restart.ResultFrame < G.Mvl.AutoRestartDelayFrames)
         return false;
 
-    const int nextRestartCount = G.MvlAutoRestartCount[instanceID] + 1;
-    G.MvlAutoRestartCount[instanceID] = nextRestartCount;
+    const int nextRestartCount = restart.RestartCount + 1;
+    restart.RestartCount = nextRestartCount;
     const int requestedStage = std::clamp(MvlStageForGame(instanceID), 0, 4);
     const melonDS::u32 requestedSeed = MatchSeedForGame(instanceID);
     G.MvlCurrentStage = requestedStage;
@@ -4070,12 +3966,12 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
     {
         restartPath = 3;
     }
-    else if (!G.MvlAutoRestartCheckpoint[instanceID].empty()
-        && G.MvlAutoRestartCheckpointStage[instanceID] == requestedStage)
+    else if (!restart.GameplayCheckpoint.Buffer.empty()
+        && restart.GameplayCheckpoint.Stage == requestedStage)
     {
         melonDS::Savestate state(
-            G.MvlAutoRestartCheckpoint[instanceID].data(),
-            static_cast<melonDS::u32>(G.MvlAutoRestartCheckpoint[instanceID].size()),
+            restart.GameplayCheckpoint.Buffer.data(),
+            static_cast<melonDS::u32>(restart.GameplayCheckpoint.Buffer.size()),
             false);
         if (!state.Error && nds->DoSavestate(&state) && !state.Error)
         {
@@ -4085,7 +3981,7 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
             SchedulePacketBridgeJitHelperPatchAfterRestore(
                 instanceID,
                 frame,
-                G.MvlAutoRestartCheckpointFrame[instanceID]);
+                restart.GameplayCheckpoint.Frame);
             WriteARM9U32(nds, kGameStageGroupAddr, 0x00000009);
             WriteARM9U32(nds, kGameVsModeAddr, 0x00000001);
             WriteARM9U32(nds, kSceneNextSceneSettingsAddr, G.MvlCurrentStageSceneSettings);
@@ -4100,7 +3996,7 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
 
     if (restartPath == 0)
     {
-        G.MvlAutoRestartCount[instanceID] = nextRestartCount - 1;
+        restart.RestartCount = nextRestartCount - 1;
         std::printf(
             "NSMB MvL auto restart: failed inst=%d frame=%u nextGame=%d requestedStage=%d seed=0x%08X reason=no-compatible-checkpoint\n",
             instanceID,
@@ -4111,22 +4007,22 @@ bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::
         std::fflush(stdout);
         return false;
     }
-    G.MvlAutoRestartLastRestartFrame[instanceID] = frame;
+    restart.LastRestartFrame = frame;
     ResetMvlRuntimeSyncStateForRestart(instanceID, frame);
-    G.MvlAutoRestartInResult[instanceID] = false;
-    G.MvlAutoRestartResultScored[instanceID] = false;
-    G.MvlAutoRestartResultUnresolvedLogged[instanceID] = false;
+    restart.InResult = false;
+    restart.ResultScored = false;
+    restart.ResultUnresolvedLogged = false;
     const int actualStage = static_cast<int>(nds->ARM9Read32(kGameStageIDAddr));
     std::printf(
         "NSMB MvL auto restart: inst=%d frame=%u nextGame=%d stage=%d requestedStage=%d seed=0x%08X matchWins=%d/%d target=%d checkpoint=%d\n",
         instanceID,
         frame,
-        G.MvlAutoRestartCount[instanceID] + 1,
+        restart.RestartCount + 1,
         actualStage,
         requestedStage,
         requestedSeed,
-        G.MvlAutoRestartWins[instanceID][0],
-        G.MvlAutoRestartWins[instanceID][1],
+        restart.Wins[0],
+        restart.Wins[1],
         G.Mvl.TargetWins,
         restartPath);
     std::fflush(stdout);
@@ -4144,10 +4040,11 @@ bool ShouldPauseInputNetplayForMvlAutoRestart(int instanceID, melonDS::NDS* nds)
     constexpr melonDS::u16 kResultsScene = 0x000A;
     if (nds->ARM9Read16(kSceneCurrentSceneIDAddr) != kResultsScene)
         return false;
-    if (!G.MvlAutoRestartInResult[instanceID])
+    const MvlRuntime::InstanceState& restart = G.MvlSeries.Instances[instanceID];
+    if (!restart.InResult)
         return false;
 
-    const int leadingWins = std::max(G.MvlAutoRestartWins[instanceID][0], G.MvlAutoRestartWins[instanceID][1]);
+    const int leadingWins = std::max(restart.Wins[0], restart.Wins[1]);
     return leadingWins < G.Mvl.TargetWins;
 }
 
@@ -4157,9 +4054,10 @@ void SaveMvlAutoRestartCheckpointIfNeeded(int instanceID, melonDS::u32 frame, me
         return;
     if (instanceID < 0 || instanceID >= 16)
         return;
-    if (!G.MvlAutoRestartCheckpoint[instanceID].empty())
+    MvlRuntime::InstanceState& restart = G.MvlSeries.Instances[instanceID];
+    if (!restart.GameplayCheckpoint.Buffer.empty())
         return;
-    if (G.MvlAutoRestartInResult[instanceID] || G.MvlAutoRestartCount[instanceID] != 0)
+    if (restart.InResult || restart.RestartCount != 0)
         return;
     if (nds->ARM9Read16(kSceneCurrentSceneIDAddr) != 0x0003)
         return;
@@ -4177,21 +4075,21 @@ void SaveMvlAutoRestartCheckpointIfNeeded(int instanceID, melonDS::u32 frame, me
     melonDS::Savestate state;
     if (state.Error || !nds->DoSavestate(&state) || state.Error)
     {
-        if (!G.MvlAutoRestartCheckpointLogged[instanceID])
+        if (!restart.GameplayCheckpoint.Logged)
         {
             std::printf("NSMB MvL auto restart: failed to save checkpoint inst=%d frame=%u\n", instanceID, frame);
             std::fflush(stdout);
-            G.MvlAutoRestartCheckpointLogged[instanceID] = true;
+            restart.GameplayCheckpoint.Logged = true;
         }
         return;
     }
 
-    G.MvlAutoRestartCheckpoint[instanceID].assign(
+    restart.GameplayCheckpoint.Buffer.assign(
         reinterpret_cast<const char*>(state.Buffer()),
         reinterpret_cast<const char*>(state.Buffer()) + state.Length());
-    G.MvlAutoRestartCheckpointFrame[instanceID] = frame;
-    G.MvlAutoRestartCheckpointStage[instanceID] = static_cast<int>(sample.StageID);
-    G.MvlAutoRestartCheckpointLogged[instanceID] = true;
+    restart.GameplayCheckpoint.Frame = frame;
+    restart.GameplayCheckpoint.Stage = static_cast<int>(sample.StageID);
+    restart.GameplayCheckpoint.Logged = true;
     std::printf(
         "NSMB MvL auto restart: saved checkpoint inst=%d frame=%u bytes=%u stage=%u settings=0x%08X\n",
         instanceID,
