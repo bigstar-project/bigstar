@@ -264,7 +264,6 @@ void TestRuntimePatchConfigDefaults() {
   const MapEnvironment environment;
   const auto config =
       NsmbNetplayPoC::Config::LoadRuntimePatchConfig(environment);
-  CHECK(config.ScriptRemotePacketInputScriptPath.empty());
   CHECK(config.PlayerStickToStarStartFrame == 0u);
   CHECK(config.PlayerStickToStarEndFrame == 0u);
   CHECK(config.PlayerStickToStarSlot == 0);
@@ -276,16 +275,12 @@ void TestRuntimePatchConfigDefaults() {
   CHECK(!config.ForcePlayerInventoryPowerupsEnabled);
   CHECK(!config.ForcePlayerStarCountersEnabled);
   CHECK(!config.TracePlayerLifeChanges);
-  CHECK(!config.ScriptRemotePacketEnabled);
-  CHECK(config.ScriptRemotePacketPlayer == -1);
-  CHECK(config.ScriptRemotePacketInputInstance == -1);
   CHECK(!config.PacketBridgeJitHelperPatchEnabled);
 }
 
 void TestRuntimePatchConfigReadsAndClampsEnvironment() {
   MapEnvironment environment;
   environment.Values = {
-      {"MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT", "remote.inputs"},
       {"MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME", "20"},
       {"MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME", "10"},
       {"MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT", "3"},
@@ -319,18 +314,12 @@ void TestRuntimePatchConfigReadsAndClampsEnvironment() {
       {"MELONDS_NSML_FORCE_PLAYER_COLLECTED_STARS0", "10"},
       {"MELONDS_NSML_FORCE_PLAYER_COLLECTED_STARS1", "11"},
       {"MELONDS_NSML_TRACE_PLAYER_LIFE_CHANGES", "1"},
-      {"MELONDS_NSML_SCRIPT_REMOTE_PACKET", "1"},
-      {"MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER", "3"},
-      {"MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE", "-2"},
-      {"MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME", "90"},
-      {"MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME", "100"},
       {"MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH", "1"},
       {"MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH_FRAME", "-1"},
   };
 
   const auto config =
       NsmbNetplayPoC::Config::LoadRuntimePatchConfig(environment);
-  CHECK(config.ScriptRemotePacketInputScriptPath == "remote.inputs");
   CHECK(config.PlayerStickToStarStartFrame == 10u);
   CHECK(config.PlayerStickToStarEndFrame == 20u);
   CHECK(config.PlayerStickToStarSlot == 1);
@@ -364,11 +353,6 @@ void TestRuntimePatchConfigReadsAndClampsEnvironment() {
   CHECK(config.ForcePlayerCollectedStars0 == 10u);
   CHECK(config.ForcePlayerCollectedStars1 == 11u);
   CHECK(config.TracePlayerLifeChanges);
-  CHECK(config.ScriptRemotePacketEnabled);
-  CHECK(config.ScriptRemotePacketPlayer == 3);
-  CHECK(config.ScriptRemotePacketInputInstance == -2);
-  CHECK(config.ScriptRemotePacketStartFrame == 90u);
-  CHECK(config.ScriptRemotePacketEndFrame == 100u);
   CHECK(config.PacketBridgeJitHelperPatchEnabled);
   CHECK(config.PacketBridgeJitHelperPatchFrame == 0u);
 }

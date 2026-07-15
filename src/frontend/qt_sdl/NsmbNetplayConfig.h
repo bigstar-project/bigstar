@@ -64,7 +64,6 @@ struct InputConfig {
 };
 
 struct RuntimePatchConfig {
-  std::string ScriptRemotePacketInputScriptPath;
   std::uint32_t PlayerStickToStarStartFrame = 0;
   std::uint32_t PlayerStickToStarEndFrame = 0;
   int PlayerStickToStarSlot = 0;
@@ -98,11 +97,6 @@ struct RuntimePatchConfig {
   std::uint32_t ForcePlayerCollectedStars0 = 0;
   std::uint32_t ForcePlayerCollectedStars1 = 0;
   bool TracePlayerLifeChanges = false;
-  bool ScriptRemotePacketEnabled = false;
-  int ScriptRemotePacketPlayer = -1;
-  int ScriptRemotePacketInputInstance = -1;
-  std::uint32_t ScriptRemotePacketStartFrame = 0;
-  std::uint32_t ScriptRemotePacketEndFrame = 0;
   bool PacketBridgeJitHelperPatchEnabled = false;
   std::uint32_t PacketBridgeJitHelperPatchFrame = 0;
 };

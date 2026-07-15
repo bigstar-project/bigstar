@@ -207,7 +207,6 @@ enum class RuntimePatchLogKind : std::size_t {
   ForcePowerups,
   ForceInventoryPowerups,
   ForceStarCounters,
-  ScriptRemotePacket,
   Count,
 };
 

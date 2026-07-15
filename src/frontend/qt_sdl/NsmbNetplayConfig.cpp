@@ -273,8 +273,6 @@ InputConfig LoadInputConfig(bool netplayOnlyForMaxFrameLeadDefault) {
 
 RuntimePatchConfig LoadRuntimePatchConfig(const Environment &environment) {
   RuntimePatchConfig config;
-  config.ScriptRemotePacketInputScriptPath = ReadCString(
-      environment, "MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT", "");
   config.PlayerStickToStarStartFrame = static_cast<std::uint32_t>(
       std::max(0, ReadInt(environment,
                           "MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME", 0)));
@@ -369,18 +367,6 @@ RuntimePatchConfig LoadRuntimePatchConfig(const Environment &environment) {
                           "MELONDS_NSML_FORCE_PLAYER_COLLECTED_STARS1", 0)));
   config.TracePlayerLifeChanges =
       ReadFlag(environment, "MELONDS_NSML_TRACE_PLAYER_LIFE_CHANGES");
-  config.ScriptRemotePacketEnabled =
-      ReadFlag(environment, "MELONDS_NSML_SCRIPT_REMOTE_PACKET");
-  config.ScriptRemotePacketPlayer =
-      ReadInt(environment, "MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER", -1);
-  config.ScriptRemotePacketInputInstance = ReadInt(
-      environment, "MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE", -1);
-  config.ScriptRemotePacketStartFrame = static_cast<std::uint32_t>(
-      std::max(0, ReadInt(environment,
-                          "MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME", 0)));
-  config.ScriptRemotePacketEndFrame = static_cast<std::uint32_t>(
-      std::max(0, ReadInt(environment,
-                          "MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME", 0)));
   config.PacketBridgeJitHelperPatchEnabled =
       ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH");
   config.PacketBridgeJitHelperPatchFrame = static_cast<std::uint32_t>(std::max(

@@ -175,9 +175,6 @@ constexpr melonDS::u32 kNetState5CAddr = 0x0208883C; // Net::errorState
 constexpr melonDS::u32 kNetGGIDAddr = 0x02088858;
 constexpr melonDS::u32 kNetPacketTickAddr = 0x020888E0;
 constexpr melonDS::u32 kNetPacketActionAddr = 0x020888E4;
-constexpr melonDS::u32 kNetPacketByte5Addr = 0x020888E5;
-constexpr melonDS::u32 kNetPacketByte6Addr = 0x020888E6;
-constexpr melonDS::u32 kNetPacketByte7Addr = 0x020888E7;
 constexpr melonDS::u32 kPacketBridgeJitScratchBaseAddr = 0x023C1200;
 constexpr melonDS::u32 kPacketBridgeJitScratchTickAddr = kPacketBridgeJitScratchBaseAddr + 0x00;
 constexpr melonDS::u32 kPacketBridgeJitScratchActionAddr = kPacketBridgeJitScratchBaseAddr + 0x04;
@@ -407,7 +404,6 @@ struct State
 
 State G;
 std::vector<InputTimeline::InputSpan> GInputScript;
-std::vector<InputTimeline::InputSpan> GScriptRemotePacketInputScript;
 
 void TraceHangPhase(const char* event, const char* phase, int instanceID = -1,
     melonDS::u32 frame = 0, melonDS::u32 logicalFrame = 0, melonDS::u32 sendFrame = 0);
@@ -519,8 +515,6 @@ void RebaseMvlAutoRestartStartupFrames(int instanceID, melonDS::u32 restartFrame
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.Input.SendDelayStartFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.Input.SendDelayEndFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.Mvl.DirectBootFrame);
-    G.MvlSeries.RebaseStartupFrame(restartFrame, G.RuntimePatch.ScriptRemotePacketStartFrame);
-    G.MvlSeries.RebaseStartupFrame(restartFrame, G.RuntimePatch.ScriptRemotePacketEndFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.Mvl.CameraInitHold.StartFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.Mvl.CameraInitHold.EndFrame);
@@ -554,8 +548,6 @@ void RebaseMvlAutoRestartStartupFramesFromCheckpoint(
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Input.SendDelayStartFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Input.SendDelayEndFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.DirectBootFrame);
-    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.ScriptRemotePacketStartFrame);
-    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.ScriptRemotePacketEndFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.CameraInitHold.StartFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.CameraInitHold.EndFrame);
@@ -580,8 +572,6 @@ void ResetMvlAutoRestartStartupHookState(int instanceID)
 
     G.MvlSeries.ResetStartupHookState(instanceID);
     G.PacketBridgeRuntime.ResetStartupHookState(instanceID);
-    G.DiagnosticsRuntime.ResetRuntimePatchLog(
-        instanceID, Diagnostics::RuntimePatchLogKind::ScriptRemotePacket);
     G.Coordinator.ResetNetplayStartWait();
     G.Session.ResetStartHandshake();
     G.InputRuntime.LastInputFrameLeadResendAt = {};
@@ -807,14 +797,6 @@ InputState ApplyInputScript(int instanceID, melonDS::u32 frame, const InputState
 {
     if (!G.TestEnabled) return fallback;
     return InputTimeline::Apply(GInputScript, instanceID, frame, fallback);
-}
-
-InputState ApplyScriptRemotePacketInputScript(int instanceID, melonDS::u32 frame, const InputState& fallback)
-{
-    if (!G.TestEnabled) return fallback;
-    if (GScriptRemotePacketInputScript.empty())
-        return ApplyInputScript(instanceID, frame, fallback);
-    return InputTimeline::Apply(GScriptRemotePacketInputScript, instanceID, frame, fallback);
 }
 
 NsmbRuleAI::Config RuleAIConfig()
@@ -4512,64 +4494,6 @@ void ForcePlayerStarCountersIfNeeded(int instanceID, melonDS::u32 frame, melonDS
     }
 }
 
-void PushScriptRemotePacketIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.RuntimePatch.ScriptRemotePacketEnabled || !nds || !nds->MainRAM)
-        return;
-    if (G.RuntimePatch.ScriptRemotePacketPlayer < 0 || G.RuntimePatch.ScriptRemotePacketPlayer > 1)
-        return;
-    if (G.RuntimePatch.ScriptRemotePacketInputInstance < 0 || G.RuntimePatch.ScriptRemotePacketInputInstance >= 16)
-        return;
-    const melonDS::u32 startFrame = G.RuntimePatch.ScriptRemotePacketEnabled
-        ? G.RuntimePatch.ScriptRemotePacketStartFrame
-        : G.RuntimePatch.PacketBridgeJitHelperPatchFrame;
-    const melonDS::u32 endFrame = G.RuntimePatch.ScriptRemotePacketEnabled ? G.RuntimePatch.ScriptRemotePacketEndFrame : 0;
-    if (frame < startFrame)
-        return;
-    if (endFrame != 0 && frame > endFrame)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-
-    const InputState input = ConvertStockXToTouch(ApplyScriptRemotePacketInputScript(
-        G.RuntimePatch.ScriptRemotePacketInputInstance,
-        frame,
-        NeutralInput()));
-    melonDS::u8 packet[52] {};
-    const melonDS::u32 tick = nds->ARM9Read16(kNetPacketTickAddr);
-    const melonDS::u32 keys = (~input.KeyMask) & 0x0FFF;
-    packet[0] = static_cast<melonDS::u8>(tick & 0xFF);
-    packet[1] = static_cast<melonDS::u8>((tick >> 8) & 0xFF);
-    packet[2] = static_cast<melonDS::u8>(keys & 0xFF);
-    packet[3] = static_cast<melonDS::u8>((keys >> 8) & 0xFF);
-    packet[4] = nds->ARM9Read8(kNetPacketActionAddr);
-    packet[5] = nds->ARM9Read8(kNetPacketByte5Addr);
-    packet[6] = nds->ARM9Read8(kNetPacketByte6Addr);
-    packet[7] = nds->ARM9Read8(kNetPacketByte7Addr);
-    for (melonDS::u32 i = 0; i < 44; i++)
-        packet[8 + i] = nds->ARM9Read8(0x020888E8 + i);
-    packet[0x29] = nds->ARM9Read8(0x02088A4C);
-
-    melonDS::NSML_PushMarioVsLuigiRemotePacket(
-        nds,
-        static_cast<melonDS::u32>(G.RuntimePatch.ScriptRemotePacketPlayer),
-        packet);
-
-    if (G.DiagnosticsRuntime.TakeRuntimePatchLog(
-            instanceID, Diagnostics::RuntimePatchLogKind::ScriptRemotePacket))
-    {
-        std::printf("NSMB Test: script remote packet inst=%d frame=%u range=%u-%u player=%d inputInstance=%d tick=0x%04X keys=0x%04X\n",
-            instanceID,
-            frame,
-            G.RuntimePatch.ScriptRemotePacketStartFrame,
-            G.RuntimePatch.ScriptRemotePacketEndFrame,
-            G.RuntimePatch.ScriptRemotePacketPlayer,
-            G.RuntimePatch.ScriptRemotePacketInputInstance,
-            tick,
-            keys);
-    }
-}
-
 int CurrentPacketBridgeLocalPlayer()
 {
     if (G.NetRole == Role::Client)
@@ -4597,8 +4521,7 @@ InputState PacketBridgeInputForPlayer(
         return ConvertStockXToTouch(localInput);
     if (hasRemoteInput)
         return ConvertStockXToTouch(remoteInput);
-    return ConvertStockXToTouch(
-        ApplyScriptRemotePacketInputScript(G.RuntimePatch.ScriptRemotePacketInputInstance, frame, NeutralInput()));
+    return ConvertStockXToTouch(NeutralInput());
 }
 
 void WritePacketBridgeJitScratchInputs(
@@ -5055,20 +4978,14 @@ void WritePacketBridgeJitScratchIfNeeded(
 {
     if (!G.RuntimePatch.PacketBridgeJitHelperPatchEnabled || !nds || !nds->MainRAM)
         return;
-    if (!G.RuntimePatch.ScriptRemotePacketEnabled && !G.Enabled)
+    if (!G.Enabled)
         return;
-    if (G.RuntimePatch.ScriptRemotePacketEnabled &&
-        (G.RuntimePatch.ScriptRemotePacketInputInstance < 0 || G.RuntimePatch.ScriptRemotePacketInputInstance >= 16))
-        return;
-    melonDS::u32 startFrame = G.RuntimePatch.ScriptRemotePacketStartFrame;
+    melonDS::u32 startFrame = 0;
     if (G.Input.NetplayOnly)
     {
         startFrame = std::max(startFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
         startFrame = std::max(startFrame, G.Connection.StartFrame);
     }
-    if (G.RuntimePatch.ScriptRemotePacketEndFrame != 0 && frame > G.RuntimePatch.ScriptRemotePacketEndFrame)
-        return;
-
     const bool traceScratch = G.Diagnostics.ActiveFrameSpikeTrace;
     const auto scratchStart = std::chrono::steady_clock::now();
     unsigned long long peerStartWaitUs = 0;
@@ -6523,12 +6440,6 @@ void InitFromEnvironment()
     {
         if (!LoadInputScriptLocked())
             G.TestEnabled = false;
-        if (!G.RuntimePatch.ScriptRemotePacketInputScriptPath.empty() &&
-            !LoadInputScriptFileLocked(G.RuntimePatch.ScriptRemotePacketInputScriptPath, GScriptRemotePacketInputScript))
-        {
-            G.TestEnabled = false;
-        }
-
         if (!G.DiagnosticsRuntime.ConfigureHashLog(
                 G.Diagnostics.HashLogPath,
                 G.Diagnostics.ScreenHashEnabled))
@@ -6795,7 +6706,6 @@ void RunBeforeFrameSetupPhase(int instanceID, melonDS::u32 frame, melonDS::NDS* 
 {
     if (!CanRunFrameHooks(instanceID, nds))
         return;
-    PushScriptRemotePacketIfNeeded(instanceID, frame, nds);
     NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, frame, nds);
     ClearMvlCameraInitHoldIfNeeded(instanceID, frame, nds);
     ForcePlayerDeathCountersIfNeeded(instanceID, frame, nds);
@@ -7410,7 +7320,6 @@ void RunAfterFrameRuntimePatchPhase(int instanceID, melonDS::u32 logFrame, melon
     ForcePlayerPowerupsIfNeeded(instanceID, logFrame, nds);
     ForcePlayerInventoryPowerupsIfNeeded(instanceID, logFrame, nds);
     ForcePlayerStarCountersIfNeeded(instanceID, logFrame, nds);
-    PushScriptRemotePacketIfNeeded(instanceID, logFrame, nds);
     SaveMvlAutoRestartCheckpointIfNeeded(instanceID, logFrame, nds);
 }
 

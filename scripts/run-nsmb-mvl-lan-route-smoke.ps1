@@ -275,12 +275,6 @@ param(
     [int]$TraceStageCameraEndFrame = 0,
     [int]$TraceStageCameraInterval = 1,
     [switch]$PacketBridgeArmOnly,
-    [switch]$ScriptRemotePacket,
-    [int]$ScriptRemotePacketPlayer = -1,
-    [int]$ScriptRemotePacketInputInstance = -1,
-    [string]$ScriptRemotePacketInputScript = "",
-    [int]$ScriptRemotePacketStartFrame = 0,
-    [int]$ScriptRemotePacketEndFrame = 0,
     [switch]$PacketBridgeJitHelperPatch,
     [int]$PacketBridgeJitHelperPatchFrame = 0,
     [switch]$ClearMvlCameraInitHold,
@@ -1320,27 +1314,6 @@ function Start-MelonLANProcess {
         }
     } else {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY -ErrorAction SilentlyContinue
-    }
-    if ($ScriptRemotePacket) {
-        $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET = "1"
-        $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER = "$ScriptRemotePacketPlayer"
-        $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE = "$ScriptRemotePacketInputInstance"
-        if ($ScriptRemotePacketInputScript) {
-            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT = (Resolve-Path $ScriptRemotePacketInputScript).Path
-        } elseif ($Role -eq "host") {
-            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT = (Resolve-Path $clientInput).Path
-        } else {
-            $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT = (Resolve-Path $hostInput).Path
-        }
-        $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME = "$ScriptRemotePacketStartFrame"
-        $env:MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME = "$ScriptRemotePacketEndFrame"
-    } else {
-        Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_PLAYER -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_INSTANCE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_INPUT_SCRIPT -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_SCRIPT_REMOTE_PACKET_END_FRAME -ErrorAction SilentlyContinue
     }
     if ($PacketBridgeJitHelperPatch) {
         $env:MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH = "1"
@@ -2635,7 +2608,7 @@ if (-not $SkipFrameLimitCheck) {
         $requiredPatterns += @{ Path = $info.Out; Pattern = "frame limit reached"; Name = "$($info.Role) frame limit" }
     }
 }
-if (-not $NoLanMP -and -not $PacketBridge -and -not $InputNetplay -and -not ($RunRole -ne "both" -and $ScriptRemotePacket -and $PacketBridgeArmOnly)) {
+if (-not $NoLanMP -and -not $PacketBridge -and -not $InputNetplay) {
     foreach ($info in $roleInfos) {
         $requiredPatterns = @(@{ Path = $info.Out; Pattern = $info.LanStartPattern; Name = $info.LanStartName }) + $requiredPatterns
     }
