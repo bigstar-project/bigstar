@@ -100,10 +100,6 @@ param(
     [string]$ClientPacketBridgeForceGameLocalPlayerID = "",
     [int]$PacketBridgeForceGameLocalPlayerIDStartFrame = 0,
     [switch]$PacketBridgeForceGameLocalPlayerIDEarly,
-    [switch]$PacketBridgeStrictRemote,
-    [string]$PacketBridgeStrictPlayers = "",
-    [int]$PacketBridgeStrictStartFrame = 0,
-    [int]$PacketBridgeStrictRequireLead = 0,
     [int]$PacketBridgeLiveFallbackWindow = 0,
     [switch]$PacketBridgeLiveFallbackNearest,
     [switch]$PacketBridgeLiveFallbackLatestBefore,
@@ -1315,31 +1311,6 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_THROTTLE_TIMEOUT_MS -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_THROTTLE_START_FRAME -ErrorAction SilentlyContinue
         }
-        if ($PacketBridgeStrictRemote -or $PacketBridgeStrictPlayers) {
-            $env:MELONDS_NSML_PACKET_REPLAY_STRICT = "1"
-            if ($PacketBridgeStrictStartFrame -gt 0) {
-                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME = "$PacketBridgeStrictStartFrame"
-            } else {
-                Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME -ErrorAction SilentlyContinue
-            }
-            if ($PacketBridgeStrictRequireLead -gt 0) {
-                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_REQUIRE_LEAD = "$PacketBridgeStrictRequireLead"
-            } else {
-                Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_REQUIRE_LEAD -ErrorAction SilentlyContinue
-            }
-            if ($PacketBridgeStrictPlayers) {
-                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS = $PacketBridgeStrictPlayers
-            } elseif ($Role -eq "host") {
-                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS = "1"
-            } else {
-                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS = "0"
-            }
-        } elseif (-not $PacketReplayFile) {
-            Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_REQUIRE_LEAD -ErrorAction SilentlyContinue
-        }
         if ($PacketBridgeLiveFallbackWindow -gt 0) {
             $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW = "$PacketBridgeLiveFallbackWindow"
         } else {
@@ -1545,10 +1516,6 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_NET_RANDOM_VALUE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_NET_RANDOM_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_NET_RANDOM_AUTO -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_STRICT_REQUIRE_LEAD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK -ErrorAction SilentlyContinue
@@ -1567,22 +1534,6 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SEND_JITTER_FRAMES -ErrorAction SilentlyContinue
         if ($PacketBridgeLookupTickDelay -gt 0) {
             $env:MELONDS_NSML_PACKET_REPLAY_LOOKUP_TICK_DELAY = "$PacketBridgeLookupTickDelay"
-        }
-        if ($PacketBridgeStrictRemote -or $PacketBridgeStrictPlayers) {
-            $env:MELONDS_NSML_PACKET_REPLAY_STRICT = "1"
-            if ($PacketBridgeStrictStartFrame -gt 0) {
-                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME = "$PacketBridgeStrictStartFrame"
-            }
-            if ($PacketBridgeStrictRequireLead -gt 0) {
-                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_REQUIRE_LEAD = "$PacketBridgeStrictRequireLead"
-            }
-            if ($PacketBridgeStrictPlayers) {
-                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS = $PacketBridgeStrictPlayers
-            } elseif ($Role -eq "host") {
-                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS = "1"
-            } else {
-                $env:MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS = "0"
-            }
         }
         if ($PacketBridgeLiveFallbackWindow -gt 0) {
             $env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW = "$PacketBridgeLiveFallbackWindow"

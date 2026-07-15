@@ -541,30 +541,6 @@ bool NSML_HasMarioVsLuigiRemotePacket(NDS* nds, u32 player, u32 tick)
     return packetIt != ndsIt->second.end() && packetIt->second.Valid[player];
 }
 
-static bool NSMLLiveReplayHasLead(NDS* nds, u32 player, u32 tick, u32 lead)
-{
-    if (!nds || player > 1 || lead == 0)
-        return true;
-
-    tick &= 0xFFFF;
-    std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
-    auto ndsIt = NSMLLiveReplayPackets.find(nds);
-    if (ndsIt == NSMLLiveReplayPackets.end())
-        return false;
-
-    const u32 required = (tick + lead) & 0xFFFF;
-    for (const auto& [packetTick, entry] : ndsIt->second)
-    {
-        if (!entry.Valid[player])
-            continue;
-
-        const u32 distance = (packetTick - tick) & 0xFFFF;
-        if (distance <= 0x7FFF && packetTick == required)
-            return true;
-    }
-    return false;
-}
-
 static bool NSMLLiveReplayLatestBeforeFallbackEnabled(NDS* nds)
 {
     static int enabled = -1;
@@ -996,10 +972,6 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
     {
         bool Checked = false;
         bool Enabled = false;
-        bool Strict = false;
-        bool StrictPlayer[2] { true, true };
-        u32 StrictStartFrame = 0;
-        u32 StrictRequireLead = 0;
         u32 LookupTickDelay = 0;
         u32 LiveFallbackWindow = 0;
         bool ReturnLookupTick = false;
@@ -1014,25 +986,6 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
         std::lock_guard<std::mutex> configLock(NSMLTraceConfigMutex);
         if (!cfg.Checked)
         {
-            cfg.Strict = getenv("MELONDS_NSML_PACKET_REPLAY_STRICT") != nullptr;
-            if (const char* strictPlayers = getenv("MELONDS_NSML_PACKET_REPLAY_STRICT_PLAYERS"))
-            {
-                cfg.StrictPlayer[0] = false;
-                cfg.StrictPlayer[1] = false;
-                char buf[32];
-                strncpy(buf, strictPlayers, sizeof(buf) - 1);
-                buf[sizeof(buf) - 1] = '\0';
-                for (char* tok = strtok(buf, ", \t\r\n"); tok; tok = strtok(nullptr, ", \t\r\n"))
-                {
-                    const u32 strictPlayer = static_cast<u32>(strtoul(tok, nullptr, 0));
-                    if (strictPlayer <= 1)
-                        cfg.StrictPlayer[strictPlayer] = true;
-                }
-            }
-            if (const char* strictStartFrame = getenv("MELONDS_NSML_PACKET_REPLAY_STRICT_START_FRAME"))
-                cfg.StrictStartFrame = static_cast<u32>(strtoul(strictStartFrame, nullptr, 0));
-            if (const char* strictRequireLead = getenv("MELONDS_NSML_PACKET_REPLAY_STRICT_REQUIRE_LEAD"))
-                cfg.StrictRequireLead = static_cast<u32>(strtoul(strictRequireLead, nullptr, 0));
             if (const char* lookupTickDelay = getenv("MELONDS_NSML_PACKET_REPLAY_LOOKUP_TICK_DELAY"))
                 cfg.LookupTickDelay = static_cast<u32>(strtoul(lookupTickDelay, nullptr, 0));
             if (const char* liveFallbackWindow = getenv("MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW"))
@@ -1139,8 +1092,6 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
     const u32 player = cpu->R[0] & 0xFFFF;
     const u32 offset = cpu->R[1];
     if (!IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
-        return false;
-    if (cfg.Strict && cpu->NDS.NumFrames < cfg.StrictStartFrame)
         return false;
 
     const u32 currentTick = NSMLPacketBridgeCanonicalTick(cpu->NDS);
@@ -1258,29 +1209,7 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
     }
 
     if (!hit)
-    {
-        if (!cfg.Strict || player > 1 || !cfg.StrictPlayer[player] || cpu->NDS.NumFrames < cfg.StrictStartFrame)
-            return false;
-        if (!NSMLLiveReplayHasLead(&cpu->NDS, player, tick, cfg.StrictRequireLead))
-            return false;
-
-        switch (op)
-        {
-        case Op::Keys:
-        case Op::Byte:
-            value = 0;
-            break;
-        case Op::Tick:
-            value = tick;
-            break;
-        case Op::Action:
-            value = cpu->NDS.ARM9Read8(0x020888E4);
-            break;
-        case Op::None:
-            value = 0;
-            break;
-        }
-    }
+        return false;
 
     cpu->R[0] = value;
     cpu->JumpTo(cpu->R[14]);
