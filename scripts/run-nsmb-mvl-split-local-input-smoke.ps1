@@ -69,7 +69,6 @@ param(
     [switch]$WorldStateSkipStar,
     [switch]$WorldStateApplyMovingHazard,
     [switch]$WorldStateApplyEffects,
-    [switch]$WorldStateApplyActorSnapshot,
     [switch]$WorldStateSkipEffects,
     [switch]$WorldStateTraceMovingHazards,
     [switch]$WorldStateTraceObjectLifecycles,
@@ -445,9 +444,6 @@ if ($WorldStateSync) {
     }
     if ($WorldStateApplyEffects) {
         $common += "-WorldStateApplyEffects"
-    }
-    if ($WorldStateApplyActorSnapshot) {
-        $common += "-WorldStateApplyActorSnapshot"
     }
     if ($WorldStateSkipEffects) {
         $common += "-WorldStateSkipEffects"

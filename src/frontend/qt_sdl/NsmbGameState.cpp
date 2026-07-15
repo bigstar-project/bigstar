@@ -840,7 +840,6 @@ void RemoteStateStore::ResetForRestart() {
   PlayerStates_.clear();
   WorldState_.reset();
   MovingHazardState_.reset();
-  WorldActorSnapshot_.reset();
   WorldEffectState_.reset();
 }
 
@@ -867,11 +866,6 @@ bool RemoteStateStore::StoreWorldState(
 bool RemoteStateStore::StoreMovingHazardState(
     const WireProtocol::WireMovingHazardState &state) {
   return StoreLatest(MovingHazardState_, state);
-}
-
-bool RemoteStateStore::StoreWorldActorSnapshot(
-    const WireProtocol::WireWorldActorSnapshotState &state) {
-  return StoreLatest(WorldActorSnapshot_, state);
 }
 
 bool RemoteStateStore::StoreWorldEffectState(
@@ -937,11 +931,6 @@ const WireProtocol::WireWorldState *RemoteStateStore::WorldState() const {
 const WireProtocol::WireMovingHazardState *
 RemoteStateStore::MovingHazardState() const {
   return MovingHazardState_ ? &*MovingHazardState_ : nullptr;
-}
-
-const WireProtocol::WireWorldActorSnapshotState *
-RemoteStateStore::WorldActorSnapshot() const {
-  return WorldActorSnapshot_ ? &*WorldActorSnapshot_ : nullptr;
 }
 
 const WireProtocol::WireWorldEffectState *
@@ -1023,10 +1012,6 @@ void StateSyncRuntime::ResetForRestart(int instanceID) {
             std::end(WorldMovingHazardRemoteGUIDMaps[instanceID]), 0);
   std::fill(std::begin(WorldMovingHazardLocalGUIDMaps[instanceID]),
             std::end(WorldMovingHazardLocalGUIDMaps[instanceID]), 0);
-  std::fill(std::begin(WorldActorSnapshotRemoteGUIDMaps[instanceID]),
-            std::end(WorldActorSnapshotRemoteGUIDMaps[instanceID]), 0);
-  std::fill(std::begin(WorldActorSnapshotLocalGUIDMaps[instanceID]),
-            std::end(WorldActorSnapshotLocalGUIDMaps[instanceID]), 0);
 }
 
 } // namespace NsmbNetplayPoC::GameStateModel

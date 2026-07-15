@@ -38,7 +38,6 @@ param(
     [switch]$WorldStateSkipStar,
     [switch]$WorldStateApplyMovingHazard,
     [switch]$WorldStateApplyEffects,
-    [switch]$WorldStateApplyActorSnapshot,
     [switch]$WorldStateSkipEffects,
     [switch]$WorldStateTraceMovingHazards,
     [switch]$WorldStateTraceObjectLifecycles,
@@ -987,11 +986,6 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS -ErrorAction SilentlyContinue
         }
-        if ($WorldStateApplyActorSnapshot) {
-            $env:MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT = "1"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT -ErrorAction SilentlyContinue
-        }
         if ($WorldStateSkipEffects) {
             $env:MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS = "1"
         } else {
@@ -1033,7 +1027,6 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES -ErrorAction SilentlyContinue
@@ -2281,7 +2274,6 @@ function Start-MelonLANProcess {
         "worldStateApply=$($env:MELONDS_NSML_WORLD_STATE_APPLY)"
         "worldStateApplyMovingHazard=$($env:MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD)"
         "worldStateApplyEffects=$($env:MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS)"
-        "worldStateApplyActorSnapshot=$($env:MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT)"
         "gameplayHeartbeatInterval=$($env:MELONDS_NSML_GAMEPLAY_HEARTBEAT_INTERVAL)"
         "worldStateTraceActorInternals=$($env:MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS)"
         "worldStateTraceEffects=$($env:MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS)"

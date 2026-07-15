@@ -970,8 +970,6 @@ StateSyncConfig LoadStateSyncConfig(const Environment &environment) {
   config.WorldApplyEffects =
       ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_APPLY_EFFECTS") &&
       !ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_SKIP_EFFECTS");
-  config.WorldApplyActorSnapshot =
-      ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_APPLY_ACTOR_SNAPSHOT");
   config.WorldTraceMovingHazards =
       ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS");
   config.WorldTraceObjectLifecycles =

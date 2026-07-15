@@ -188,9 +188,6 @@ void TestRemoteStateStoreSelectionAndRestart() {
   WireProtocol::WireMovingHazardState hazard{};
   hazard.Frame = 30;
   CHECK(store.StoreMovingHazardState(hazard));
-  WireProtocol::WireWorldActorSnapshotState actors{};
-  actors.Frame = 40;
-  CHECK(store.StoreWorldActorSnapshot(actors));
   WireProtocol::WireWorldEffectState effects{};
   effects.Frame = 50;
   CHECK(store.StoreWorldEffectState(effects));
@@ -201,7 +198,6 @@ void TestRemoteStateStoreSelectionAndRestart() {
   CHECK(store.PlayerStateCount() == 0);
   CHECK(store.WorldState() == nullptr);
   CHECK(store.MovingHazardState() == nullptr);
-  CHECK(store.WorldActorSnapshot() == nullptr);
   CHECK(store.WorldEffectState() == nullptr);
 }
 
@@ -264,8 +260,6 @@ void TestStateSyncRuntimeRestartContract() {
   runtime.WorldMovingHazardGUIDCaches[3][0] = 33;
   runtime.WorldMovingHazardRemoteGUIDMaps[3][0] = 34;
   runtime.WorldMovingHazardLocalGUIDMaps[3][0] = 35;
-  runtime.WorldActorSnapshotRemoteGUIDMaps[3][0] = 36;
-  runtime.WorldActorSnapshotLocalGUIDMaps[3][0] = 37;
   runtime.LastTracedWorldMovingHazardsFrame[3] = 38;
   runtime.LastTracedWorldEffectsFrame[3] = 39;
   runtime.LastTracedWorldObjectLifecyclesFrame[3] = 40;
@@ -290,8 +284,6 @@ void TestStateSyncRuntimeRestartContract() {
   CHECK(runtime.WorldMovingHazardGUIDCaches[3][0] == 0);
   CHECK(runtime.WorldMovingHazardRemoteGUIDMaps[3][0] == 0);
   CHECK(runtime.WorldMovingHazardLocalGUIDMaps[3][0] == 0);
-  CHECK(runtime.WorldActorSnapshotRemoteGUIDMaps[3][0] == 0);
-  CHECK(runtime.WorldActorSnapshotLocalGUIDMaps[3][0] == 0);
   CHECK(runtime.LastTracedWorldMovingHazardsFrame[3] == 38);
   CHECK(runtime.LastTracedWorldEffectsFrame[3] == 39);
   CHECK(runtime.LastTracedWorldObjectLifecyclesFrame[3] == 40);

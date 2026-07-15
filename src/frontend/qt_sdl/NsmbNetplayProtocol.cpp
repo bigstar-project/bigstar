@@ -219,7 +219,6 @@ namespace {
 bool IsGamePacketSize(std::size_t size, const KnownPacketSizes &known) {
   return size == known.NSMLPacket || size == known.PlayerState ||
          size == known.WorldState || size == known.MovingHazardState ||
-         size == known.WorldActorSnapshotState ||
          size == known.WorldEffectState || size == known.GameState;
 }
 
@@ -242,8 +241,6 @@ PacketClass Classify(std::size_t packetSize, const KnownPacketSizes &sizes) {
     return PacketClass::WorldState;
   if (packetSize == sizes.MovingHazardState)
     return PacketClass::MovingHazardState;
-  if (packetSize == sizes.WorldActorSnapshotState)
-    return PacketClass::WorldActorSnapshotState;
   if (packetSize == sizes.WorldEffectState)
     return PacketClass::WorldEffectState;
   if (packetSize == sizes.GameState)

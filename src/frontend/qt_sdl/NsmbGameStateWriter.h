@@ -85,13 +85,6 @@ struct ApplyTraceOptions {
   }
 };
 
-struct WorldActorSnapshotApplyOptions {
-  int InstanceID = 0;
-  melonDS::u32 Frame = 0;
-  int MaxPredictFrames = 0;
-  ApplyTraceOptions Trace;
-};
-
 struct WorldStateApplyOptions {
   int InstanceID = 0;
   melonDS::u32 Frame = 0;
@@ -166,11 +159,6 @@ bool WritePlayerGlobalState(melonDS::NDS *nds,
 GameStateApplyResult ApplyGameState(
     melonDS::NDS *nds, const GameStateModel::GameStateSample &sample,
     const GameStateApplyOptions &options);
-void ApplyWorldActorSnapshotState(
-    melonDS::NDS *nds,
-    const WireProtocol::WireWorldActorSnapshotState &sample,
-    GameStateModel::StateSyncRuntime &runtime,
-    const WorldActorSnapshotApplyOptions &options);
 void ApplyWorldState(melonDS::NDS *nds,
                      const WireProtocol::WireWorldState &sample,
                      GameStateModel::StateSyncRuntime &runtime,

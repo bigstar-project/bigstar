@@ -2249,54 +2249,6 @@ void FillWireWorldActorState(
   state.TargetVelZ = actor.TargetVelZ;
 }
 
-std::vector<WorldActorSnapshotCandidate>
-CollectWorldActorSnapshotCandidates(melonDS::NDS *nds) {
-  const auto isCandidate = [](const GameStateObjectScanEntry &entry) {
-    if (!entry.Actor.Found || entry.Actor.StateType == 0 ||
-        entry.Actor.StateType > 2 || entry.Actor.Flags >= 0x10000000)
-      return false;
-    switch (entry.ObjectID) {
-    case kPlayerObjectID:
-    case kVsBattleStarActorObjectID:
-    case kVsMovingHazardObjectID:
-    case kStageSceneObjectID:
-    case kStageFXObjectID:
-    case kStageActorManagerObjectID:
-    case kStageControllerObjectID:
-    case kMvlObject267ID:
-    case kVsConnectObjectID:
-    case kCourseSelectObjectID:
-    case kStageCameraObjectID:
-      return false;
-    default:
-      return entry.ObjectID != 0 && entry.ObjectID < 0x0300;
-    }
-  };
-
-  std::vector<WorldActorSnapshotCandidate> actors;
-  const GameStateObjectScanCache cache = BuildGameStateObjectScanCache(nds);
-  actors.reserve(
-      std::min(cache.Entries.size(), WireProtocol::kMaxWorldActorSnapshots));
-  for (const GameStateObjectScanEntry &entry : cache.Entries) {
-    if (isCandidate(entry))
-      actors.push_back({entry.ObjectID, entry.Actor});
-  }
-  std::sort(actors.begin(), actors.end(),
-            [](const WorldActorSnapshotCandidate &lhs,
-               const WorldActorSnapshotCandidate &rhs) {
-              if (lhs.ObjectID != rhs.ObjectID)
-                return lhs.ObjectID < rhs.ObjectID;
-              if (lhs.Actor.Settings != rhs.Actor.Settings)
-                return lhs.Actor.Settings < rhs.Actor.Settings;
-              if (lhs.Actor.PosX != rhs.Actor.PosX)
-                return lhs.Actor.PosX < rhs.Actor.PosX;
-              return lhs.Actor.GUID < rhs.Actor.GUID;
-            });
-  if (actors.size() > WireProtocol::kMaxWorldActorSnapshots)
-    actors.resize(WireProtocol::kMaxWorldActorSnapshots);
-  return actors;
-}
-
 void ReadPlayerGlobalState(melonDS::NDS *nds, melonDS::u32 player,
                            WireProtocol::WirePlayerState &state) {
   if (!nds || !nds->MainRAM || player > 1)
@@ -2497,30 +2449,6 @@ WireProtocol::WireMovingHazardState BuildMovingHazardStatePacket(
   for (melonDS::u32 index = 0; index < packet.Count; index++)
     FillWireWorldActorState(actors[index], packet.Actors[index]);
   return packet;
-}
-
-bool BuildWorldActorSnapshotStatePacket(
-    melonDS::NDS *nds, melonDS::u32 instance, melonDS::u32 frame,
-    WireProtocol::WireWorldActorSnapshotState &packet) {
-  const std::vector<WorldActorSnapshotCandidate> actors =
-      CollectWorldActorSnapshotCandidates(nds);
-  if (actors.empty())
-    return false;
-
-  packet = {};
-  packet.Magic = WireProtocol::kMagic;
-  packet.Version = WireProtocol::kVersion;
-  packet.Kind = WireProtocol::kWireKindWorldActorSnapshot;
-  packet.Frame = frame;
-  packet.Instance = instance;
-  packet.Count = static_cast<melonDS::u32>(
-      std::min(actors.size(), WireProtocol::kMaxWorldActorSnapshots));
-  for (melonDS::u32 index = 0; index < packet.Count; index++) {
-    packet.Actors[index].ObjectID = actors[index].ObjectID;
-    FillWireWorldActorState(actors[index].Actor,
-                            packet.Actors[index].Actor);
-  }
-  return true;
 }
 
 } // namespace NsmbNetplayPoC::GameStateReader

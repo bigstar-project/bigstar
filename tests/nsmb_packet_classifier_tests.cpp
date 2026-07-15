@@ -16,7 +16,7 @@ void Check(bool condition, const char *expression, int line) {
 #define CHECK(expression) Check((expression), #expression, __LINE__)
 
 NsmbNetplayPoC::PacketClassifier::KnownPacketSizes Sizes() {
-  return {24, 16, 80, 96, 112, 128, 144, 160, 176};
+  return {24, 16, 80, 96, 112, 128, 160, 176};
 }
 
 void TestEveryKnownClass() {
@@ -28,7 +28,6 @@ void TestEveryKnownClass() {
   CHECK(Classify(96, sizes) == PacketClass::PlayerState);
   CHECK(Classify(112, sizes) == PacketClass::WorldState);
   CHECK(Classify(128, sizes) == PacketClass::MovingHazardState);
-  CHECK(Classify(144, sizes) == PacketClass::WorldActorSnapshotState);
   CHECK(Classify(160, sizes) == PacketClass::WorldEffectState);
   CHECK(Classify(176, sizes) == PacketClass::GameState);
 }
@@ -38,6 +37,7 @@ void TestBundleCandidateAndUnknownSizes() {
   const KnownPacketSizes sizes = Sizes();
   CHECK(Classify(17, sizes) == PacketClass::InputBundleCandidate);
   CHECK(Classify(64, sizes) == PacketClass::InputBundleCandidate);
+  CHECK(Classify(144, sizes) == PacketClass::InputBundleCandidate);
   CHECK(Classify(0, sizes) == PacketClass::Unknown);
   CHECK(Classify(15, sizes) == PacketClass::Unknown);
 }

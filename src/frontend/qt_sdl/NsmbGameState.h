@@ -648,8 +648,6 @@ public:
   bool StoreWorldState(const WireProtocol::WireWorldState &state);
   bool StoreMovingHazardState(
       const WireProtocol::WireMovingHazardState &state);
-  bool StoreWorldActorSnapshot(
-      const WireProtocol::WireWorldActorSnapshotState &state);
   bool StoreWorldEffectState(
       const WireProtocol::WireWorldEffectState &state);
 
@@ -666,7 +664,6 @@ public:
 
   const WireProtocol::WireWorldState *WorldState() const;
   const WireProtocol::WireMovingHazardState *MovingHazardState() const;
-  const WireProtocol::WireWorldActorSnapshotState *WorldActorSnapshot() const;
   const WireProtocol::WireWorldEffectState *WorldEffectState() const;
   std::size_t PlayerStateCount() const;
 
@@ -676,8 +673,6 @@ private:
   std::map<melonDS::u64, WireProtocol::WirePlayerState> PlayerStates_;
   std::optional<WireProtocol::WireWorldState> WorldState_;
   std::optional<WireProtocol::WireMovingHazardState> MovingHazardState_;
-  std::optional<WireProtocol::WireWorldActorSnapshotState>
-      WorldActorSnapshot_;
   std::optional<WireProtocol::WireWorldEffectState> WorldEffectState_;
 };
 
@@ -709,10 +704,6 @@ public:
       [16][WireProtocol::kMaxWorldMovingHazards]{};
   melonDS::u32 WorldMovingHazardLocalGUIDMaps
       [16][WireProtocol::kMaxWorldMovingHazards]{};
-  melonDS::u32 WorldActorSnapshotRemoteGUIDMaps
-      [16][WireProtocol::kMaxWorldActorSnapshots]{};
-  melonDS::u32 WorldActorSnapshotLocalGUIDMaps
-      [16][WireProtocol::kMaxWorldActorSnapshots]{};
   melonDS::u32 WorldMovingHazardCacheCounts[16]{};
   melonDS::u32 LastTracedWorldMovingHazardsFrame[16]{};
   melonDS::u32 LastTracedWorldEffectsFrame[16]{};

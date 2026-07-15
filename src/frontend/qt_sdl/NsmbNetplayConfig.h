@@ -341,7 +341,6 @@ struct StateSyncConfig {
   bool WorldApplyStarActor = true;
   bool WorldApplyMovingHazard = false;
   bool WorldApplyEffects = false;
-  bool WorldApplyActorSnapshot = false;
   bool WorldTraceMovingHazards = false;
   bool WorldTraceObjectLifecycles = false;
   bool WorldTraceActorInternals = false;
