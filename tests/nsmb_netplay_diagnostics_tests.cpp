@@ -206,6 +206,93 @@ void TestPerformanceRuntimeContract() {
   CHECK(runtime.ShouldTraceGameplayHeartbeat(1, 20, 20, 10));
 }
 
+void TestDiagnosticSnapshotRuntimeContract() {
+  using NsmbNetplayPoC::Diagnostics::DiagnosticFrameSnapshot;
+  using NsmbNetplayPoC::Diagnostics::Runtime;
+  using NsmbNetplayPoC::Diagnostics::kDiagnosticRingCapacity;
+
+  Runtime runtime;
+  CHECK(!runtime.LatestDiagnosticSnapshot(-1));
+  CHECK(runtime.DiagnosticSnapshotWindow(16, 10).empty());
+
+  DiagnosticFrameSnapshot snapshot;
+  snapshot.Valid = true;
+  snapshot.Instance = 0;
+  snapshot.Frame = 1;
+  snapshot.Player[0].PosX = 100;
+  runtime.RecordDiagnosticSnapshot(-1, snapshot);
+  runtime.RecordDiagnosticSnapshot(0, snapshot);
+  auto latest = runtime.LatestDiagnosticSnapshot(0);
+  CHECK(latest && latest->Frame == 1 && latest->Player[0].PosX == 100);
+
+  snapshot.Frame = 2;
+  snapshot.Player[0].PosX = 200;
+  runtime.RecordDiagnosticSnapshot(0, snapshot);
+  std::vector<DiagnosticFrameSnapshot> window =
+      runtime.DiagnosticSnapshotWindow(0, 1);
+  CHECK(window.size() == 1 && window[0].Frame == 2);
+  window = runtime.DiagnosticSnapshotWindow(0, 2);
+  CHECK(window.size() == 2 && window[0].Frame == 1 &&
+        window[1].Frame == 2);
+
+  Runtime wrapped;
+  for (std::size_t frame = 1; frame <= kDiagnosticRingCapacity; frame++) {
+    snapshot.Frame = static_cast<melonDS::u32>(frame);
+    wrapped.RecordDiagnosticSnapshot(0, snapshot);
+  }
+  CHECK(!wrapped.LatestDiagnosticSnapshot(0));
+  window = wrapped.DiagnosticSnapshotWindow(0, 3);
+  CHECK(window.size() == 3 && window[0].Frame == 718 &&
+        window[1].Frame == 719 && window[2].Frame == 720);
+  snapshot.Frame = 721;
+  wrapped.RecordDiagnosticSnapshot(0, snapshot);
+  latest = wrapped.LatestDiagnosticSnapshot(0);
+  CHECK(latest && latest->Frame == 721);
+  window = wrapped.DiagnosticSnapshotWindow(0, 3);
+  CHECK(window.size() == 3 && window[0].Frame == 719 &&
+        window[1].Frame == 720 && window[2].Frame == 721);
+
+  CHECK(!runtime.TakeDueDiagnosticPostTrigger(0, 100));
+  runtime.ScheduleDiagnosticPostTrigger(-1, 120);
+  CHECK(!runtime.TakeDueDiagnosticPostTrigger(0, 120));
+  runtime.ScheduleDiagnosticPostTrigger(0, 120);
+  CHECK(!runtime.TakeDueDiagnosticPostTrigger(0, 119));
+  const auto trigger = runtime.TakeDueDiagnosticPostTrigger(0, 120);
+  CHECK(trigger && *trigger == 120);
+  CHECK(!runtime.TakeDueDiagnosticPostTrigger(0, 121));
+}
+
+void TestDiagnosticEventThrottleContract() {
+  using NsmbNetplayPoC::Diagnostics::Runtime;
+  Runtime runtime;
+
+  CHECK(!runtime.ShouldEmitDiagnosticMismatch(-1, 100, 300));
+  CHECK(runtime.ShouldEmitDiagnosticMismatch(0, 100, 300));
+  CHECK(!runtime.ShouldEmitDiagnosticMismatch(0, 399, 300));
+  CHECK(runtime.ShouldEmitDiagnosticMismatch(0, 400, 300));
+  CHECK(runtime.ShouldEmitDiagnosticMismatch(1, 100, 300));
+
+  CHECK(!runtime.ShouldEmitDiagnosticLifeEvent(0, -1, 100, false, 300));
+  CHECK(runtime.ShouldEmitDiagnosticLifeEvent(0, 0, 100, false, 300));
+  CHECK(!runtime.ShouldEmitDiagnosticLifeEvent(0, 0, 100, false, 300));
+  CHECK(!runtime.ShouldEmitDiagnosticLifeEvent(0, 0, 399, true, 300));
+  CHECK(runtime.ShouldEmitDiagnosticLifeEvent(0, 0, 400, true, 300));
+  CHECK(runtime.ShouldEmitDiagnosticLifeEvent(0, 0, 401, false, 300));
+  CHECK(runtime.ShouldEmitDiagnosticLifeEvent(0, 1, 100, false, 300));
+
+  CHECK(!runtime.ShouldEmitDiagnosticPitTransition(0, 2, 100, 120));
+  CHECK(runtime.ShouldEmitDiagnosticPitTransition(0, 0, 100, 120));
+  CHECK(!runtime.ShouldEmitDiagnosticPitTransition(0, 0, 219, 120));
+  CHECK(runtime.ShouldEmitDiagnosticPitTransition(0, 0, 220, 120));
+  CHECK(runtime.ShouldEmitDiagnosticPitTransition(0, 1, 100, 120));
+
+  CHECK(!runtime.ShouldEmitDiagnosticPositionAnomaly(16, 0, 100, 120));
+  CHECK(runtime.ShouldEmitDiagnosticPositionAnomaly(0, 0, 100, 120));
+  CHECK(!runtime.ShouldEmitDiagnosticPositionAnomaly(0, 0, 219, 120));
+  CHECK(runtime.ShouldEmitDiagnosticPositionAnomaly(0, 0, 220, 120));
+  CHECK(runtime.ShouldEmitDiagnosticPositionAnomaly(1, 0, 100, 120));
+}
+
 } // namespace
 
 int main() {
@@ -214,6 +301,8 @@ int main() {
   TestHashLogContract();
   TestDiagnosticEventLogContract();
   TestPerformanceRuntimeContract();
+  TestDiagnosticSnapshotRuntimeContract();
+  TestDiagnosticEventThrottleContract();
   if (Failures != 0) {
     std::printf("nsmb_netplay_diagnostics_tests: %d failure(s)\n", Failures);
     return 1;

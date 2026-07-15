@@ -348,7 +348,6 @@ constexpr melonDS::u32 kRollbackMainRAMModeSparse = 1;
 constexpr melonDS::u32 kRollbackMainRAMModeDelta = 2;
 constexpr melonDS::u32 kRollbackMainRAMModeSkip = 3;
 
-constexpr std::size_t kDiagnosticRingCapacity = 720;
 constexpr melonDS::u32 kDiagnosticPostTriggerFrames = 120;
 constexpr melonDS::u32 kDiagnosticRepeatedAnomalyFrames = 120;
 constexpr melonDS::u32 kPlayerPitDeathTransitStateAddr = 0x021196B0;
@@ -381,90 +380,8 @@ const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings);
 
 
 GameStateSample ReadGameStateSample(melonDS::NDS* nds);
-
-struct DiagnosticPlayerSnapshot
-{
-    melonDS::u32 Found = 0;
-    melonDS::u32 Base = 0;
-    melonDS::u32 GUID = 0;
-    melonDS::u32 Settings = 0;
-    melonDS::u32 StateType = 0;
-    melonDS::u32 Flags = 0;
-    melonDS::u32 PosX = 0;
-    melonDS::u32 PosY = 0;
-    melonDS::u32 PosZ = 0;
-    melonDS::u32 PrevX = 0;
-    melonDS::u32 PrevY = 0;
-    melonDS::u32 PrevZ = 0;
-    melonDS::u32 VelX = 0;
-    melonDS::u32 VelY = 0;
-    melonDS::u32 VelZ = 0;
-    melonDS::u32 ActionFlag = 0;
-    melonDS::u32 SubActionFlag = 0;
-    melonDS::u32 PhysicsFlag = 0;
-    melonDS::u32 DamageCooldown = 0;
-    melonDS::u32 TransitionFlag = 0;
-    melonDS::u32 CollisionFlag = 0;
-    melonDS::u32 EnvironmentFlag = 0;
-    melonDS::u32 LinkedActor = 0;
-    melonDS::u32 TransitionStep = 0;
-    melonDS::u32 UpdateLocked = 0;
-    melonDS::u32 CharacterIDBase = 0;
-    melonDS::u32 TransitioningFlag = 0;
-    melonDS::u32 CameraFocusMode = 0;
-    melonDS::u32 DefeatedFlag = 0;
-    melonDS::u32 PlayerBaseID = 0;
-    melonDS::u32 VisibleFlag = 0;
-    melonDS::u32 TransitFunc = 0;
-    melonDS::u32 TransitArg = 0;
-    melonDS::u32 Powerup = 0;
-    melonDS::u32 InventoryPowerup = 0;
-    melonDS::u32 Dead = 0;
-    melonDS::u32 Character = 0;
-    melonDS::u32 TransitionStatus = 0;
-    melonDS::u32 Lives = 0;
-    melonDS::u32 BattleStars = 0;
-    melonDS::u32 Coins = 0;
-    melonDS::u32 Score = 0;
-    melonDS::u32 DisplayedStars = 0;
-    melonDS::u32 Deaths = 0;
-    melonDS::u32 CollectedStars = 0;
-};
-
-struct DiagnosticFrameSnapshot
-{
-    bool Valid = false;
-    melonDS::u32 Frame = 0;
-    melonDS::u32 Instance = 0;
-    melonDS::u32 StageID = 0;
-    melonDS::u32 StageGroup = 0;
-    melonDS::u32 VsMode = 0;
-    melonDS::u32 LocalPlayerID = 0;
-    melonDS::u32 SceneCurrentSceneID = 0;
-    melonDS::u32 SceneNextSceneID = 0;
-    melonDS::u32 StageActorFreezeFlag = 0;
-    melonDS::u32 PlayerCount = 0;
-    melonDS::u32 InputConsole0Held = 0;
-    melonDS::u32 InputConsole1Held = 0;
-    melonDS::u32 InputPlayer0Held = 0;
-    melonDS::u32 InputPlayer1Held = 0;
-    melonDS::u32 LastSentInputFrame = 0;
-    melonDS::u32 LastReceivedInputFrame = 0;
-    melonDS::u64 PlayerGlobalHash = 0;
-    melonDS::u64 PlayerGlobalHash0 = 0;
-    melonDS::u64 PlayerGlobalHash1 = 0;
-    melonDS::u64 PlayerActorHash0 = 0;
-    melonDS::u64 PlayerActorHash1 = 0;
-    melonDS::u32 StageCameraGlobalX0 = 0;
-    melonDS::u32 StageCameraGlobalX1 = 0;
-    melonDS::u32 StageCameraGlobalY0 = 0;
-    melonDS::u32 StageCameraGlobalY1 = 0;
-    melonDS::u32 StageCameraGlobalWidth0 = 0;
-    melonDS::u32 StageCameraGlobalWidth1 = 0;
-    melonDS::u32 StageCameraGlobalHeight0 = 0;
-    melonDS::u32 StageCameraGlobalHeight1 = 0;
-    DiagnosticPlayerSnapshot Player[2];
-};
+using Diagnostics::DiagnosticFrameSnapshot;
+using Diagnostics::DiagnosticPlayerSnapshot;
 
 void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 
@@ -526,13 +443,6 @@ struct State
     Config::HarnessConfig Harness;
     GameStateTraceWriter GameStateTrace;
     AIObservation::Runtime AIObservationRuntime;
-    melonDS::u32 DiagnosticPostTriggerUntilFrame[16] {};
-    melonDS::u32 LastDiagnosticMismatchFrame[16] {};
-    melonDS::u32 LastDiagnosticLifeEventFrame[16][2] {};
-    melonDS::u32 LastDiagnosticPitTransitionFrame[16][2] {};
-    melonDS::u32 LastDiagnosticPositionAnomalyFrame[16][2] {};
-    std::array<DiagnosticFrameSnapshot, kDiagnosticRingCapacity> DiagnosticRing[16];
-    std::size_t DiagnosticRingNext[16] {};
     bool MemPatchApplied[16] {};
     bool ForcePlayerDeathCountersLogged[16] {};
     bool ForcePlayerPowerupsLogged[16] {};
@@ -4315,14 +4225,12 @@ void AppendDiagnosticRingJson(std::ostream& out, int instanceID)
     {
         bool first = true;
         const std::size_t ringFrames = static_cast<std::size_t>(
-            std::clamp(G.Diagnostics.DiagnosticRingFrames, 1, static_cast<int>(kDiagnosticRingCapacity)));
-        const std::size_t next = G.DiagnosticRingNext[instanceID] % kDiagnosticRingCapacity;
-        for (std::size_t i = 0; i < ringFrames; i++)
+            std::clamp(G.Diagnostics.DiagnosticRingFrames, 1,
+                static_cast<int>(Diagnostics::kDiagnosticRingCapacity)));
+        const std::vector<DiagnosticFrameSnapshot> snapshots =
+            G.DiagnosticsRuntime.DiagnosticSnapshotWindow(instanceID, ringFrames);
+        for (const DiagnosticFrameSnapshot& snap : snapshots)
         {
-            const std::size_t idx = (next + kDiagnosticRingCapacity - ringFrames + i) % kDiagnosticRingCapacity;
-            const DiagnosticFrameSnapshot& snap = G.DiagnosticRing[instanceID][idx];
-            if (!snap.Valid)
-                continue;
             if (!first)
                 out << ",";
             first = false;
@@ -4456,14 +4364,12 @@ void EmitDiagnosticPitTransitionEvent(
         return;
     if (previous && previous->Valid && previous->Player[player].TransitFunc == kPlayerPitDeathTransitStateAddr)
         return;
-    if (G.LastDiagnosticPitTransitionFrame[instanceID][player] != 0
-        && snap.Frame < G.LastDiagnosticPitTransitionFrame[instanceID][player] + kDiagnosticRepeatedAnomalyFrames)
-    {
+    if (!G.DiagnosticsRuntime.ShouldEmitDiagnosticPitTransition(
+            instanceID, player, snap.Frame, kDiagnosticRepeatedAnomalyFrames))
         return;
-    }
 
-    G.LastDiagnosticPitTransitionFrame[instanceID][player] = snap.Frame;
-    G.DiagnosticPostTriggerUntilFrame[instanceID] = snap.Frame + kDiagnosticPostTriggerFrames;
+    G.DiagnosticsRuntime.ScheduleDiagnosticPostTrigger(
+        instanceID, snap.Frame + kDiagnosticPostTriggerFrames);
 
     std::ostringstream json;
     json << "{\"event\":\"player_pit_transition\","
@@ -4493,13 +4399,9 @@ void EmitDiagnosticPositionAnomalyEvent(
         return;
     if (!DiagnosticPlayerScreenPositionAnomalous(snap, previous, player))
         return;
-    if (G.LastDiagnosticPositionAnomalyFrame[instanceID][player] != 0
-        && snap.Frame < G.LastDiagnosticPositionAnomalyFrame[instanceID][player] + kDiagnosticRepeatedAnomalyFrames)
-    {
+    if (!G.DiagnosticsRuntime.ShouldEmitDiagnosticPositionAnomaly(
+            instanceID, player, snap.Frame, kDiagnosticRepeatedAnomalyFrames))
         return;
-    }
-
-    G.LastDiagnosticPositionAnomalyFrame[instanceID][player] = snap.Frame;
 
     std::ostringstream json;
     json << "{\"event\":\"player_position_anomaly\","
@@ -4636,34 +4538,29 @@ void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonD
     if (snap.Player[1].Found && IsValidMainRAMRange(nds, snap.Player[1].Base, 0xC00))
         snap.PlayerActorHash1 = HashMainRAMRange(nds, snap.Player[1].Base, 0xC00);
 
-    const DiagnosticFrameSnapshot* previous = nullptr;
-    if (G.DiagnosticRingNext[instanceID] != 0)
-    {
-        const std::size_t prevIdx =
-            (G.DiagnosticRingNext[instanceID] + kDiagnosticRingCapacity - 1) % kDiagnosticRingCapacity;
-        if (G.DiagnosticRing[instanceID][prevIdx].Valid)
-            previous = &G.DiagnosticRing[instanceID][prevIdx];
-    }
+    const std::optional<DiagnosticFrameSnapshot> previousSnapshot =
+        G.DiagnosticsRuntime.LatestDiagnosticSnapshot(instanceID);
+    const DiagnosticFrameSnapshot* previous = previousSnapshot
+        ? &previousSnapshot.value()
+        : nullptr;
     for (int player = 0; player < 2; player++)
     {
         EmitDiagnosticPositionAnomalyEvent(instanceID, snap, previous, player);
         EmitDiagnosticPitTransitionEvent(instanceID, snap, previous, player);
     }
 
-    G.DiagnosticRing[instanceID][G.DiagnosticRingNext[instanceID] % kDiagnosticRingCapacity] = snap;
-    G.DiagnosticRingNext[instanceID] = (G.DiagnosticRingNext[instanceID] + 1) % kDiagnosticRingCapacity;
+    G.DiagnosticsRuntime.RecordDiagnosticSnapshot(instanceID, snap);
 
-    if (G.DiagnosticPostTriggerUntilFrame[instanceID] != 0
-        && frame >= G.DiagnosticPostTriggerUntilFrame[instanceID])
+    const std::optional<melonDS::u32> triggerFrame =
+        G.DiagnosticsRuntime.TakeDueDiagnosticPostTrigger(instanceID, frame);
+    if (triggerFrame)
     {
-        const melonDS::u32 triggerFrame = G.DiagnosticPostTriggerUntilFrame[instanceID];
-        G.DiagnosticPostTriggerUntilFrame[instanceID] = 0;
         std::ostringstream json;
         json << "{\"event\":\"diagnostic_post_window\","
              << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
              << "\"instance\":" << instanceID << ","
              << "\"frame\":" << frame << ","
-             << "\"triggerUntilFrame\":" << triggerFrame << ",";
+             << "\"triggerUntilFrame\":" << triggerFrame.value() << ",";
         AppendDiagnosticRingJson(json, instanceID);
         json << "}";
         std::lock_guard<std::mutex> lock(G.Mutex);
@@ -4713,12 +4610,11 @@ void EmitGameStateMismatchEventLocked(
         return;
     if (local.PlayerGlobal == remote.PlayerGlobal)
         return;
-    if (G.LastDiagnosticMismatchFrame[instanceID] != 0
-        && frame < G.LastDiagnosticMismatchFrame[instanceID] + 300)
+    if (!G.DiagnosticsRuntime.ShouldEmitDiagnosticMismatch(instanceID, frame, 300))
         return;
 
-    G.LastDiagnosticMismatchFrame[instanceID] = frame;
-    G.DiagnosticPostTriggerUntilFrame[instanceID] = frame + kDiagnosticPostTriggerFrames;
+    G.DiagnosticsRuntime.ScheduleDiagnosticPostTrigger(
+        instanceID, frame + kDiagnosticPostTriggerFrames);
 
     GameStateSample remoteSample;
     bool hasRemoteSample = false;
@@ -4730,14 +4626,11 @@ void EmitGameStateMismatchEventLocked(
 
     GameStateSample localSample;
     bool hasLocalSample = false;
-    const DiagnosticFrameSnapshot* latest = nullptr;
-    if (G.DiagnosticRingNext[instanceID] != 0)
-    {
-        const std::size_t idx =
-            (G.DiagnosticRingNext[instanceID] + kDiagnosticRingCapacity - 1) % kDiagnosticRingCapacity;
-        if (G.DiagnosticRing[instanceID][idx].Valid)
-            latest = &G.DiagnosticRing[instanceID][idx];
-    }
+    const std::optional<DiagnosticFrameSnapshot> latestSnapshot =
+        G.DiagnosticsRuntime.LatestDiagnosticSnapshot(instanceID);
+    const DiagnosticFrameSnapshot* latest = latestSnapshot
+        ? &latestSnapshot.value()
+        : nullptr;
 
     std::ostringstream json;
     json << "{\"event\":\"player_global_mismatch\","
@@ -4834,18 +4727,13 @@ void EmitPlayerLifeEvent(
     if (!G.Diagnostics.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
         return;
     const bool transitionOnly = reason && std::strcmp(reason, "death-transition") == 0;
-    if (G.LastDiagnosticLifeEventFrame[instanceID][player] == frame)
+    if (!G.DiagnosticsRuntime.ShouldEmitDiagnosticLifeEvent(
+            instanceID, player, frame, transitionOnly, 300))
         return;
-    if (transitionOnly
-        && G.LastDiagnosticLifeEventFrame[instanceID][player] != 0
-        && frame < G.LastDiagnosticLifeEventFrame[instanceID][player] + 300)
-    {
-        return;
-    }
 
-    G.LastDiagnosticLifeEventFrame[instanceID][player] = frame;
     if (!transitionOnly)
-        G.DiagnosticPostTriggerUntilFrame[instanceID] = frame + kDiagnosticPostTriggerFrames;
+        G.DiagnosticsRuntime.ScheduleDiagnosticPostTrigger(
+            instanceID, frame + kDiagnosticPostTriggerFrames);
 
     std::ostringstream json;
     json << "{\"event\":\"player_life_change\","
@@ -7328,7 +7216,8 @@ void InitFromEnvironment()
     } markEnvironmentChecked;
 
     G.Bootstrap = Config::LoadBootstrapConfig();
-    G.Diagnostics = Config::LoadDiagnosticsConfig(static_cast<int>(kDiagnosticRingCapacity));
+    G.Diagnostics = Config::LoadDiagnosticsConfig(
+        static_cast<int>(Diagnostics::kDiagnosticRingCapacity));
     G.Harness = Config::LoadHarnessConfig();
     G.Enabled = G.Bootstrap.Enabled;
     G.TestEnabled = G.Bootstrap.TestEnabled;

@@ -4,12 +4,99 @@
 #include "NsmbNetplayConfig.h"
 
 #include <chrono>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace NsmbNetplayPoC::Diagnostics {
+
+constexpr std::size_t kDiagnosticRingCapacity = 720;
+
+struct DiagnosticPlayerSnapshot {
+  melonDS::u32 Found = 0;
+  melonDS::u32 Base = 0;
+  melonDS::u32 GUID = 0;
+  melonDS::u32 Settings = 0;
+  melonDS::u32 StateType = 0;
+  melonDS::u32 Flags = 0;
+  melonDS::u32 PosX = 0;
+  melonDS::u32 PosY = 0;
+  melonDS::u32 PosZ = 0;
+  melonDS::u32 PrevX = 0;
+  melonDS::u32 PrevY = 0;
+  melonDS::u32 PrevZ = 0;
+  melonDS::u32 VelX = 0;
+  melonDS::u32 VelY = 0;
+  melonDS::u32 VelZ = 0;
+  melonDS::u32 ActionFlag = 0;
+  melonDS::u32 SubActionFlag = 0;
+  melonDS::u32 PhysicsFlag = 0;
+  melonDS::u32 DamageCooldown = 0;
+  melonDS::u32 TransitionFlag = 0;
+  melonDS::u32 CollisionFlag = 0;
+  melonDS::u32 EnvironmentFlag = 0;
+  melonDS::u32 LinkedActor = 0;
+  melonDS::u32 TransitionStep = 0;
+  melonDS::u32 UpdateLocked = 0;
+  melonDS::u32 CharacterIDBase = 0;
+  melonDS::u32 TransitioningFlag = 0;
+  melonDS::u32 CameraFocusMode = 0;
+  melonDS::u32 DefeatedFlag = 0;
+  melonDS::u32 PlayerBaseID = 0;
+  melonDS::u32 VisibleFlag = 0;
+  melonDS::u32 TransitFunc = 0;
+  melonDS::u32 TransitArg = 0;
+  melonDS::u32 Powerup = 0;
+  melonDS::u32 InventoryPowerup = 0;
+  melonDS::u32 Dead = 0;
+  melonDS::u32 Character = 0;
+  melonDS::u32 TransitionStatus = 0;
+  melonDS::u32 Lives = 0;
+  melonDS::u32 BattleStars = 0;
+  melonDS::u32 Coins = 0;
+  melonDS::u32 Score = 0;
+  melonDS::u32 DisplayedStars = 0;
+  melonDS::u32 Deaths = 0;
+  melonDS::u32 CollectedStars = 0;
+};
+
+struct DiagnosticFrameSnapshot {
+  bool Valid = false;
+  melonDS::u32 Frame = 0;
+  melonDS::u32 Instance = 0;
+  melonDS::u32 StageID = 0;
+  melonDS::u32 StageGroup = 0;
+  melonDS::u32 VsMode = 0;
+  melonDS::u32 LocalPlayerID = 0;
+  melonDS::u32 SceneCurrentSceneID = 0;
+  melonDS::u32 SceneNextSceneID = 0;
+  melonDS::u32 StageActorFreezeFlag = 0;
+  melonDS::u32 PlayerCount = 0;
+  melonDS::u32 InputConsole0Held = 0;
+  melonDS::u32 InputConsole1Held = 0;
+  melonDS::u32 InputPlayer0Held = 0;
+  melonDS::u32 InputPlayer1Held = 0;
+  melonDS::u32 LastSentInputFrame = 0;
+  melonDS::u32 LastReceivedInputFrame = 0;
+  melonDS::u64 PlayerGlobalHash = 0;
+  melonDS::u64 PlayerGlobalHash0 = 0;
+  melonDS::u64 PlayerGlobalHash1 = 0;
+  melonDS::u64 PlayerActorHash0 = 0;
+  melonDS::u64 PlayerActorHash1 = 0;
+  melonDS::u32 StageCameraGlobalX0 = 0;
+  melonDS::u32 StageCameraGlobalX1 = 0;
+  melonDS::u32 StageCameraGlobalY0 = 0;
+  melonDS::u32 StageCameraGlobalY1 = 0;
+  melonDS::u32 StageCameraGlobalWidth0 = 0;
+  melonDS::u32 StageCameraGlobalWidth1 = 0;
+  melonDS::u32 StageCameraGlobalHeight0 = 0;
+  melonDS::u32 StageCameraGlobalHeight1 = 0;
+  DiagnosticPlayerSnapshot Player[2];
+};
 
 class Runtime {
 public:
@@ -63,6 +150,28 @@ public:
                                               TimePoint now) const;
   bool ShouldTraceGameplayHeartbeat(int instanceID, melonDS::u32 frame,
                                     melonDS::u32 startFrame, int interval);
+  std::optional<DiagnosticFrameSnapshot>
+  LatestDiagnosticSnapshot(int instanceID) const;
+  void RecordDiagnosticSnapshot(int instanceID,
+                                const DiagnosticFrameSnapshot &snapshot);
+  std::vector<DiagnosticFrameSnapshot>
+  DiagnosticSnapshotWindow(int instanceID, std::size_t frameCount) const;
+  void ScheduleDiagnosticPostTrigger(int instanceID,
+                                     melonDS::u32 untilFrame);
+  std::optional<melonDS::u32>
+  TakeDueDiagnosticPostTrigger(int instanceID, melonDS::u32 frame);
+  bool ShouldEmitDiagnosticMismatch(int instanceID, melonDS::u32 frame,
+                                    melonDS::u32 cooldownFrames);
+  bool ShouldEmitDiagnosticLifeEvent(int instanceID, int player,
+                                     melonDS::u32 frame,
+                                     bool transitionOnly,
+                                     melonDS::u32 cooldownFrames);
+  bool ShouldEmitDiagnosticPitTransition(int instanceID, int player,
+                                         melonDS::u32 frame,
+                                         melonDS::u32 cooldownFrames);
+  bool ShouldEmitDiagnosticPositionAnomaly(int instanceID, int player,
+                                           melonDS::u32 frame,
+                                           melonDS::u32 cooldownFrames);
   void StartHangDiagnostics(const Config::DiagnosticsConfig &config, bool host);
   void Stop();
 

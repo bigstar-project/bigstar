@@ -142,6 +142,17 @@ struct Runtime::Impl {
   std::mutex DiagnosticEventMutex;
   std::ofstream DiagnosticEventLog;
   std::string DiagnosticEventPath;
+  struct DiagnosticInstanceState {
+    melonDS::u32 PostTriggerUntilFrame = 0;
+    melonDS::u32 LastMismatchFrame = 0;
+    melonDS::u32 LastLifeEventFrame[2]{};
+    melonDS::u32 LastPitTransitionFrame[2]{};
+    melonDS::u32 LastPositionAnomalyFrame[2]{};
+    std::array<DiagnosticFrameSnapshot, kDiagnosticRingCapacity> Ring{};
+    std::size_t RingNext = 0;
+  };
+  mutable std::mutex DiagnosticStateMutex;
+  std::array<DiagnosticInstanceState, 16> DiagnosticState{};
   std::atomic<const char *> Phase{"startup"};
   std::atomic<const char *> Event{"startup"};
   std::atomic<std::uint64_t> PhaseUnixMs{0};
@@ -609,6 +620,158 @@ bool Runtime::ShouldTraceGameplayHeartbeat(int instanceID, melonDS::u32 frame,
   if (frame == State->LastGameplayHeartbeat[instanceID])
     return false;
   State->LastGameplayHeartbeat[instanceID] = frame;
+  return true;
+}
+
+std::optional<DiagnosticFrameSnapshot>
+Runtime::LatestDiagnosticSnapshot(int instanceID) const {
+  std::lock_guard<std::mutex> lock(State->DiagnosticStateMutex);
+  if (instanceID < 0 ||
+      instanceID >= static_cast<int>(State->DiagnosticState.size())) {
+    return std::nullopt;
+  }
+  const Impl::DiagnosticInstanceState &diagnostic =
+      State->DiagnosticState[instanceID];
+  if (diagnostic.RingNext == 0)
+    return std::nullopt;
+  const std::size_t index =
+      (diagnostic.RingNext + kDiagnosticRingCapacity - 1) %
+      kDiagnosticRingCapacity;
+  if (!diagnostic.Ring[index].Valid)
+    return std::nullopt;
+  return diagnostic.Ring[index];
+}
+
+void Runtime::RecordDiagnosticSnapshot(
+    int instanceID, const DiagnosticFrameSnapshot &snapshot) {
+  std::lock_guard<std::mutex> lock(State->DiagnosticStateMutex);
+  if (instanceID < 0 ||
+      instanceID >= static_cast<int>(State->DiagnosticState.size())) {
+    return;
+  }
+  Impl::DiagnosticInstanceState &diagnostic =
+      State->DiagnosticState[instanceID];
+  diagnostic.Ring[diagnostic.RingNext % kDiagnosticRingCapacity] = snapshot;
+  diagnostic.RingNext =
+      (diagnostic.RingNext + 1) % kDiagnosticRingCapacity;
+}
+
+std::vector<DiagnosticFrameSnapshot>
+Runtime::DiagnosticSnapshotWindow(int instanceID,
+                                  std::size_t frameCount) const {
+  std::lock_guard<std::mutex> lock(State->DiagnosticStateMutex);
+  std::vector<DiagnosticFrameSnapshot> snapshots;
+  if (instanceID < 0 ||
+      instanceID >= static_cast<int>(State->DiagnosticState.size())) {
+    return snapshots;
+  }
+  frameCount = std::clamp<std::size_t>(frameCount, 1,
+                                      kDiagnosticRingCapacity);
+  const Impl::DiagnosticInstanceState &diagnostic =
+      State->DiagnosticState[instanceID];
+  snapshots.reserve(frameCount);
+  for (std::size_t offset = 0; offset < frameCount; offset++) {
+    const std::size_t index =
+        (diagnostic.RingNext + kDiagnosticRingCapacity - frameCount + offset) %
+        kDiagnosticRingCapacity;
+    if (diagnostic.Ring[index].Valid)
+      snapshots.push_back(diagnostic.Ring[index]);
+  }
+  return snapshots;
+}
+
+void Runtime::ScheduleDiagnosticPostTrigger(int instanceID,
+                                            melonDS::u32 untilFrame) {
+  std::lock_guard<std::mutex> lock(State->DiagnosticStateMutex);
+  if (instanceID < 0 ||
+      instanceID >= static_cast<int>(State->DiagnosticState.size())) {
+    return;
+  }
+  State->DiagnosticState[instanceID].PostTriggerUntilFrame = untilFrame;
+}
+
+std::optional<melonDS::u32>
+Runtime::TakeDueDiagnosticPostTrigger(int instanceID, melonDS::u32 frame) {
+  std::lock_guard<std::mutex> lock(State->DiagnosticStateMutex);
+  if (instanceID < 0 ||
+      instanceID >= static_cast<int>(State->DiagnosticState.size())) {
+    return std::nullopt;
+  }
+  melonDS::u32 &untilFrame =
+      State->DiagnosticState[instanceID].PostTriggerUntilFrame;
+  if (untilFrame == 0 || frame < untilFrame)
+    return std::nullopt;
+  const melonDS::u32 result = untilFrame;
+  untilFrame = 0;
+  return result;
+}
+
+bool Runtime::ShouldEmitDiagnosticMismatch(int instanceID,
+                                           melonDS::u32 frame,
+                                           melonDS::u32 cooldownFrames) {
+  std::lock_guard<std::mutex> lock(State->DiagnosticStateMutex);
+  if (instanceID < 0 ||
+      instanceID >= static_cast<int>(State->DiagnosticState.size())) {
+    return false;
+  }
+  melonDS::u32 &last = State->DiagnosticState[instanceID].LastMismatchFrame;
+  if (last != 0 && frame < last + cooldownFrames)
+    return false;
+  last = frame;
+  return true;
+}
+
+bool Runtime::ShouldEmitDiagnosticLifeEvent(int instanceID, int player,
+                                            melonDS::u32 frame,
+                                            bool transitionOnly,
+                                            melonDS::u32 cooldownFrames) {
+  std::lock_guard<std::mutex> lock(State->DiagnosticStateMutex);
+  if (instanceID < 0 ||
+      instanceID >= static_cast<int>(State->DiagnosticState.size()) ||
+      player < 0 || player >= 2) {
+    return false;
+  }
+  melonDS::u32 &last =
+      State->DiagnosticState[instanceID].LastLifeEventFrame[player];
+  if (last == frame)
+    return false;
+  if (transitionOnly && last != 0 && frame < last + cooldownFrames)
+    return false;
+  last = frame;
+  return true;
+}
+
+bool Runtime::ShouldEmitDiagnosticPitTransition(
+    int instanceID, int player, melonDS::u32 frame,
+    melonDS::u32 cooldownFrames) {
+  std::lock_guard<std::mutex> lock(State->DiagnosticStateMutex);
+  if (instanceID < 0 ||
+      instanceID >= static_cast<int>(State->DiagnosticState.size()) ||
+      player < 0 || player >= 2) {
+    return false;
+  }
+  melonDS::u32 &last =
+      State->DiagnosticState[instanceID].LastPitTransitionFrame[player];
+  if (last != 0 && frame < last + cooldownFrames)
+    return false;
+  last = frame;
+  return true;
+}
+
+bool Runtime::ShouldEmitDiagnosticPositionAnomaly(
+    int instanceID, int player, melonDS::u32 frame,
+    melonDS::u32 cooldownFrames) {
+  std::lock_guard<std::mutex> lock(State->DiagnosticStateMutex);
+  if (instanceID < 0 ||
+      instanceID >= static_cast<int>(State->DiagnosticState.size()) ||
+      player < 0 || player >= 2) {
+    return false;
+  }
+  melonDS::u32 &last =
+      State->DiagnosticState[instanceID].LastPositionAnomalyFrame[player];
+  if (last != 0 && frame < last + cooldownFrames)
+    return false;
+  last = frame;
   return true;
 }
 
