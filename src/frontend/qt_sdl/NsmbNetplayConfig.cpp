@@ -457,23 +457,6 @@ PacketBridgeConfig LoadPacketBridgeConfig(const Environment &environment) {
                  "MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME", 0)));
   config.ForceTickBase =
       ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE", -1);
-  config.ForceNetReady =
-      ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY");
-  config.ForceNetReadyStartFrame = static_cast<std::uint32_t>(std::max(
-      0, ReadInt(environment,
-                 "MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME", 0)));
-  config.ForceNetReadyEndFrame = static_cast<std::uint32_t>(std::max(
-      0, ReadInt(environment,
-                 "MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_END_FRAME", 0)));
-  config.ForceNetReadyHostOnly = ReadFlag(
-      environment, "MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_HOST_ONLY");
-  config.ForceNetReadyClientOnly = ReadFlag(
-      environment, "MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_CLIENT_ONLY");
-  config.ForceNetReadyState10 = ReadFlag(
-      environment, "MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10");
-  config.ForceNetReadyState10ClientOnly = ReadFlag(
-      environment,
-      "MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10_CLIENT_ONLY");
   config.ForceGameLocalPlayerID = ReadInt(
       environment, "MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID", -1);
   config.ForceGameLocalPlayerIDStartFrame = static_cast<std::uint32_t>(std::max(

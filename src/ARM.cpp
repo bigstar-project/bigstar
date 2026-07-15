@@ -82,29 +82,10 @@ static u32 NSMLEnvU32(const char* name, u32 fallback)
     return static_cast<u32>(strtoul(value, nullptr, 0));
 }
 
-static bool NSMLEnvHasValue(const char* name)
-{
-    const char* value = getenv(name);
-    return value && value[0];
-}
-
-static u32 NSMLComposeMvlSceneSettingsFromEnvironment()
-{
-    const u32 stage = std::min(NSMLEnvU32("MELONDS_NSML_MVL_STAGE", 0), 4u);
-    return ((0xB4u + stage) << 16) | 0xFF00u;
-}
-
 static u32 NSMLMvlStage()
 {
     u32 stage = NSMLEnvU32("MELONDS_NSML_MVL_STAGE", 0);
     return std::min(stage, 4u);
-}
-
-static u32 NSMLMvlSceneSettings(u32 fallback)
-{
-    if (NSMLEnvHasValue("MELONDS_NSML_MVL_SCENE_SETTINGS"))
-        return NSMLEnvU32("MELONDS_NSML_MVL_SCENE_SETTINGS", fallback);
-    return NSMLComposeMvlSceneSettingsFromEnvironment();
 }
 
 static bool NSMLRuntimeHooksMaybeEnabled()
@@ -856,55 +837,15 @@ static void NSMLProbeStageStartReadyBits(NDS& nds)
 static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
 {
     static int enabled = -1;
-    static int forceStageSceneArg = -1;
-    static int forceCourseSelectReady = -1;
-    static u32 startFrame = 0;
-    static u32 forceCourseSelectReadyStartFrame = 0;
     if (enabled < 0)
     {
-        const bool forceNetReady = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY");
-        const bool forceCourseSelectReadyFlag = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY");
         const bool mvlExternalSettings = NSMLEnvFlag("MELONDS_NSML_MVL_STAGE")
             || NSMLEnvFlag("MELONDS_NSML_MVL_SCENE_SETTINGS");
-        enabled = (forceNetReady || forceCourseSelectReadyFlag || mvlExternalSettings) ? 1 : 0;
-        forceStageSceneArg = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_STAGE_SCENE_ARG") ? 1 : 0;
-        forceCourseSelectReady = forceCourseSelectReadyFlag ? 1 : 0;
-        if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME"))
-            startFrame = static_cast<u32>(strtoul(value, nullptr, 0));
-        if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_FORCE_COURSE_SELECT_READY_START_FRAME"))
-            forceCourseSelectReadyStartFrame = static_cast<u32>(strtoul(value, nullptr, 0));
-        printf("NSMB PacketBridge: net hotpatch config forceNetReady=%d forceCourseSelectReady=%d\n",
-            forceNetReady ? 1 : 0,
-            forceCourseSelectReady);
+        enabled = mvlExternalSettings ? 1 : 0;
+        printf("NSMB PacketBridge: net hotpatch config enabled=%d\n", enabled);
         fflush(stdout);
     }
     if (!enabled || !cpu || cpu->Num != 0)
-        return;
-    if (forceCourseSelectReady && instrAddr == 0x0214C3C4)
-    {
-        const u32 courseSelectBase = NSMLFindObjectBaseByID(cpu->NDS, 0x0005);
-        if (NSMLPacketBridgeEnabled()
-            && cpu->NDS.NumFrames >= forceCourseSelectReadyStartFrame
-            && courseSelectBase != 0
-            && cpu->NDS.ARM9Read32(0x02085A18) == 9
-            && cpu->NDS.ARM9Read16(0x0203B484) == 0x000F)
-        {
-            cpu->R[0] = 1;
-            static int logCount = 0;
-            if (logCount < 16)
-            {
-                printf("NSMB PacketBridge: force CourseSelect ready result frame=%u courseSelect=%08X timer=%u settings=%08X\n",
-                    cpu->NDS.NumFrames,
-                    courseSelectBase,
-                    cpu->NDS.ARM9Read32(courseSelectBase + 0x64),
-                    cpu->NDS.ARM9Read32(courseSelectBase + 0x08));
-                fflush(stdout);
-                logCount++;
-            }
-        }
-        return;
-    }
-    if (cpu->NDS.NumFrames < startFrame)
         return;
     if (instrAddr == 0x020068A8
         && (IsNSMLMarioVsLuigiPacketContext(cpu->NDS)
@@ -945,24 +886,6 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
         }
         return;
     }
-    if (forceStageSceneArg && instrAddr == 0x020130A8 && IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
-    {
-        if (cpu->R[0] == 0x00000003
-            && cpu->R[1] == NSMLMvlSceneSettings(0x00B5FF00)
-            && (cpu->R[2] < 0x02000000 || cpu->R[2] >= 0x02400000))
-        {
-            cpu->R[2] = 0x0208B040;
-            static int logCount = 0;
-            if (logCount < 8)
-            {
-                printf("NSMB PacketBridge: force stage scene create arg frame=%u\n",
-                    cpu->NDS.NumFrames);
-                fflush(stdout);
-                logCount++;
-            }
-        }
-        return;
-    }
     if (instrAddr == 0x021514E4 && IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
     {
         const u32 vsConnectBase = NSMLFindObjectBaseByID(cpu->NDS, 0x0006);
@@ -978,27 +901,6 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
                 printf("NSMB PacketBridge: force load-game net-ready result frame=%u vsConnect=%08X\n",
                     cpu->NDS.NumFrames,
                     vsConnectBase);
-                fflush(stdout);
-                logCount++;
-            }
-        }
-        return;
-    }
-    if (forceCourseSelectReady
-        && cpu->NDS.NumFrames >= forceCourseSelectReadyStartFrame
-        && instrAddr == 0x0214ED18
-        && IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
-    {
-        const u32 courseSelectBase = NSMLFindObjectBaseByID(cpu->NDS, 0x0005);
-        if (courseSelectBase != 0 && cpu->NDS.ARM9Read8(courseSelectBase + 0x64) == 1)
-        {
-            cpu->R[0] = 1;
-            static int logCount = 0;
-            if (logCount < 8)
-            {
-                printf("NSMB PacketBridge: force CourseSelect state1 ready result frame=%u courseSelect=%08X\n",
-                    cpu->NDS.NumFrames,
-                    courseSelectBase);
                 fflush(stdout);
                 logCount++;
             }

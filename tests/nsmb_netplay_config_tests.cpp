@@ -450,13 +450,6 @@ void TestPacketBridgeConfigDefaults() {
   CHECK(!config.ForceTickEnabled);
   CHECK(config.ForceTickStartFrame == 0u);
   CHECK(config.ForceTickBase == -1);
-  CHECK(!config.ForceNetReady);
-  CHECK(config.ForceNetReadyStartFrame == 0u);
-  CHECK(config.ForceNetReadyEndFrame == 0u);
-  CHECK(!config.ForceNetReadyHostOnly);
-  CHECK(!config.ForceNetReadyClientOnly);
-  CHECK(!config.ForceNetReadyState10);
-  CHECK(!config.ForceNetReadyState10ClientOnly);
   CHECK(config.ForceGameLocalPlayerID == -1);
   CHECK(config.ForceGameLocalPlayerIDStartFrame == 0u);
   CHECK(!config.ForceGameLocalPlayerIDEarly);
@@ -490,13 +483,6 @@ void TestPacketBridgeConfigReadsAndClampsEnvironment() {
       {"MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK", "1"},
       {"MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME", "-3"},
       {"MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE", "42"},
-      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY", "1"},
-      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_START_FRAME", "5"},
-      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_END_FRAME", "6"},
-      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_HOST_ONLY", "1"},
-      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_CLIENT_ONLY", "1"},
-      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10", "1"},
-      {"MELONDS_NSML_PACKET_BRIDGE_FORCE_NET_READY_STATE10_CLIENT_ONLY", "1"},
       {"MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID", "7"},
       {"MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_START_FRAME",
        "-8"},
@@ -528,13 +514,6 @@ void TestPacketBridgeConfigReadsAndClampsEnvironment() {
   CHECK(config.ForceTickEnabled);
   CHECK(config.ForceTickStartFrame == 0u);
   CHECK(config.ForceTickBase == 42);
-  CHECK(config.ForceNetReady);
-  CHECK(config.ForceNetReadyStartFrame == 5u);
-  CHECK(config.ForceNetReadyEndFrame == 6u);
-  CHECK(config.ForceNetReadyHostOnly);
-  CHECK(config.ForceNetReadyClientOnly);
-  CHECK(config.ForceNetReadyState10);
-  CHECK(config.ForceNetReadyState10ClientOnly);
   CHECK(config.ForceGameLocalPlayerID == 7);
   CHECK(config.ForceGameLocalPlayerIDStartFrame == 0u);
   CHECK(config.ForceGameLocalPlayerIDEarly);

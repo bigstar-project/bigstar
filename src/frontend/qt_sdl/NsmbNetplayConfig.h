@@ -138,13 +138,6 @@ struct PacketBridgeConfig {
   bool ForceTickEnabled = false;
   std::uint32_t ForceTickStartFrame = 0;
   int ForceTickBase = -1;
-  bool ForceNetReady = false;
-  std::uint32_t ForceNetReadyStartFrame = 0;
-  std::uint32_t ForceNetReadyEndFrame = 0;
-  bool ForceNetReadyHostOnly = false;
-  bool ForceNetReadyClientOnly = false;
-  bool ForceNetReadyState10 = false;
-  bool ForceNetReadyState10ClientOnly = false;
   int ForceGameLocalPlayerID = -1;
   std::uint32_t ForceGameLocalPlayerIDStartFrame = 0;
   bool ForceGameLocalPlayerIDEarly = false;

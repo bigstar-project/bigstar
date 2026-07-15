@@ -142,10 +142,6 @@ constexpr melonDS::u32 kGameLocalPlayerIDAddr = 0x02085A7C;
 constexpr melonDS::u32 kGameVsModeAddr = 0x02085A84;
 constexpr melonDS::u32 kNetStateBaseAddr = 0x020887E8;
 constexpr melonDS::u32 kNetLocalAidAddr = 0x020887F0;
-constexpr melonDS::u32 kNetState14Addr = 0x020887FC; // Net::connectionState
-constexpr melonDS::u32 kNetState1CAddr = 0x02088804; // Net::connectedConsoleCount
-constexpr melonDS::u32 kNetState20Addr = 0x02088808;
-constexpr melonDS::u32 kNetState24Addr = 0x0208880C; // Net::expectedConsoleCount
 
 unsigned long long NowUnixMs()
 {
@@ -153,7 +149,6 @@ unsigned long long NowUnixMs()
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count());
 }
-constexpr melonDS::u32 kNetState5CAddr = 0x0208883C; // Net::errorState
 constexpr melonDS::u32 kNetGGIDAddr = 0x02088858;
 constexpr melonDS::u32 kNetPacketTickAddr = 0x020888E0;
 constexpr melonDS::u32 kNetPacketActionAddr = 0x020888E4;
@@ -477,8 +472,6 @@ void RebaseMvlAutoRestartStartupFrames(int instanceID, melonDS::u32 restartFrame
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.Connection.StartFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.WaitStartFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ForceTickStartFrame);
-    G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ForceNetReadyStartFrame);
-    G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ForceNetReadyEndFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ForceGameLocalPlayerIDStartFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ThrottleStartFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.Input.SendDelayStartFrame);
@@ -508,8 +501,6 @@ void RebaseMvlAutoRestartStartupFramesFromCheckpoint(
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Connection.StartFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.WaitStartFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ForceTickStartFrame);
-    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ForceNetReadyStartFrame);
-    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ForceNetReadyEndFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ForceGameLocalPlayerIDStartFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ThrottleStartFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Input.SendDelayStartFrame);
@@ -2110,55 +2101,6 @@ void ForceNSMLPacketBridgeTickIfNeeded(int instanceID, melonDS::u32 frame, melon
     if (G.PacketBridge.TraceEnabled && (frame % 60) == 0)
     {
         std::printf("NSMB PacketBridge: force tick=0x%04X frame=%u\n", tick, frame);
-        std::fflush(stdout);
-    }
-}
-
-void ForceNSMLPacketBridgeNetReadyIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.PacketBridge.ForceNetReady || !nds || instanceID < 0 || instanceID >= 16)
-        return;
-    if (frame < G.PacketBridge.ForceNetReadyStartFrame)
-        return;
-    if (G.PacketBridge.ForceNetReadyEndFrame != 0 && frame > G.PacketBridge.ForceNetReadyEndFrame)
-        return;
-    if (G.PacketBridge.ForceNetReadyHostOnly && G.NetRole != Role::Host)
-        return;
-    if (G.PacketBridge.ForceNetReadyClientOnly && G.NetRole != Role::Client)
-        return;
-    if (!IsMarioVsLuigiGGID(nds->ARM9Read32(kNetGGIDAddr)))
-        return;
-
-    nds->ARM9Write32(kNetState14Addr, 0x00000001);
-    nds->ARM9Write32(kNetState1CAddr, 0x00000006);
-    nds->ARM9Write32(kNetState20Addr, 0x00000002);
-    nds->ARM9Write32(kNetState24Addr, 0x00000002);
-    nds->ARM9Write32(kNetState5CAddr, 0x00000000);
-    const bool inMvlGameplay = nds->ARM9Read32(kGameStageGroupAddr) == 9
-        && nds->ARM9Read32(kGameVsModeAddr) == 1;
-    nds->ARM9Write32(kGameLocalPlayerIDAddr, (inMvlGameplay && G.NetRole == Role::Client) ? 1 : 0);
-    nds->ARM9Write32(kGameVsModeAddr, 0x00000001);
-    nds->ARM9Write32(0x020887F4, 0x00000001);
-    if (G.PacketBridge.ForceNetReadyState10
-        && (!G.PacketBridge.ForceNetReadyState10ClientOnly || G.NetRole == Role::Client))
-    {
-        nds->ARM9Write32(0x020887F8, 0x00000001);
-    }
-    nds->ARM9Write32(0x02088878, 0x023DF000);
-    nds->ARM9Write32(0x020888C0, 0x02088988);
-    nds->ARM9Write32(0x020888C4, 0x02088988);
-    nds->ARM9Write32(0x02088910, 0x00000100);
-    nds->ARM9Write32(0x02088A00, 0x020888C0);
-    nds->ARM9Write32(0x02088A4C, 0x00000001);
-    nds->ARM9Write32(0x02088A58, 0x00000101);
-    nds->ARM9Write32(0x02088A5C, 0x00000202);
-    nds->ARM9Write32(0x02088A64, 0x00000202);
-    nds->ARM9Write32(0x02088A84, 0x00000003);
-    nds->ARM9Write32(0x02088A88, 0x00000003);
-
-    if (G.PacketBridge.TraceEnabled && (frame % 60) == 0)
-    {
-        std::printf("NSMB PacketBridge: force net ready inst=%d frame=%u\n", instanceID, frame);
         std::fflush(stdout);
     }
 }
@@ -4157,7 +4099,6 @@ void ApplyRollbackResimFramePatches(int instanceID, melonDS::u32 frame, melonDS:
         return;
 
     ApplyMvlRuntimeConfigIfNeeded(nds);
-    ForceNSMLPacketBridgeNetReadyIfNeeded(instanceID, frame, nds);
     ForceNSMLGameLocalPlayerIDIfNeeded(frame, nds);
     ClearMvlCameraInitHoldIfNeeded(instanceID, frame, nds);
     ForcePlayerDeathCountersIfNeeded(instanceID, frame, nds);
@@ -5719,7 +5660,6 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
     {
-        ForceNSMLPacketBridgeNetReadyIfNeeded(instanceID, inputFrame, nds);
         ForceNSMLGameLocalPlayerIDIfNeeded(inputFrame, nds);
     }
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::PacketBridgeSetup);
@@ -5829,7 +5769,6 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
                 PumpNSMLPacketBridgeLocked(nds, syncFrame);
                 ForceNSMLPacketBridgeTickIfNeeded(instanceID, syncFrame, nds);
             }
-            ForceNSMLPacketBridgeNetReadyIfNeeded(instanceID, syncFrame, nds);
             ForceNSMLGameLocalPlayerIDIfNeeded(syncFrame, nds);
             melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);
             ForceNSMLGameLocalPlayerIDIfNeeded(syncFrame, nds);
