@@ -152,6 +152,8 @@ struct Runtime::Impl {
     std::size_t RingNext = 0;
     bool HasPlayerLifeState = false;
     PlayerLifeState LastPlayerLifeState;
+    std::array<bool, static_cast<std::size_t>(RuntimePatchLogKind::Count)>
+        RuntimePatchLogged{};
   };
   mutable std::mutex DiagnosticStateMutex;
   std::array<DiagnosticInstanceState, 16> DiagnosticState{};
@@ -804,6 +806,32 @@ Runtime::ObservePlayerLifeState(int instanceID,
   instance.LastPlayerLifeState = current;
   instance.HasPlayerLifeState = true;
   return observation;
+}
+
+bool Runtime::TakeRuntimePatchLog(int instanceID, RuntimePatchLogKind kind) {
+  std::lock_guard<std::mutex> lock(State->DiagnosticStateMutex);
+  const std::size_t index = static_cast<std::size_t>(kind);
+  if (instanceID < 0 ||
+      instanceID >= static_cast<int>(State->DiagnosticState.size()) ||
+      index >= static_cast<std::size_t>(RuntimePatchLogKind::Count)) {
+    return false;
+  }
+  bool &logged = State->DiagnosticState[instanceID].RuntimePatchLogged[index];
+  if (logged)
+    return false;
+  logged = true;
+  return true;
+}
+
+void Runtime::ResetRuntimePatchLog(int instanceID, RuntimePatchLogKind kind) {
+  std::lock_guard<std::mutex> lock(State->DiagnosticStateMutex);
+  const std::size_t index = static_cast<std::size_t>(kind);
+  if (instanceID < 0 ||
+      instanceID >= static_cast<int>(State->DiagnosticState.size()) ||
+      index >= static_cast<std::size_t>(RuntimePatchLogKind::Count)) {
+    return;
+  }
+  State->DiagnosticState[instanceID].RuntimePatchLogged[index] = false;
 }
 
 void Runtime::StartHangDiagnostics(const Config::DiagnosticsConfig &config,

@@ -112,6 +112,15 @@ struct PlayerLifeObservation {
   PlayerLifeState Previous;
 };
 
+enum class RuntimePatchLogKind : std::size_t {
+  ForceDeathCounters,
+  ForcePowerups,
+  ForceInventoryPowerups,
+  ForceStarCounters,
+  ScriptRemotePacket,
+  Count,
+};
+
 class Runtime {
 public:
   using TimePoint = std::chrono::steady_clock::time_point;
@@ -188,6 +197,8 @@ public:
                                            melonDS::u32 cooldownFrames);
   PlayerLifeObservation ObservePlayerLifeState(int instanceID,
                                                const PlayerLifeState &current);
+  bool TakeRuntimePatchLog(int instanceID, RuntimePatchLogKind kind);
+  void ResetRuntimePatchLog(int instanceID, RuntimePatchLogKind kind);
   void StartHangDiagnostics(const Config::DiagnosticsConfig &config, bool host);
   void Stop();
 

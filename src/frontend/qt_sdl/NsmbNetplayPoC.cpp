@@ -434,11 +434,6 @@ struct State
     GameStateTraceWriter GameStateTrace;
     AIObservation::Runtime AIObservationRuntime;
     bool MemPatchApplied[16] {};
-    bool ForcePlayerDeathCountersLogged[16] {};
-    bool ForcePlayerPowerupsLogged[16] {};
-    bool ForcePlayerInventoryPowerupsLogged[16] {};
-    bool ForcePlayerStarCountersLogged[16] {};
-    bool ScriptRemotePacketLogged[16] {};
     Config::RollbackConfig Rollback;
     RollbackStorage::Store RollbackStore;
     RollbackStorage::Statistics RollbackStats;
@@ -630,7 +625,8 @@ void ResetMvlAutoRestartStartupHookState(int instanceID)
 
     G.MvlSeries.ResetStartupHookState(instanceID);
     G.PacketBridgeRuntime.ResetStartupHookState(instanceID);
-    G.ScriptRemotePacketLogged[instanceID] = false;
+    G.DiagnosticsRuntime.ResetRuntimePatchLog(
+        instanceID, Diagnostics::RuntimePatchLogKind::ScriptRemotePacket);
     G.Coordinator.ResetNetplayStartWait();
     G.Session.ResetStartHandshake();
     G.InputRuntime.LastInputFrameLeadResendAt = {};
@@ -5043,7 +5039,8 @@ void ForcePlayerDeathCountersIfNeeded(int instanceID, melonDS::u32 frame, melonD
         nds->ARM9Write32(kGamePlayerLivesAddr + sizeof(melonDS::u32), G.RuntimePatch.ForcePlayerLife1);
     }
 
-    if (!G.ForcePlayerDeathCountersLogged[instanceID])
+    if (G.DiagnosticsRuntime.TakeRuntimePatchLog(
+            instanceID, Diagnostics::RuntimePatchLogKind::ForceDeathCounters))
     {
         std::printf(
             "NSMB Test: force player death counters inst=%d frame=%u range=%u-%u old=%u/%u value=%u/%u lives=%u/%u->%u/%u enabled=%d\n",
@@ -5060,7 +5057,6 @@ void ForcePlayerDeathCountersIfNeeded(int instanceID, melonDS::u32 frame, melonD
             G.RuntimePatch.ForcePlayerLife0,
             G.RuntimePatch.ForcePlayerLife1,
             G.RuntimePatch.ForcePlayerLivesEnabled ? 1 : 0);
-        G.ForcePlayerDeathCountersLogged[instanceID] = true;
     }
 }
 
@@ -5082,7 +5078,8 @@ void ForcePlayerInventoryPowerupsIfNeeded(int instanceID, melonDS::u32 frame, me
     nds->ARM9Write8(kGamePlayerInventoryPowerupAddr, static_cast<melonDS::u8>(G.RuntimePatch.ForcePlayerInventoryPowerup0 & 0xFF));
     nds->ARM9Write8(kGamePlayerInventoryPowerupAddr + 1, static_cast<melonDS::u8>(G.RuntimePatch.ForcePlayerInventoryPowerup1 & 0xFF));
 
-    if (!G.ForcePlayerInventoryPowerupsLogged[instanceID])
+    if (G.DiagnosticsRuntime.TakeRuntimePatchLog(
+            instanceID, Diagnostics::RuntimePatchLogKind::ForceInventoryPowerups))
     {
         std::printf(
             "NSMB Test: force player inventory powerups inst=%d frame=%u range=%u-%u old=%u/%u value=%u/%u\n",
@@ -5094,7 +5091,6 @@ void ForcePlayerInventoryPowerupsIfNeeded(int instanceID, melonDS::u32 frame, me
             old1,
             G.RuntimePatch.ForcePlayerInventoryPowerup0 & 0xFF,
             G.RuntimePatch.ForcePlayerInventoryPowerup1 & 0xFF);
-        G.ForcePlayerInventoryPowerupsLogged[instanceID] = true;
     }
 }
 
@@ -5137,7 +5133,8 @@ void ForcePlayerPowerupsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::ND
         nds->ARM9Write8(actor.Base + kPlayerBasePowerupSubStateOffset, 0);
     }
 
-    if (!G.ForcePlayerPowerupsLogged[instanceID])
+    if (G.DiagnosticsRuntime.TakeRuntimePatchLog(
+            instanceID, Diagnostics::RuntimePatchLogKind::ForcePowerups))
     {
         std::printf(
             "NSMB Test: force player active powerups inst=%d frame=%u range=%u-%u "
@@ -5156,7 +5153,6 @@ void ForcePlayerPowerupsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::ND
             actorOldState[1],
             actorOldForm[0],
             actorOldForm[1]);
-        G.ForcePlayerPowerupsLogged[instanceID] = true;
     }
 }
 
@@ -5187,7 +5183,8 @@ void ForcePlayerStarCountersIfNeeded(int instanceID, melonDS::u32 frame, melonDS
     nds->ARM9Write32(kGamePlayerCollectedStarsAddr, G.RuntimePatch.ForcePlayerCollectedStars0);
     nds->ARM9Write32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32), G.RuntimePatch.ForcePlayerCollectedStars1);
 
-    if (!G.ForcePlayerStarCountersLogged[instanceID])
+    if (G.DiagnosticsRuntime.TakeRuntimePatchLog(
+            instanceID, Diagnostics::RuntimePatchLogKind::ForceStarCounters))
     {
         std::printf(
             "NSMB Test: force player star counters inst=%d frame=%u range=%u-%u "
@@ -5208,7 +5205,6 @@ void ForcePlayerStarCountersIfNeeded(int instanceID, melonDS::u32 frame, melonDS
             oldCollected1,
             G.RuntimePatch.ForcePlayerCollectedStars0,
             G.RuntimePatch.ForcePlayerCollectedStars1);
-        G.ForcePlayerStarCountersLogged[instanceID] = true;
     }
 }
 
@@ -5255,7 +5251,8 @@ void PushScriptRemotePacketIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
         static_cast<melonDS::u32>(G.RuntimePatch.ScriptRemotePacketPlayer),
         packet);
 
-    if (!G.ScriptRemotePacketLogged[instanceID])
+    if (G.DiagnosticsRuntime.TakeRuntimePatchLog(
+            instanceID, Diagnostics::RuntimePatchLogKind::ScriptRemotePacket))
     {
         std::printf("NSMB Test: script remote packet inst=%d frame=%u range=%u-%u player=%d inputInstance=%d tick=0x%04X keys=0x%04X\n",
             instanceID,
@@ -5266,7 +5263,6 @@ void PushScriptRemotePacketIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
             G.RuntimePatch.ScriptRemotePacketInputInstance,
             tick,
             keys);
-        G.ScriptRemotePacketLogged[instanceID] = true;
     }
 }
 

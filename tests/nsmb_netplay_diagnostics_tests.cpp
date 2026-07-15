@@ -343,6 +343,33 @@ void TestPlayerLifeObservationContract() {
   CHECK(!observation.HadPrevious);
 }
 
+void TestRuntimePatchLogContract() {
+  using NsmbNetplayPoC::Diagnostics::Runtime;
+  using NsmbNetplayPoC::Diagnostics::RuntimePatchLogKind;
+
+  Runtime runtime;
+  CHECK(!runtime.TakeRuntimePatchLog(
+      -1, RuntimePatchLogKind::ForceDeathCounters));
+  CHECK(!runtime.TakeRuntimePatchLog(0, RuntimePatchLogKind::Count));
+  CHECK(runtime.TakeRuntimePatchLog(
+      0, RuntimePatchLogKind::ForceDeathCounters));
+  CHECK(!runtime.TakeRuntimePatchLog(
+      0, RuntimePatchLogKind::ForceDeathCounters));
+  CHECK(runtime.TakeRuntimePatchLog(
+      0, RuntimePatchLogKind::ForcePowerups));
+  CHECK(runtime.TakeRuntimePatchLog(
+      1, RuntimePatchLogKind::ForceDeathCounters));
+
+  runtime.ResetRuntimePatchLog(
+      -1, RuntimePatchLogKind::ForceDeathCounters);
+  runtime.ResetRuntimePatchLog(
+      0, RuntimePatchLogKind::ForceDeathCounters);
+  CHECK(runtime.TakeRuntimePatchLog(
+      0, RuntimePatchLogKind::ForceDeathCounters));
+  CHECK(!runtime.TakeRuntimePatchLog(
+      0, RuntimePatchLogKind::ForcePowerups));
+}
+
 } // namespace
 
 int main() {
@@ -354,6 +381,7 @@ int main() {
   TestDiagnosticSnapshotRuntimeContract();
   TestDiagnosticEventThrottleContract();
   TestPlayerLifeObservationContract();
+  TestRuntimePatchLogContract();
   if (Failures != 0) {
     std::printf("nsmb_netplay_diagnostics_tests: %d failure(s)\n", Failures);
     return 1;
