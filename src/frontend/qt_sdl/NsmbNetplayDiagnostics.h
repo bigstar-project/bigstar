@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace NsmbImitationAI {
@@ -201,6 +202,35 @@ std::string FormatImitationModelInitializationReport(
 std::string FormatAIStartupReport(
     const Config::AIConfig &ai, bool imitationEnabled,
     const NsmbImitationAI::ModelDescription &model);
+
+bool ShouldCaptureRamDumpFrame(
+    melonDS::u32 frame, int interval,
+    const std::vector<std::pair<melonDS::u32, melonDS::u32>> &ranges);
+bool ShouldCaptureScreenshotFrame(const Config::DiagnosticsConfig &config,
+                                  melonDS::u32 frame);
+struct ScreenshotFrame {
+  bool FramebufferAvailable = false;
+  const void *TopBuffer = nullptr;
+  const void *BottomBuffer = nullptr;
+  melonDS::u32 DisplayControlA = 0;
+  melonDS::u32 DisplayControlB = 0;
+  melonDS::u16 DisplayStatus = 0;
+  melonDS::u16 PowerControl = 0;
+  melonDS::u16 BlendControlA = 0;
+  melonDS::u16 BlendY_A = 0;
+  melonDS::u16 BlendControlB = 0;
+  melonDS::u16 BlendY_B = 0;
+  melonDS::u8 NetState = 0;
+  melonDS::u16 NetFlags = 0;
+};
+void CaptureScreenshot(const Config::DiagnosticsConfig &config,
+                       int instanceID, melonDS::u32 frame,
+                       const ScreenshotFrame &screenshot);
+void CaptureRamDumpIfNeeded(
+    const Config::DiagnosticsConfig &config,
+    const std::vector<std::pair<melonDS::u32, melonDS::u32>> &ranges,
+    int instanceID, melonDS::u32 frame, const melonDS::u8 *mainRAM,
+    melonDS::u32 mainRAMLength);
 
 enum class RuntimePatchLogKind : std::size_t {
   ForceDeathCounters,

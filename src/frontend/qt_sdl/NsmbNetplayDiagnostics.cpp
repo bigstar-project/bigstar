@@ -1,12 +1,16 @@
 #include "NsmbNetplayDiagnostics.h"
 #include "NsmbImitationAI.h"
 
+#include <QImage>
+#include <QString>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -808,6 +812,145 @@ std::string FormatAIStartupReport(
       ai.Imitation.HazardGuardVerticalRange,
       ai.Imitation.HazardGuardCloseRange);
   return report;
+}
+
+bool ShouldCaptureRamDumpFrame(
+    melonDS::u32 frame, int interval,
+    const std::vector<std::pair<melonDS::u32, melonDS::u32>> &ranges) {
+  if (interval > 0 &&
+      (frame % static_cast<melonDS::u32>(interval)) == 0) {
+    return true;
+  }
+  return std::any_of(ranges.begin(), ranges.end(), [frame](const auto &range) {
+    return frame >= range.first && frame <= range.second;
+  });
+}
+
+bool ShouldCaptureScreenshotFrame(const Config::DiagnosticsConfig &config,
+                                  melonDS::u32 frame) {
+  return !config.ScreenshotDir.empty() && config.ScreenshotInterval > 0 &&
+         (frame % static_cast<melonDS::u32>(config.ScreenshotInterval)) == 0;
+}
+
+void CaptureScreenshot(const Config::DiagnosticsConfig &config,
+                       int instanceID, melonDS::u32 frame,
+                       const ScreenshotFrame &screenshot) {
+  if (!screenshot.FramebufferAvailable) {
+    if (config.ScreenshotRegisterTrace) {
+      std::printf("NSMB Test: screenshot skipped inst=%d frame=%u "
+                  "reason=no-framebuffer\n",
+                  instanceID, frame);
+      std::fflush(stdout);
+    }
+    return;
+  }
+  if (!screenshot.TopBuffer || !screenshot.BottomBuffer) {
+    if (config.ScreenshotRegisterTrace) {
+      std::printf("NSMB Test: screenshot skipped inst=%d frame=%u "
+                  "reason=null-buffer top=%p bottom=%p\n",
+                  instanceID, frame, screenshot.TopBuffer,
+                  screenshot.BottomBuffer);
+      std::fflush(stdout);
+    }
+    return;
+  }
+
+  std::error_code error;
+  std::filesystem::create_directories(config.ScreenshotDir, error);
+  if (error) {
+    std::printf("NSMB Test: failed to create screenshot dir: %s (%s)\n",
+                config.ScreenshotDir.c_str(), error.message().c_str());
+    return;
+  }
+
+  QImage image(256, 384, QImage::Format_RGB32);
+  std::memcpy(image.scanLine(0), screenshot.TopBuffer, 256 * 192 * 4);
+  std::memcpy(image.scanLine(192), screenshot.BottomBuffer, 256 * 192 * 4);
+
+  int blackPixels = 0;
+  int brightPixels = 0;
+  for (int y = 0; y < image.height(); y += 4) {
+    const QRgb *row = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+    for (int x = 0; x < image.width(); x += 4) {
+      const QRgb pixel = row[x];
+      const int red = qRed(pixel);
+      const int green = qGreen(pixel);
+      const int blue = qBlue(pixel);
+      if (red <= 2 && green <= 2 && blue <= 2)
+        blackPixels++;
+      if (red >= 24 || green >= 24 || blue >= 24)
+        brightPixels++;
+    }
+  }
+  if (blackPixels > 6100 && brightPixels == 0) {
+    std::printf(
+        "NSMB Test: black framebuffer inst=%d frame=%u dispcntA=0x%08X "
+        "dispcntB=0x%08X dispstat=0x%04X powcnt1=0x%04X "
+        "bldcntA=0x%04X bldyA=0x%04X bldcntB=0x%04X bldyB=0x%04X "
+        "netState=0x%02X netFlags=0x%04X\n",
+        instanceID, frame, screenshot.DisplayControlA,
+        screenshot.DisplayControlB, screenshot.DisplayStatus,
+        screenshot.PowerControl, screenshot.BlendControlA,
+        screenshot.BlendY_A, screenshot.BlendControlB, screenshot.BlendY_B,
+        screenshot.NetState, screenshot.NetFlags);
+    std::fflush(stdout);
+  } else if (config.ScreenshotRegisterTrace) {
+    std::printf(
+        "NSMB Test: screenshot regs inst=%d frame=%u dispcntA=0x%08X "
+        "dispcntB=0x%08X bldcntA=0x%04X bldyA=0x%04X "
+        "bldcntB=0x%04X bldyB=0x%04X netState=0x%02X netFlags=0x%04X "
+        "blackSample=%d brightSample=%d\n",
+        instanceID, frame, screenshot.DisplayControlA,
+        screenshot.DisplayControlB, screenshot.BlendControlA,
+        screenshot.BlendY_A, screenshot.BlendControlB, screenshot.BlendY_B,
+        screenshot.NetState, screenshot.NetFlags, blackPixels, brightPixels);
+    std::fflush(stdout);
+  }
+
+  char filename[256];
+  std::snprintf(filename, sizeof(filename), "inst%d_frame%06u.png", instanceID,
+                frame);
+  const std::filesystem::path path =
+      std::filesystem::path(config.ScreenshotDir) / filename;
+  if (!image.save(QString::fromStdWString(path.wstring()))) {
+    std::printf("NSMB Test: failed to save screenshot: %ls\n", path.c_str());
+  }
+}
+
+void CaptureRamDumpIfNeeded(
+    const Config::DiagnosticsConfig &config,
+    const std::vector<std::pair<melonDS::u32, melonDS::u32>> &ranges,
+    int instanceID, melonDS::u32 frame, const melonDS::u8 *mainRAM,
+    melonDS::u32 mainRAMLength) {
+  if (!mainRAM || mainRAMLength == 0 || config.RamDumpDir.empty() ||
+      !ShouldCaptureRamDumpFrame(frame, config.RamDumpInterval, ranges)) {
+    return;
+  }
+
+  std::error_code error;
+  std::filesystem::create_directories(config.RamDumpDir, error);
+  if (error) {
+    std::printf("NSMB Test: failed to create RAM dump dir: %s (%s)\n",
+                config.RamDumpDir.c_str(), error.message().c_str());
+    return;
+  }
+
+  char filename[256];
+  std::snprintf(filename, sizeof(filename), "inst%d_frame%06u_mainram.bin",
+                instanceID, frame);
+  const std::filesystem::path path =
+      std::filesystem::path(config.RamDumpDir) / filename;
+  const melonDS::u32 length = std::min<melonDS::u32>(mainRAMLength, 0x400000);
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  if (!file) {
+    std::printf("NSMB Test: failed to open RAM dump for write: %ls\n",
+                path.c_str());
+    return;
+  }
+  file.write(reinterpret_cast<const char *>(mainRAM), length);
+  if (!file) {
+    std::printf("NSMB Test: failed to write RAM dump: %ls\n", path.c_str());
+  }
 }
 
 struct Runtime::Impl {

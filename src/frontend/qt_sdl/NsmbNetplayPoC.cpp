@@ -54,9 +54,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include <QImage>
-#include <QString>
-
 #include <enet/enet.h>
 
 #include "NDS.h"
@@ -4885,160 +4882,6 @@ void UpdateHangGameSnapshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
     G.DiagnosticsRuntime.UpdateGameSnapshot(instanceID, frame, sample, NowUnixMs());
 }
 
-void SaveScreenshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (G.Diagnostics.ScreenshotDir.empty() || G.Diagnostics.ScreenshotInterval <= 0) return;
-    if ((frame % static_cast<melonDS::u32>(G.Diagnostics.ScreenshotInterval)) != 0) return;
-
-    void* topBuffer = nullptr;
-    void* bottomBuffer = nullptr;
-    if (!nds->GPU.GetFramebuffers(&topBuffer, &bottomBuffer))
-    {
-        if (G.Diagnostics.ScreenshotRegisterTrace)
-        {
-            std::printf("NSMB Test: screenshot skipped inst=%d frame=%u reason=no-framebuffer\n", instanceID, frame);
-            std::fflush(stdout);
-        }
-        return;
-    }
-    if (!topBuffer || !bottomBuffer)
-    {
-        if (G.Diagnostics.ScreenshotRegisterTrace)
-        {
-            std::printf(
-                "NSMB Test: screenshot skipped inst=%d frame=%u reason=null-buffer top=%p bottom=%p\n",
-                instanceID,
-                frame,
-                topBuffer,
-                bottomBuffer);
-            std::fflush(stdout);
-        }
-        return;
-    }
-
-    std::error_code ec;
-    std::filesystem::create_directories(G.Diagnostics.ScreenshotDir, ec);
-    if (ec)
-    {
-        std::printf("NSMB Test: failed to create screenshot dir: %s (%s)\n",
-            G.Diagnostics.ScreenshotDir.c_str(),
-            ec.message().c_str());
-        return;
-    }
-
-    QImage image(256, 384, QImage::Format_RGB32);
-    std::memcpy(image.scanLine(0), topBuffer, 256 * 192 * 4);
-    std::memcpy(image.scanLine(192), bottomBuffer, 256 * 192 * 4);
-
-    int blackPixels = 0;
-    int brightPixels = 0;
-    for (int y = 0; y < image.height(); y += 4)
-    {
-        const QRgb* row = reinterpret_cast<const QRgb*>(image.constScanLine(y));
-        for (int x = 0; x < image.width(); x += 4)
-        {
-            const QRgb pixel = row[x];
-            const int r = qRed(pixel);
-            const int g = qGreen(pixel);
-            const int b = qBlue(pixel);
-            if (r <= 2 && g <= 2 && b <= 2)
-                blackPixels++;
-            if (r >= 24 || g >= 24 || b >= 24)
-                brightPixels++;
-        }
-    }
-    if (blackPixels > 6100 && brightPixels == 0)
-    {
-        std::printf(
-            "NSMB Test: black framebuffer inst=%d frame=%u dispcntA=0x%08X dispcntB=0x%08X dispstat=0x%04X powcnt1=0x%04X bldcntA=0x%04X bldyA=0x%04X bldcntB=0x%04X bldyB=0x%04X netState=0x%02X netFlags=0x%04X\n",
-            instanceID,
-            frame,
-            nds->ARM9Read32(0x04000000),
-            nds->ARM9Read32(0x04001000),
-            nds->ARM9Read16(0x04000004),
-            nds->ARM9Read16(0x04000304),
-            nds->ARM9Read16(0x04000050),
-            nds->ARM9Read16(0x04000054),
-            nds->ARM9Read16(0x04001050),
-            nds->ARM9Read16(0x04001054),
-            nds->ARM9Read8(0x02088804),
-            nds->ARM9Read16(0x0208883C));
-        std::fflush(stdout);
-    }
-    else if (G.Diagnostics.ScreenshotRegisterTrace)
-    {
-        std::printf(
-            "NSMB Test: screenshot regs inst=%d frame=%u dispcntA=0x%08X dispcntB=0x%08X bldcntA=0x%04X bldyA=0x%04X bldcntB=0x%04X bldyB=0x%04X netState=0x%02X netFlags=0x%04X blackSample=%d brightSample=%d\n",
-            instanceID,
-            frame,
-            nds->ARM9Read32(0x04000000),
-            nds->ARM9Read32(0x04001000),
-            nds->ARM9Read16(0x04000050),
-            nds->ARM9Read16(0x04000054),
-            nds->ARM9Read16(0x04001050),
-            nds->ARM9Read16(0x04001054),
-            nds->ARM9Read8(0x02088804),
-            nds->ARM9Read16(0x0208883C),
-            blackPixels,
-            brightPixels);
-        std::fflush(stdout);
-    }
-
-    char filename[256];
-    std::snprintf(filename, sizeof(filename), "inst%d_frame%06u.png", instanceID, frame);
-    const std::filesystem::path path = std::filesystem::path(G.Diagnostics.ScreenshotDir) / filename;
-    if (!image.save(QString::fromStdWString(path.wstring())))
-        std::printf("NSMB Test: failed to save screenshot: %ls\n", path.c_str());
-}
-
-void SaveRamDump(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (G.Diagnostics.RamDumpDir.empty()) return;
-
-    bool shouldDump = false;
-    if (G.Diagnostics.RamDumpInterval > 0 &&
-        (frame % static_cast<melonDS::u32>(G.Diagnostics.RamDumpInterval)) == 0)
-        shouldDump = true;
-
-    for (const auto& [start, end] : G.RamDumpRanges)
-    {
-        if (frame >= start && frame <= end)
-        {
-            shouldDump = true;
-            break;
-        }
-    }
-
-    if (!shouldDump) return;
-    if (!nds->MainRAM) return;
-
-    std::error_code ec;
-    std::filesystem::create_directories(G.Diagnostics.RamDumpDir, ec);
-    if (ec)
-    {
-        std::printf("NSMB Test: failed to create RAM dump dir: %s (%s)\n",
-            G.Diagnostics.RamDumpDir.c_str(),
-            ec.message().c_str());
-        return;
-    }
-
-    char filename[256];
-    std::snprintf(filename, sizeof(filename), "inst%d_frame%06u_mainram.bin", instanceID, frame);
-    const std::filesystem::path path = std::filesystem::path(G.Diagnostics.RamDumpDir) / filename;
-
-    const melonDS::u32 len = std::min<melonDS::u32>(nds->MainRAMMask + 1, 0x400000);
-    std::ofstream file(path, std::ios::binary | std::ios::trunc);
-    if (!file)
-    {
-        std::printf("NSMB Test: failed to open RAM dump for write: %ls\n", path.c_str());
-        return;
-    }
-
-    file.write(reinterpret_cast<const char*>(nds->MainRAM), len);
-    if (!file)
-        std::printf("NSMB Test: failed to write RAM dump: %ls\n", path.c_str());
-}
-
 bool WriteNetAndGameRandomSeed(melonDS::NDS* nds, melonDS::u32 seed)
 {
     constexpr melonDS::u32 kNetRandomValueOffset = kNetRandomValueAddr - kMainRAMBase;
@@ -6416,12 +6259,46 @@ void RunAfterFrameRuntimePatchPhase(int instanceID, melonDS::u32 logFrame, melon
     SaveMvlAutoRestartCheckpointIfNeeded(instanceID, logFrame, nds);
 }
 
+void CaptureScreenshotIfNeeded(int instanceID, melonDS::u32 frame,
+    melonDS::NDS* nds)
+{
+    if (!nds ||
+        !Diagnostics::ShouldCaptureScreenshotFrame(G.Diagnostics, frame))
+        return;
+
+    void* topBuffer = nullptr;
+    void* bottomBuffer = nullptr;
+    Diagnostics::ScreenshotFrame screenshot;
+    screenshot.FramebufferAvailable =
+        nds->GPU.GetFramebuffers(&topBuffer, &bottomBuffer);
+    screenshot.TopBuffer = topBuffer;
+    screenshot.BottomBuffer = bottomBuffer;
+    if (screenshot.FramebufferAvailable && topBuffer && bottomBuffer)
+    {
+        screenshot.DisplayControlA = nds->ARM9Read32(0x04000000);
+        screenshot.DisplayControlB = nds->ARM9Read32(0x04001000);
+        screenshot.DisplayStatus = nds->ARM9Read16(0x04000004);
+        screenshot.PowerControl = nds->ARM9Read16(0x04000304);
+        screenshot.BlendControlA = nds->ARM9Read16(0x04000050);
+        screenshot.BlendY_A = nds->ARM9Read16(0x04000054);
+        screenshot.BlendControlB = nds->ARM9Read16(0x04001050);
+        screenshot.BlendY_B = nds->ARM9Read16(0x04001054);
+        screenshot.NetState = nds->ARM9Read8(0x02088804);
+        screenshot.NetFlags = nds->ARM9Read16(0x0208883C);
+    }
+    Diagnostics::CaptureScreenshot(
+        G.Diagnostics, instanceID, frame, screenshot);
+}
+
 void SaveAfterFrameArtifacts(int instanceID, melonDS::u32 logFrame, melonDS::NDS* nds)
 {
     SaveState(instanceID, logFrame, nds);
     SaveLocalMPState(logFrame);
-    SaveScreenshot(instanceID, logFrame, nds);
-    SaveRamDump(instanceID, logFrame, nds);
+    CaptureScreenshotIfNeeded(instanceID, logFrame, nds);
+    Diagnostics::CaptureRamDumpIfNeeded(
+        G.Diagnostics, G.RamDumpRanges, instanceID, logFrame,
+        nds ? nds->MainRAM : nullptr,
+        nds ? std::min<melonDS::u32>(nds->MainRAMMask + 1, 0x400000) : 0);
 }
 
 void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)

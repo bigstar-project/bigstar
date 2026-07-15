@@ -380,6 +380,9 @@ if (BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}"
         "${CMAKE_SOURCE_DIR}/src"
     )
+    target_link_libraries(nsmb_netplay_diagnostics_tests PRIVATE
+        ${QT_LINK_LIBS}
+    )
     set_target_properties(nsmb_netplay_diagnostics_tests PROPERTIES
         AUTOMOC OFF
         AUTOUIC OFF

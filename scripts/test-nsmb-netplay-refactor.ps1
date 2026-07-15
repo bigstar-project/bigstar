@@ -75,6 +75,38 @@ function Resolve-RepoPath {
     return Join-Path $repoRoot $Path
 }
 
+function Set-MelonTomlValue {
+    param(
+        [string]$Text,
+        [string]$KeyPath,
+        [string]$Value
+    )
+
+    $separator = $KeyPath.LastIndexOf('.')
+    if ($separator -lt 0) {
+        if ($Text -match "(?m)^$([regex]::Escape($KeyPath))\s*=") {
+            return ($Text -replace "(?m)^$([regex]::Escape($KeyPath))\s*=.*$", "$KeyPath = $Value")
+        }
+        return "$Text`n$KeyPath = $Value"
+    }
+
+    $section = $KeyPath.Substring(0, $separator)
+    $key = $KeyPath.Substring($separator + 1)
+    $sectionPattern = "(?ms)^\[$([regex]::Escape($section))\]\r?\n.*?(?=^\[|\z)"
+    $sectionMatch = [regex]::Match($Text, $sectionPattern)
+    if (-not $sectionMatch.Success) {
+        return "$Text`n[$section]`n$key = $Value`n"
+    }
+
+    $sectionText = $sectionMatch.Value
+    if ($sectionText -match "(?m)^$([regex]::Escape($key))\s*=") {
+        $newSectionText = $sectionText -replace "(?m)^$([regex]::Escape($key))\s*=.*$", "$key = $Value"
+    } else {
+        $newSectionText = "$sectionText$key = $Value`n"
+    }
+    return $Text.Remove($sectionMatch.Index, $sectionMatch.Length).Insert($sectionMatch.Index, $newSectionText)
+}
+
 $params = @{
     RunRole = "both"
     Exe = $Exe
@@ -134,10 +166,29 @@ if ($Tier -eq "fast" -or $Tier -eq "rollback" -or $Tier -eq "diagnostics") {
     $params.ScreenshotInterval = 300
 }
 
+$rendererConfigPath = Join-Path (Split-Path -Parent (Resolve-RepoPath $Exe)) "melonDS.toml"
+$originalRendererConfig = $null
+$originalRendererConfigBytes = $null
+if ($Tier -eq "standard") {
+    if (-not (Test-Path -LiteralPath $rendererConfigPath -PathType Leaf)) {
+        throw "standard screenshot tier requires melonDS config: $rendererConfigPath"
+    }
+    $originalRendererConfigBytes = [System.IO.File]::ReadAllBytes($rendererConfigPath)
+    $originalRendererConfig = Get-Content -LiteralPath $rendererConfigPath -Raw -Encoding UTF8
+    $softwareRendererConfig = $originalRendererConfig
+    $softwareRendererConfig = Set-MelonTomlValue -Text $softwareRendererConfig -KeyPath "Screen.UseGL" -Value "false"
+    $softwareRendererConfig = Set-MelonTomlValue -Text $softwareRendererConfig -KeyPath "3D.Renderer" -Value "0"
+    $softwareRendererConfig = Set-MelonTomlValue -Text $softwareRendererConfig -KeyPath "3D.Soft.Threaded" -Value "true"
+    Set-Content -LiteralPath $rendererConfigPath -Value $softwareRendererConfig -Encoding UTF8
+}
+
 Push-Location $repoRoot
 try {
     & $routeSmoke @params
 } finally {
+    if ($null -ne $originalRendererConfigBytes) {
+        [System.IO.File]::WriteAllBytes($rendererConfigPath, $originalRendererConfigBytes)
+    }
     Pop-Location
 }
 

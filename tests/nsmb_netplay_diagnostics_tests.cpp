@@ -1,6 +1,7 @@
 #include "NsmbNetplayDiagnostics.h"
 #include "NsmbImitationAI.h"
 
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -9,6 +10,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -88,6 +90,63 @@ void TestConsoleOnlyHeartbeatContract() {
   CHECK(!runtime.PublishFrameHeartbeat(0, 2, true));
   CHECK(runtime.PublishFrameHeartbeat(0, 3, true));
   CHECK(!runtime.PublishFrameHeartbeat(0, 3, true));
+}
+
+void TestRamDumpFrameSelectionContract() {
+  using namespace NsmbNetplayPoC;
+  using Diagnostics::ShouldCaptureRamDumpFrame;
+  const std::vector<std::pair<melonDS::u32, melonDS::u32>> ranges = {
+      {10, 12}, {20, 20}};
+
+  CHECK(!ShouldCaptureRamDumpFrame(0, 0, {}));
+  CHECK(ShouldCaptureRamDumpFrame(0, 5, {}));
+  CHECK(!ShouldCaptureRamDumpFrame(4, 5, {}));
+  CHECK(ShouldCaptureRamDumpFrame(5, 5, {}));
+  CHECK(!ShouldCaptureRamDumpFrame(9, 0, ranges));
+  CHECK(ShouldCaptureRamDumpFrame(10, 0, ranges));
+  CHECK(ShouldCaptureRamDumpFrame(12, 0, ranges));
+  CHECK(!ShouldCaptureRamDumpFrame(13, 0, ranges));
+  CHECK(ShouldCaptureRamDumpFrame(20, 0, ranges));
+
+  Config::DiagnosticsConfig config;
+  CHECK(!Diagnostics::ShouldCaptureScreenshotFrame(config, 0));
+  config.ScreenshotDir = "screenshots";
+  config.ScreenshotInterval = 5;
+  CHECK(Diagnostics::ShouldCaptureScreenshotFrame(config, 0));
+  CHECK(!Diagnostics::ShouldCaptureScreenshotFrame(config, 4));
+  CHECK(Diagnostics::ShouldCaptureScreenshotFrame(config, 5));
+}
+
+void TestRamDumpArtifactContract() {
+  using namespace NsmbNetplayPoC;
+  const std::filesystem::path directory =
+      std::filesystem::temp_directory_path() /
+      "nsmb_netplay_diagnostics_ram_dump_test";
+  std::error_code error;
+  std::filesystem::remove_all(directory, error);
+
+  Config::DiagnosticsConfig config;
+  config.RamDumpDir = directory.string();
+  const std::vector<std::pair<melonDS::u32, melonDS::u32>> ranges = {
+      {10, 10}};
+  const std::array<melonDS::u8, 8> mainRAM = {0, 1, 2, 3, 4, 5, 6, 7};
+  const std::filesystem::path path =
+      directory / "inst2_frame000010_mainram.bin";
+
+  Diagnostics::CaptureRamDumpIfNeeded(config, ranges, 2, 9, mainRAM.data(),
+                                      mainRAM.size());
+  CHECK(!std::filesystem::exists(path));
+  Diagnostics::CaptureRamDumpIfNeeded(config, ranges, 2, 10, mainRAM.data(),
+                                      mainRAM.size());
+  CHECK(std::filesystem::exists(path));
+  std::ifstream input(path, std::ios::binary);
+  const std::vector<char> actual{std::istreambuf_iterator<char>(input),
+                                 std::istreambuf_iterator<char>()};
+  const std::vector<char> expected(mainRAM.begin(), mainRAM.end());
+  CHECK(actual == expected);
+  input.close();
+  std::filesystem::remove_all(directory, error);
+  CHECK(!error);
 }
 
 void TestHashLogContract() {
@@ -813,6 +872,8 @@ void TestAIStartupReportFormattingContract() {
 int main() {
   TestFrameHeartbeatFileContract();
   TestConsoleOnlyHeartbeatContract();
+  TestRamDumpFrameSelectionContract();
+  TestRamDumpArtifactContract();
   TestHashLogContract();
   TestDiagnosticEventLogContract();
   TestPerformanceRuntimeContract();
