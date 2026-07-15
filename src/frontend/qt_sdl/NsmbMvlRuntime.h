@@ -24,7 +24,6 @@ struct InstanceState {
   bool InResult = false;
   bool ResultScored = false;
   bool ResultUnresolvedLogged = false;
-  bool EntranceSpawnNormalizedLogged = false;
   bool ClearCameraInitHoldApplied = false;
   bool NetRandomPatchApplied = false;
   melonDS::u32 ResultFrame = 0;

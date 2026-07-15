@@ -222,7 +222,6 @@ struct MvlConfig {
   std::uint32_t InitialLives = 3;
   std::uint32_t LifeModeSelector = 2;
   std::uint32_t BigStarSelector = 1;
-  bool NormalizeEntranceSpawnWrites = false;
   bool AutoRestartAfterResult = false;
   std::uint32_t AutoRestartDelayFrames = 120;
   std::uint32_t AutoRestartBootstrapFrame = 120;

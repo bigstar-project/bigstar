@@ -650,8 +650,6 @@ MvlConfig LoadMvlConfig(const Environment &environment) {
   config.BigStarSelector = config.BigStarTarget == 3    ? 0u
                            : config.BigStarTarget == 10 ? 2u
                                                         : 1u;
-  config.NormalizeEntranceSpawnWrites =
-      ReadFlag(environment, "MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES");
   config.AutoRestartAfterResult =
       ReadFlag(environment, "MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT");
   config.AutoRestartDelayFrames = static_cast<std::uint32_t>(

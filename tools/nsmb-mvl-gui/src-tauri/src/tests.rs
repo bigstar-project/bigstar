@@ -514,23 +514,17 @@ fn melonds_cli_open_input_config_option_is_registered() {
 #[test]
 fn melon_command_sanitizes_inherited_melonds_environment() {
     let mut command = Command::new("melonDS.exe");
-    command.env("MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES", "1");
     command.env("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS", "1");
     command.env("NSMB_MVL_SIGNAL_URL", "ws://127.0.0.1:8787/session");
 
     remove_inherited_melonds_env_keys(
         &mut command,
         [
-            OsString::from("MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES"),
             OsString::from("MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS"),
             OsString::from("NSMB_MVL_SIGNAL_URL"),
         ],
     );
 
-    assert_eq!(
-        env_value(&command, "MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES"),
-        None
-    );
     assert_eq!(
         env_value(&command, "MELONDS_NSML_FORCE_PLAYER_DEATH_COUNTERS"),
         None

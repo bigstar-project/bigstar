@@ -140,12 +140,6 @@ static bool NSMLRuntimeHooksMaybeEnabled()
     return enabled;
 }
 
-static bool NSMLEntranceSpawnWriteNormalizeEnabled()
-{
-    static const bool enabled = NSMLEnvFlag("MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES");
-    return enabled;
-}
-
 static u32 NSMLPacketBridgeEnvFrame(const char* name, u32 fallback);
 
 static bool NSMLPacketBridgeEnabled()
@@ -2718,46 +2712,6 @@ static bool NSMLWriteTraceMaybeEnabled()
     return enabled;
 }
 
-static bool ShouldNormalizeNSMLEntranceSpawnWrites(ARM* cpu)
-{
-    if (!cpu || cpu->Num != 0)
-        return false;
-    if (!NSMLEntranceSpawnWriteNormalizeEnabled())
-        return false;
-    return cpu->NDS.ARM9Read8(0x02085A84) == 1; // Game::vsMode
-}
-
-static u8 NormalizeNSMLEntranceSpawnWrite8(ARM* cpu, u32 addr, u8 val)
-{
-    if (!ShouldNormalizeNSMLEntranceSpawnWrites(cpu))
-        return val;
-
-    const u32 pc = cpu->R[15] - ((cpu->CPSR & 0x20) ? 2 : 4);
-    if (pc == 0x0201E370)
-    {
-        if (addr == 0x0208B094)
-            return 0;
-        if (addr == 0x0208B095)
-            return 1;
-    }
-    return val;
-}
-
-static u32 NormalizeNSMLEntranceSpawnWrite32(ARM* cpu, u32 addr, u32 val)
-{
-    if (!ShouldNormalizeNSMLEntranceSpawnWrites(cpu))
-        return val;
-
-    const u32 pc = cpu->R[15] - ((cpu->CPSR & 0x20) ? 2 : 4);
-    if (pc == 0x0201E390 && addr == 0x0208B0A4)
-    {
-        const u32 player0Entrance = cpu->NDS.ARM9Read32(0x0208B0A0);
-        if (player0Entrance >= 0x02000000 && player0Entrance < 0x02400000 && val == player0Entrance)
-            return player0Entrance + 0x14;
-    }
-    return val;
-}
-
 static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)
 {
     struct CallTraceConfig
@@ -5286,8 +5240,6 @@ u32 ARMv5::BusRead32(u32 addr)
 
 void ARMv5::BusWrite8(u32 addr, u8 val)
 {
-    if (NSMLEntranceSpawnWriteNormalizeEnabled())
-        val = NormalizeNSMLEntranceSpawnWrite8(this, addr, val);
     if (NSMLWriteTraceMaybeEnabled())
         TraceNSMLWrite(this, addr, val, 8);
     NDS.ARM9Write8(addr, val);
@@ -5302,8 +5254,6 @@ void ARMv5::BusWrite16(u32 addr, u16 val)
 
 void ARMv5::BusWrite32(u32 addr, u32 val)
 {
-    if (NSMLEntranceSpawnWriteNormalizeEnabled())
-        val = NormalizeNSMLEntranceSpawnWrite32(this, addr, val);
     if (NSMLWriteTraceMaybeEnabled())
         TraceNSMLWrite(this, addr, val, 32);
     NDS.ARM9Write32(addr, val);

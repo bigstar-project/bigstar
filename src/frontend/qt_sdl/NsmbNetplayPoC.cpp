@@ -279,10 +279,6 @@ constexpr melonDS::u32 kScenePreviousSceneIDAddr = 0x0203BD2C;
 constexpr melonDS::u32 kSceneNextSceneIDAddr = 0x0203BD30;
 constexpr melonDS::u32 kSceneCurrentSceneIDAddr = 0x0203BD34;
 constexpr melonDS::u32 kSceneNextSceneSettingsAddr = 0x02088F38;
-constexpr melonDS::u32 kEntranceSpawnEntranceIDAddr = 0x0208B094;
-constexpr melonDS::u32 kEntranceTransitionFlagsAddr = 0x0208B098;
-constexpr melonDS::u32 kEntranceSpawnEntranceAddr = 0x0208B0A0;
-
 bool IsMarioVsLuigiGGID(melonDS::u32 value)
 {
     // A2DJ diagnostics used 0x42. US A2DE keeps the MvL GGID as 0x00400150.
@@ -3134,16 +3130,6 @@ void AdvanceSerialRunTurn(int instanceID, melonDS::u32 frame)
     G.Coordinator.AdvanceSerialTurn(instanceID, frame, G.Bootstrap.TestInstanceCount);
 }
 
-bool IsMainRAMAddress(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 size = 1)
-{
-    if (!nds || !nds->MainRAM || addr < kMainRAMBase)
-        return false;
-
-    const melonDS::u32 offset = addr - kMainRAMBase;
-    const melonDS::u32 ramLen = nds->MainRAMMask + 1;
-    return offset < ramLen && size <= ramLen - offset;
-}
-
 bool WriteARM9U32(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 value)
 {
     if (!nds || (addr & 3) != 0)
@@ -4068,55 +4054,6 @@ void TraceWorldObjectLifecyclesIfNeeded(int instanceID, melonDS::u32 frame, melo
     std::printf("\n");
 }
 
-void NormalizeMvlEntranceSpawnStateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.Mvl.NormalizeEntranceSpawnWrites)
-        return;
-    if (!nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
-        return;
-    if (!IsMarioVsLuigiGameplay(nds))
-        return;
-
-    const melonDS::u32 oldID0 = nds->ARM9Read8(kEntranceSpawnEntranceIDAddr);
-    const melonDS::u32 oldID1 = nds->ARM9Read8(kEntranceSpawnEntranceIDAddr + 1);
-    const melonDS::u32 oldPtr0 = nds->ARM9Read32(kEntranceSpawnEntranceAddr);
-    const melonDS::u32 oldPtr1 = nds->ARM9Read32(kEntranceSpawnEntranceAddr + sizeof(melonDS::u32));
-
-    const bool idsNeedFix = oldID0 != 0 || oldID1 != 1;
-    const bool ptr0Valid = IsMainRAMAddress(nds, oldPtr0, 0x14);
-    const bool ptr1Valid = IsMainRAMAddress(nds, oldPtr1, 0x14);
-    const bool fallbackPtr1Valid = IsMainRAMAddress(nds, oldPtr0 + 0x14, 0x14);
-    const bool ptrsNeedFix = ptr0Valid && fallbackPtr1Valid && (!ptr1Valid || oldPtr1 == oldPtr0);
-    if (!idsNeedFix && !ptrsNeedFix)
-        return;
-
-    nds->ARM9Write8(kEntranceSpawnEntranceIDAddr, 0);
-    nds->ARM9Write8(kEntranceSpawnEntranceIDAddr + 1, 1);
-    nds->ARM9Write8(kEntranceTransitionFlagsAddr, 0);
-    nds->ARM9Write8(kEntranceTransitionFlagsAddr + 1, 0);
-    if (ptrsNeedFix)
-    {
-        nds->ARM9Write32(kEntranceSpawnEntranceAddr, oldPtr0);
-        nds->ARM9Write32(kEntranceSpawnEntranceAddr + sizeof(melonDS::u32), oldPtr0 + 0x14);
-    }
-
-    if (!G.MvlSeries.Instances[instanceID].EntranceSpawnNormalizedLogged)
-    {
-        G.MvlSeries.Instances[instanceID].EntranceSpawnNormalizedLogged = true;
-        std::printf(
-            "NSMB MvL: normalized entrance spawn state inst=%d frame=%u ids=%u/%u->0/1 ptr=%08X/%08X->%08X/%08X\n",
-            instanceID,
-            frame,
-            oldID0,
-            oldID1,
-            oldPtr0,
-            oldPtr1,
-            oldPtr0,
-            ptrsNeedFix ? oldPtr0 + 0x14 : oldPtr1);
-        std::fflush(stdout);
-    }
-}
-
 void ApplyPlayerStickToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (G.RuntimePatch.PlayerStickToStarStartFrame == 0 && G.RuntimePatch.PlayerStickToStarEndFrame == 0) return;
@@ -4466,7 +4403,6 @@ void ApplyRollbackResimFramePatches(int instanceID, melonDS::u32 frame, melonDS:
     ApplyMvlRuntimeConfigIfNeeded(nds);
     ForceNSMLPacketBridgeNetReadyIfNeeded(instanceID, frame, nds);
     ForceNSMLGameLocalPlayerIDIfNeeded(frame, nds);
-    NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, frame, nds);
     ClearMvlCameraInitHoldIfNeeded(instanceID, frame, nds);
     ForcePlayerDeathCountersIfNeeded(instanceID, frame, nds);
     ForcePlayerInventoryPowerupsIfNeeded(instanceID, frame, nds);
@@ -6492,7 +6428,6 @@ void RunBeforeFrameSetupPhase(int instanceID, melonDS::u32 frame, melonDS::NDS* 
 {
     if (!CanRunFrameHooks(instanceID, nds))
         return;
-    NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, frame, nds);
     ClearMvlCameraInitHoldIfNeeded(instanceID, frame, nds);
     ForcePlayerDeathCountersIfNeeded(instanceID, frame, nds);
     ForcePlayerPowerupsIfNeeded(instanceID, frame, nds);
@@ -7102,7 +7037,6 @@ void RunAfterFrameRuntimePatchPhase(int instanceID, melonDS::u32 logFrame, melon
         return;
 
     ForcePlayerDeathCountersIfNeeded(instanceID, logFrame, nds);
-    NormalizeMvlEntranceSpawnStateIfNeeded(instanceID, logFrame, nds);
     ForcePlayerPowerupsIfNeeded(instanceID, logFrame, nds);
     ForcePlayerInventoryPowerupsIfNeeded(instanceID, logFrame, nds);
     ForcePlayerStarCountersIfNeeded(instanceID, logFrame, nds);

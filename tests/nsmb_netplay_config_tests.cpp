@@ -664,7 +664,6 @@ void TestMvlConfigDefaults() {
   CHECK(config.InitialLives == 3u);
   CHECK(config.LifeModeSelector == 2u);
   CHECK(config.BigStarSelector == 1u);
-  CHECK(!config.NormalizeEntranceSpawnWrites);
   CHECK(!config.AutoRestartAfterResult);
   CHECK(config.AutoRestartDelayFrames == 120u);
   CHECK(config.AutoRestartBootstrapFrame == 120u);
@@ -691,7 +690,6 @@ void TestMvlConfigReadsClampsAndPreservesPriority() {
       {"MELONDS_NSML_MVL_WINS", "0"},
       {"MELONDS_NSML_MVL_BIG_STARS", "99"},
       {"MELONDS_NSML_MVL_LIVES", "5"},
-      {"MELONDS_NSML_NORMALIZE_MVL_ENTRANCE_SPAWN_WRITES", "1"},
       {"MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT", "1"},
       {"MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES", "-1"},
       {"MELONDS_NSML_MVL_AUTO_RESTART_BOOTSTRAP_FRAME", "2000000"},
@@ -719,7 +717,6 @@ void TestMvlConfigReadsClampsAndPreservesPriority() {
   CHECK(config.InitialLives == 5u);
   CHECK(config.LifeModeSelector == 0u);
   CHECK(config.BigStarSelector == 2u);
-  CHECK(config.NormalizeEntranceSpawnWrites);
   CHECK(config.AutoRestartAfterResult);
   CHECK(config.AutoRestartDelayFrames == 1u);
   CHECK(config.AutoRestartBootstrapFrame == 1000000u);
