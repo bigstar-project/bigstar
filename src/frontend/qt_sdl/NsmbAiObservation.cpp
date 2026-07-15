@@ -107,6 +107,9 @@ constexpr melonDS::u16 kFirebarObjectID = 0x0041;
 constexpr melonDS::u16 kBobOmbObjectID = 0x0023;
 constexpr melonDS::u16 kItemSpawnEffectObjectID = 0x00F0;
 
+// Call-scoped integration state. Public entry points bind this per emulator
+// thread so internal feature and serialization helpers never depend on the PoC
+// process-global state.
 thread_local Context *GActiveContext = nullptr;
 thread_local const Hooks *GActiveHooks = nullptr;
 
@@ -186,6 +189,8 @@ RuntimeHazardThreat MostDangerousRuntimeHazard(
       objectScanCache, selfX, selfY, selfVelX, AIObjectCategory);
 }
 
+// Shared game semantics and geometry. Training logs and runtime inference must
+// use these same mappings to avoid feature drift.
 const char* AIPowerupCandidateName(melonDS::u32 value)
 {
     switch (value)
@@ -581,6 +586,7 @@ void WriteAIScreenJson(
         << "}";
 }
 
+// Verbose observation serialization primitives.
 void WriteAIInputJson(std::ostream& out, const char* name, melonDS::u32 held, melonDS::u32 pressed)
 {
     out << "\"" << name << "\":{\"held\":" << held << ",\"heldHex\":";
@@ -818,6 +824,7 @@ void WriteAITileGridCellJson(std::ostream& out, const AITileGridSample& cell)
 
 int AITileProbeSolidishValue(const AIPlayerTileProbeSample& probe, const char* name);
 
+// Terrain and compact-observation semantics shared by logging and inference.
 int AIObservationV2EntityCategoryID(const char* category)
 {
     if (std::strcmp(category, "player") == 0)
@@ -1966,6 +1973,7 @@ void WriteAIVisualSummaryJson(
     out << "]}";
 }
 
+// Named-feature resolution for linear imitation models.
 bool AITileTypeFeature(melonDS::u32 tileType, const std::string& name, double& out)
 {
     auto bit = [tileType](melonDS::u32 mask) { return (tileType & mask) ? 1.0 : 0.0; };
@@ -2941,6 +2949,7 @@ bool BuildRuntimeImitationFeatures(
     return filled > 0;
 }
 
+// Compact-model feature packing and inference.
 constexpr int kAICompactRuntimeLegacyScalarCount = 35;
 constexpr int kAICompactRuntimeScalarCount = 47;
 constexpr int kAICompactRuntimeTerrainChannels = 16;
@@ -3592,6 +3601,7 @@ InputState ApplyImitationAIInput(
     return input;
 }
 
+// V1/V2/V3 record serialization and log dispatch.
 void PrepareAIPlayLogFireballOwnerTracking(int instanceID, const GameStateSample& sample)
 {
     if (instanceID < 0 || instanceID >= 16)
@@ -4201,6 +4211,7 @@ void TraceAIPlayLog(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
 } // namespace
 
+// Public integration API.
 const char *ObjectCategory(melonDS::u16 objectID, melonDS::u32 settings) {
   return AIObjectCategory(objectID, settings);
 }
