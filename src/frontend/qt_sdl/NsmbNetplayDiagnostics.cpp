@@ -577,6 +577,47 @@ std::string FormatPlayerGlobalMismatchEvent(
   return json.str();
 }
 
+std::string FormatPlayerLifeEvent(
+    const char *role, const char *reason, int instanceID, melonDS::u32 frame,
+    int player, const GameStateModel::GameStateSample &sample,
+    const std::vector<DiagnosticMovingHazardSnapshot> &nearbyHazards,
+    bool includeRing, const std::vector<DiagnosticFrameSnapshot> &ring) {
+  std::ostringstream json;
+  json << "{\"event\":\"player_life_change\"," << "\"role\":\"" << role
+       << "\"," << "\"reason\":\"" << (reason ? reason : "change") << "\","
+       << "\"instance\":" << instanceID << "," << "\"frame\":" << frame
+       << "," << "\"player\":" << player << "," << "\"stageID\":"
+       << sample.StageID << "," << "\"stageGroup\":" << sample.StageGroup
+       << "," << "\"scene\":" << sample.SceneCurrentSceneID << ","
+       << "\"nextScene\":" << sample.SceneNextSceneID << ","
+       << "\"players\":[";
+  AppendGameStatePlayerJson(json, sample, 0);
+  json << ",";
+  AppendGameStatePlayerJson(json, sample, 1);
+  json << "],\"nearbyMovingHazards\":[";
+  for (std::size_t i = 0; i < nearbyHazards.size(); i++) {
+    if (i != 0)
+      json << ",";
+    const DiagnosticMovingHazardSnapshot &hazard = nearbyHazards[i];
+    json << "{\"guid\":" << hazard.GUID << ",";
+    AppendJsonHex32(json, "base", hazard.Base); json << ",";
+    AppendJsonHex32(json, "x", hazard.PosX); json << ",";
+    AppendJsonHex32(json, "y", hazard.PosY); json << ",";
+    AppendJsonHex32(json, "velX", hazard.VelX); json << ",";
+    AppendJsonHex32(json, "velY", hazard.VelY); json << ",";
+    json << "\"stateType\":" << hazard.StateType << ",";
+    AppendJsonHex32(json, "flags", hazard.Flags);
+    json << "}";
+  }
+  json << "]";
+  if (includeRing) {
+    json << ",";
+    AppendDiagnosticRingJson(json, ring);
+  }
+  json << "}";
+  return json.str();
+}
+
 std::string FormatTestStartupReport(
     std::uint64_t unixMs, const Config::BootstrapConfig &bootstrap,
     const Config::DiagnosticsConfig &diagnostics,

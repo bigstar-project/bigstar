@@ -586,6 +586,22 @@ void TestDiagnosticEventFormattingContract() {
       Diagnostics::FormatPlayerGlobalMismatchEvent(
           "host", 2, 20, localHashes, remoteHashes, &current, &remoteSample,
           ring);
+  Diagnostics::DiagnosticMovingHazardSnapshot hazard;
+  hazard.GUID = 31;
+  hazard.Base = 0x10203040;
+  hazard.PosX = 0x11223344;
+  hazard.PosY = 0x55667788;
+  hazard.VelX = 0x99AABBCC;
+  hazard.VelY = 0xDDEEFF00;
+  hazard.StateType = 2;
+  hazard.Flags = 0xABCDEF01;
+  const std::vector<Diagnostics::DiagnosticMovingHazardSnapshot> hazards{
+      hazard};
+  const std::string lifeEvent = Diagnostics::FormatPlayerLifeEvent(
+      "client", "death", 2, 20, 1, remoteSample, hazards, true, ring);
+  const std::string transitionEvent = Diagnostics::FormatPlayerLifeEvent(
+      "host", "death-transition", 2, 21, 0, remoteSample, hazards, false,
+      ring);
 
   CHECK(playerEvent.rfind(
             "{\"event\":\"player_position_anomaly\",\"role\":\"host\","
@@ -599,9 +615,19 @@ void TestDiagnosticEventFormattingContract() {
             "\"remoteSampleDiffs\":[{\"field\":\"stageID\","
             "\"local\":\"0x00000009\",\"remote\":\"0x0000000A\"}") !=
         std::string::npos);
+  CHECK(lifeEvent.find(
+            "\"nearbyMovingHazards\":[{\"guid\":31,"
+            "\"base\":\"0x10203040\",\"x\":\"0x11223344\",") !=
+        std::string::npos);
+  CHECK(lifeEvent.find("\"ring\":[") != std::string::npos);
+  CHECK(transitionEvent.find("\"reason\":\"death-transition\"") !=
+        std::string::npos);
+  CHECK(transitionEvent.find("\"ring\":[") == std::string::npos);
   CHECK(Fnv1a64(playerEvent) == 17232318831486508629ull);
   CHECK(Fnv1a64(postEvent) == 10915587500136319599ull);
   CHECK(Fnv1a64(mismatchEvent) == 1812141437166136686ull);
+  CHECK(Fnv1a64(lifeEvent) == 5563945675449118778ull);
+  CHECK(Fnv1a64(transitionEvent) == 9015990334359297348ull);
 }
 
 void TestStartupReportFormattingContract() {

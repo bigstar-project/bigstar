@@ -343,8 +343,6 @@ const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings);
 GameStateSample ReadGameStateSample(melonDS::NDS* nds);
 using Diagnostics::DiagnosticFrameSnapshot;
 using Diagnostics::DiagnosticPlayerSnapshot;
-using Diagnostics::AppendGameStatePlayerJson;
-using Diagnostics::AppendJsonHex32;
 using Diagnostics::IsPlayerScreenPositionAnomalous;
 using Diagnostics::JsonEscape;
 
@@ -3993,28 +3991,28 @@ void EmitGameStateMismatchEventLocked(
         remote, latest, remoteSamplePtr, DiagnosticRingWindow(instanceID)));
 }
 
-void AppendNearbyHazardsJson(std::ostream& out, melonDS::NDS* nds)
+std::vector<Diagnostics::DiagnosticMovingHazardSnapshot>
+ReadNearbyDiagnosticHazards(melonDS::NDS* nds)
 {
-    out << "\"nearbyMovingHazards\":[";
-    const std::vector<ObjectScanSample> hazards =
+    const std::vector<ObjectScanSample> actors =
         FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
-    const std::size_t count = std::min<std::size_t>(hazards.size(), kMaxWorldMovingHazards);
+    const std::size_t count = std::min<std::size_t>(actors.size(), kMaxWorldMovingHazards);
+    std::vector<Diagnostics::DiagnosticMovingHazardSnapshot> hazards;
+    hazards.reserve(count);
     for (std::size_t i = 0; i < count; i++)
     {
-        if (i != 0)
-            out << ",";
-        out << "{";
-        out << "\"guid\":" << hazards[i].GUID << ",";
-        AppendJsonHex32(out, "base", hazards[i].Base); out << ",";
-        AppendJsonHex32(out, "x", hazards[i].PosX); out << ",";
-        AppendJsonHex32(out, "y", hazards[i].PosY); out << ",";
-        AppendJsonHex32(out, "velX", hazards[i].VelX); out << ",";
-        AppendJsonHex32(out, "velY", hazards[i].VelY); out << ",";
-        out << "\"stateType\":" << hazards[i].StateType << ",";
-        AppendJsonHex32(out, "flags", hazards[i].Flags);
-        out << "}";
+        Diagnostics::DiagnosticMovingHazardSnapshot hazard;
+        hazard.GUID = actors[i].GUID;
+        hazard.Base = actors[i].Base;
+        hazard.PosX = actors[i].PosX;
+        hazard.PosY = actors[i].PosY;
+        hazard.VelX = actors[i].VelX;
+        hazard.VelY = actors[i].VelY;
+        hazard.StateType = actors[i].StateType;
+        hazard.Flags = actors[i].Flags;
+        hazards.push_back(hazard);
     }
-    out << "]";
+    return hazards;
 }
 
 void EmitPlayerLifeEvent(
@@ -4036,32 +4034,17 @@ void EmitPlayerLifeEvent(
         G.DiagnosticsRuntime.ScheduleDiagnosticPostTrigger(
             instanceID, frame + kDiagnosticPostTriggerFrames);
 
-    std::ostringstream json;
-    json << "{\"event\":\"player_life_change\","
-         << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
-         << "\"reason\":\"" << (reason ? reason : "change") << "\","
-         << "\"instance\":" << instanceID << ","
-         << "\"frame\":" << frame << ","
-         << "\"player\":" << player << ","
-         << "\"stageID\":" << sample.StageID << ","
-         << "\"stageGroup\":" << sample.StageGroup << ","
-         << "\"scene\":" << sample.SceneCurrentSceneID << ","
-         << "\"nextScene\":" << sample.SceneNextSceneID << ","
-         << "\"players\":[";
-    AppendGameStatePlayerJson(json, sample, 0);
-    json << ",";
-    AppendGameStatePlayerJson(json, sample, 1);
-    json << "],";
-    AppendNearbyHazardsJson(json, nds);
-    if (!transitionOnly)
-    {
-        json << ",";
-        Diagnostics::AppendDiagnosticRingJson(json, DiagnosticRingWindow(instanceID));
-    }
-    json << "}";
+    const std::vector<Diagnostics::DiagnosticMovingHazardSnapshot> hazards =
+        ReadNearbyDiagnosticHazards(nds);
+    const std::vector<DiagnosticFrameSnapshot> ring =
+        transitionOnly ? std::vector<DiagnosticFrameSnapshot>{}
+                       : DiagnosticRingWindow(instanceID);
+    const std::string json = Diagnostics::FormatPlayerLifeEvent(
+        G.NetRole == Role::Host ? "host" : "client", reason, instanceID, frame,
+        player, sample, hazards, !transitionOnly, ring);
 
     std::lock_guard<std::mutex> lock(G.Mutex);
-    WriteDiagnosticEventLocked(json.str());
+    WriteDiagnosticEventLocked(json);
 }
 
 void TraceWorldMovingHazardsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)

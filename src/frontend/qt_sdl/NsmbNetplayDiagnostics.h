@@ -104,6 +104,17 @@ struct DiagnosticFrameSnapshot {
   DiagnosticPlayerSnapshot Player[2];
 };
 
+struct DiagnosticMovingHazardSnapshot {
+  melonDS::u32 GUID = 0;
+  melonDS::u32 Base = 0;
+  melonDS::u32 PosX = 0;
+  melonDS::u32 PosY = 0;
+  melonDS::u32 VelX = 0;
+  melonDS::u32 VelY = 0;
+  melonDS::u32 StateType = 0;
+  melonDS::u32 Flags = 0;
+};
+
 struct PlayerLifeState {
   melonDS::u32 Lives[2]{};
   melonDS::u32 Deaths[2]{};
@@ -163,6 +174,11 @@ std::string FormatPlayerGlobalMismatchEvent(
     const DiagnosticFrameSnapshot *latest,
     const GameStateModel::GameStateSample *remoteSample,
     const std::vector<DiagnosticFrameSnapshot> &ring);
+std::string FormatPlayerLifeEvent(
+    const char *role, const char *reason, int instanceID, melonDS::u32 frame,
+    int player, const GameStateModel::GameStateSample &sample,
+    const std::vector<DiagnosticMovingHazardSnapshot> &nearbyHazards,
+    bool includeRing, const std::vector<DiagnosticFrameSnapshot> &ring);
 std::string FormatTestStartupReport(
     std::uint64_t unixMs, const Config::BootstrapConfig &bootstrap,
     const Config::DiagnosticsConfig &diagnostics,
