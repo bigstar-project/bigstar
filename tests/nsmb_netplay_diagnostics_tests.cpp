@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -370,6 +371,120 @@ void TestRuntimePatchLogContract() {
       0, RuntimePatchLogKind::ForcePowerups));
 }
 
+void TestDiagnosticJsonAndPositionContract() {
+  using namespace NsmbNetplayPoC;
+  using Diagnostics::DiagnosticFrameSnapshot;
+  using Diagnostics::DiagnosticPlayerSnapshot;
+
+  DiagnosticPlayerSnapshot player;
+  player.Found = 1;
+  player.Base = 0x12;
+  player.GUID = 3;
+  player.TransitioningFlag = 4;
+  player.DefeatedFlag = 5;
+  player.VisibleFlag = 6;
+  player.CollectedStars = 7;
+  std::ostringstream playerJson;
+  Diagnostics::AppendDiagnosticPlayerJson(playerJson, player);
+  const std::string playerText = playerJson.str();
+  CHECK(playerText.rfind(
+            "{\"found\":1,\"base\":\"0x00000012\",\"guid\":3,", 0) ==
+        0);
+  CHECK(playerText.find("\"transitioningFlag\":4") != std::string::npos);
+  CHECK(playerText.find("\"defeatedFlag\":5") != std::string::npos);
+  CHECK(playerText.find("\"visibleFlag\":6") != std::string::npos);
+  const std::string playerSuffix = "\"collectedStars\":7}";
+  CHECK(playerText.size() >= playerSuffix.size());
+  CHECK(playerText.compare(playerText.size() - playerSuffix.size(),
+                           playerSuffix.size(), playerSuffix) == 0);
+
+  std::ostringstream hexState;
+  hexState << std::hex << std::nouppercase;
+  Diagnostics::AppendJsonHex32(hexState, "word", 0xabcdef01);
+  hexState << ':' << 15;
+  CHECK(hexState.str() == "\"word\":\"0xABCDEF01\":f");
+
+  DiagnosticFrameSnapshot frame;
+  frame.Valid = true;
+  frame.Frame = 20;
+  frame.Instance = 2;
+  frame.PlayerGlobalHash = 0x123456789ABCDEF0ull;
+  frame.Player[0] = player;
+  frame.Player[1].GUID = 99;
+  std::ostringstream frameJson;
+  Diagnostics::AppendDiagnosticFrameJson(frameJson, frame);
+  const std::string frameText = frameJson.str();
+  CHECK(frameText.rfind("{\"frame\":20,\"instance\":2,", 0) == 0);
+  CHECK(frameText.find(
+            "\"playerGlobalHash\":\"0x123456789ABCDEF0\"") !=
+        std::string::npos);
+  CHECK(frameText.find("\"players\":[{\"found\":1") !=
+        std::string::npos);
+  const std::string frameSuffix = "\"collectedStars\":0}]}";
+  CHECK(frameText.size() >= frameSuffix.size());
+  CHECK(frameText.compare(frameText.size() - frameSuffix.size(),
+                          frameSuffix.size(), frameSuffix) == 0);
+
+  GameStateModel::GameStateSample sample;
+  sample.PlayerActor0GUID = 11;
+  sample.PlayerActor1GUID = 22;
+  sample.Player0Lives = 3;
+  sample.Player1Lives = 4;
+  std::ostringstream gamePlayer0;
+  std::ostringstream gamePlayer1;
+  Diagnostics::AppendGameStatePlayerJson(gamePlayer0, sample, 0);
+  Diagnostics::AppendGameStatePlayerJson(gamePlayer1, sample, 1);
+  CHECK(gamePlayer0.str().find("\"guid\":11") != std::string::npos);
+  CHECK(gamePlayer0.str().find("\"lives\":3") != std::string::npos);
+  CHECK(gamePlayer1.str().find("\"guid\":22") != std::string::npos);
+  CHECK(gamePlayer1.str().find("\"lives\":4") != std::string::npos);
+
+  constexpr melonDS::s32 fixedOne = 0x1000;
+  constexpr melonDS::s32 margin = 512 * fixedOne;
+  constexpr melonDS::s32 largeDelta = 256 * fixedOne;
+  DiagnosticFrameSnapshot current;
+  current.Valid = true;
+  current.Player[0].Found = 1;
+  current.Player[0].VisibleFlag = 1;
+  current.StageCameraGlobalX0 = 0;
+  current.StageCameraGlobalY0 = 0;
+  current.Player[0].PosX = static_cast<melonDS::u32>(-margin);
+  CHECK(!Diagnostics::IsPlayerScreenPositionAnomalous(current, nullptr, 0));
+  current.Player[0].PosX = static_cast<melonDS::u32>(-margin - 1);
+  CHECK(Diagnostics::IsPlayerScreenPositionAnomalous(current, nullptr, 0));
+  current.Player[0].PosX = static_cast<melonDS::u32>(256 * fixedOne + margin);
+  CHECK(!Diagnostics::IsPlayerScreenPositionAnomalous(current, nullptr, 0));
+  current.Player[0].PosX++;
+  CHECK(Diagnostics::IsPlayerScreenPositionAnomalous(current, nullptr, 0));
+
+  current.Player[0].PosX = 100 * fixedOne;
+  DiagnosticFrameSnapshot previous = current;
+  previous.Player[0].PosX =
+      current.Player[0].PosX - static_cast<melonDS::u32>(largeDelta);
+  CHECK(!Diagnostics::IsPlayerScreenPositionAnomalous(current, &previous, 0));
+  previous.Player[0].PosX--;
+  CHECK(Diagnostics::IsPlayerScreenPositionAnomalous(current, &previous, 0));
+  current.Player[0].Dead = 1;
+  CHECK(!Diagnostics::IsPlayerScreenPositionAnomalous(current, &previous, 0));
+  CHECK(!Diagnostics::IsPlayerScreenPositionAnomalous(current, &previous, -1));
+
+  current.Player[0].Dead = 0;
+  current.Player[0].PosX = 2 * fixedOne;
+  current.Player[0].PosY = 3 * fixedOne;
+  previous.Player[0].PosX = fixedOne;
+  previous.Player[0].PosY = fixedOne;
+  std::ostringstream context;
+  Diagnostics::AppendDiagnosticPlayerContextJson(context, current, &previous,
+                                                  0);
+  CHECK(context.str().find("\"cameraWidth\":\"0x00100000\"") !=
+        std::string::npos);
+  CHECK(context.str().find("\"cameraHeight\":\"0x000C0000\"") !=
+        std::string::npos);
+  CHECK(context.str().find("\"screenXPx\":2") != std::string::npos);
+  CHECK(context.str().find("\"deltaYPx\":2") != std::string::npos);
+  CHECK(context.str().find("\"previous\":{") != std::string::npos);
+}
+
 } // namespace
 
 int main() {
@@ -382,6 +497,7 @@ int main() {
   TestDiagnosticEventThrottleContract();
   TestPlayerLifeObservationContract();
   TestRuntimePatchLogContract();
+  TestDiagnosticJsonAndPositionContract();
   if (Failures != 0) {
     std::printf("nsmb_netplay_diagnostics_tests: %d failure(s)\n", Failures);
     return 1;

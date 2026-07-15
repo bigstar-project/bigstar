@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <iosfwd>
 #include <memory>
 #include <optional>
 #include <string>
@@ -111,6 +112,22 @@ struct PlayerLifeObservation {
   bool HadPrevious = false;
   PlayerLifeState Previous;
 };
+
+void AppendJsonHex32(std::ostream &out, const char *key, melonDS::u32 value);
+void AppendJsonHex64(std::ostream &out, const char *key, melonDS::u64 value);
+void AppendDiagnosticPlayerJson(std::ostream &out,
+                                const DiagnosticPlayerSnapshot &player);
+void AppendDiagnosticFrameJson(std::ostream &out,
+                               const DiagnosticFrameSnapshot &snapshot);
+void AppendGameStatePlayerJson(std::ostream &out,
+                               const GameStateModel::GameStateSample &sample,
+                               int player);
+void AppendDiagnosticPlayerContextJson(
+    std::ostream &out, const DiagnosticFrameSnapshot &snapshot,
+    const DiagnosticFrameSnapshot *previous, int player);
+bool IsPlayerScreenPositionAnomalous(
+    const DiagnosticFrameSnapshot &snapshot,
+    const DiagnosticFrameSnapshot *previous, int player);
 
 enum class RuntimePatchLogKind : std::size_t {
   ForceDeathCounters,

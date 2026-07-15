@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -96,6 +97,271 @@ bool WriteMiniDump(const std::string &) { return false; }
 #endif
 
 } // namespace
+
+void AppendJsonHex32(std::ostream &out, const char *key, melonDS::u32 value) {
+  const std::ios::fmtflags flags = out.flags();
+  const char fill = out.fill();
+  out << '\"' << key << "\":\"0x" << std::hex << std::uppercase
+      << std::setw(8) << std::setfill('0') << value << std::dec << '\"';
+  out.flags(flags);
+  out.fill(fill);
+}
+
+void AppendJsonHex64(std::ostream &out, const char *key, melonDS::u64 value) {
+  const std::ios::fmtflags flags = out.flags();
+  const char fill = out.fill();
+  out << '\"' << key << "\":\"0x" << std::hex << std::uppercase
+      << std::setw(16) << std::setfill('0') << value << std::dec << '\"';
+  out.flags(flags);
+  out.fill(fill);
+}
+
+void AppendDiagnosticPlayerJson(std::ostream &out,
+                                const DiagnosticPlayerSnapshot &player) {
+  out << "{";
+  out << "\"found\":" << player.Found << ",";
+  AppendJsonHex32(out, "base", player.Base); out << ",";
+  out << "\"guid\":" << player.GUID << ",";
+  AppendJsonHex32(out, "settings", player.Settings); out << ",";
+  out << "\"stateType\":" << player.StateType << ",";
+  AppendJsonHex32(out, "flags", player.Flags); out << ",";
+  AppendJsonHex32(out, "x", player.PosX); out << ",";
+  AppendJsonHex32(out, "y", player.PosY); out << ",";
+  AppendJsonHex32(out, "z", player.PosZ); out << ",";
+  AppendJsonHex32(out, "prevX", player.PrevX); out << ",";
+  AppendJsonHex32(out, "prevY", player.PrevY); out << ",";
+  AppendJsonHex32(out, "velX", player.VelX); out << ",";
+  AppendJsonHex32(out, "velY", player.VelY); out << ",";
+  AppendJsonHex32(out, "action", player.ActionFlag); out << ",";
+  AppendJsonHex32(out, "subAction", player.SubActionFlag); out << ",";
+  AppendJsonHex32(out, "physics", player.PhysicsFlag); out << ",";
+  AppendJsonHex32(out, "damageCooldown", player.DamageCooldown); out << ",";
+  AppendJsonHex32(out, "transitionFlag", player.TransitionFlag); out << ",";
+  AppendJsonHex32(out, "collisionFlag", player.CollisionFlag); out << ",";
+  AppendJsonHex32(out, "environmentFlag", player.EnvironmentFlag); out << ",";
+  AppendJsonHex32(out, "linkedActor", player.LinkedActor); out << ",";
+  out << "\"transitionStep\":" << player.TransitionStep << ",";
+  out << "\"updateLocked\":" << player.UpdateLocked << ",";
+  out << "\"characterIDBase\":" << player.CharacterIDBase << ",";
+  out << "\"transitioningFlag\":" << player.TransitioningFlag << ",";
+  out << "\"cameraFocusMode\":" << player.CameraFocusMode << ",";
+  out << "\"defeatedFlag\":" << player.DefeatedFlag << ",";
+  out << "\"playerBaseID\":" << player.PlayerBaseID << ",";
+  out << "\"visibleFlag\":" << player.VisibleFlag << ",";
+  AppendJsonHex32(out, "transitFunc", player.TransitFunc); out << ",";
+  AppendJsonHex32(out, "transitArg", player.TransitArg); out << ",";
+  out << "\"powerup\":" << player.Powerup << ",";
+  out << "\"inventoryPowerup\":" << player.InventoryPowerup << ",";
+  out << "\"dead\":" << player.Dead << ",";
+  out << "\"character\":" << player.Character << ",";
+  out << "\"transitionStatus\":" << player.TransitionStatus << ",";
+  out << "\"lives\":" << player.Lives << ",";
+  out << "\"battleStars\":" << player.BattleStars << ",";
+  out << "\"coins\":" << player.Coins << ",";
+  out << "\"score\":" << player.Score << ",";
+  out << "\"displayedStars\":" << player.DisplayedStars << ",";
+  out << "\"deaths\":" << player.Deaths << ",";
+  out << "\"collectedStars\":" << player.CollectedStars;
+  out << "}";
+}
+
+void AppendDiagnosticFrameJson(std::ostream &out,
+                               const DiagnosticFrameSnapshot &snapshot) {
+  out << "{";
+  out << "\"frame\":" << snapshot.Frame << ",";
+  out << "\"instance\":" << snapshot.Instance << ",";
+  out << "\"stageID\":" << snapshot.StageID << ",";
+  out << "\"stageGroup\":" << snapshot.StageGroup << ",";
+  out << "\"vsMode\":" << snapshot.VsMode << ",";
+  out << "\"localPlayerID\":" << snapshot.LocalPlayerID << ",";
+  out << "\"scene\":" << snapshot.SceneCurrentSceneID << ",";
+  out << "\"nextScene\":" << snapshot.SceneNextSceneID << ",";
+  out << "\"freeze\":" << snapshot.StageActorFreezeFlag << ",";
+  out << "\"playerCount\":" << snapshot.PlayerCount << ",";
+  AppendJsonHex32(out, "inputConsole0", snapshot.InputConsole0Held); out << ",";
+  AppendJsonHex32(out, "inputConsole1", snapshot.InputConsole1Held); out << ",";
+  AppendJsonHex32(out, "inputPlayer0", snapshot.InputPlayer0Held); out << ",";
+  AppendJsonHex32(out, "inputPlayer1", snapshot.InputPlayer1Held); out << ",";
+  out << "\"lastSentInputFrame\":" << snapshot.LastSentInputFrame << ",";
+  out << "\"lastReceivedInputFrame\":" << snapshot.LastReceivedInputFrame << ",";
+  AppendJsonHex64(out, "playerGlobalHash", snapshot.PlayerGlobalHash); out << ",";
+  AppendJsonHex64(out, "playerGlobalHash0", snapshot.PlayerGlobalHash0); out << ",";
+  AppendJsonHex64(out, "playerGlobalHash1", snapshot.PlayerGlobalHash1); out << ",";
+  AppendJsonHex64(out, "playerActorHash0", snapshot.PlayerActorHash0); out << ",";
+  AppendJsonHex64(out, "playerActorHash1", snapshot.PlayerActorHash1); out << ",";
+  AppendJsonHex32(out, "cameraX0", snapshot.StageCameraGlobalX0); out << ",";
+  AppendJsonHex32(out, "cameraX1", snapshot.StageCameraGlobalX1); out << ",";
+  AppendJsonHex32(out, "cameraY0", snapshot.StageCameraGlobalY0); out << ",";
+  AppendJsonHex32(out, "cameraY1", snapshot.StageCameraGlobalY1); out << ",";
+  AppendJsonHex32(out, "cameraWidth0", snapshot.StageCameraGlobalWidth0); out << ",";
+  AppendJsonHex32(out, "cameraWidth1", snapshot.StageCameraGlobalWidth1); out << ",";
+  AppendJsonHex32(out, "cameraHeight0", snapshot.StageCameraGlobalHeight0); out << ",";
+  AppendJsonHex32(out, "cameraHeight1", snapshot.StageCameraGlobalHeight1); out << ",";
+  out << "\"players\":[";
+  AppendDiagnosticPlayerJson(out, snapshot.Player[0]);
+  out << ",";
+  AppendDiagnosticPlayerJson(out, snapshot.Player[1]);
+  out << "]}";
+}
+
+void AppendGameStatePlayerJson(std::ostream &out,
+                               const GameStateModel::GameStateSample &sample,
+                               int player) {
+  const bool first = player == 0;
+  DiagnosticPlayerSnapshot snapshot;
+  snapshot.Found = first ? sample.PlayerActor0Found : sample.PlayerActor1Found;
+  snapshot.Base = first ? sample.PlayerActor0Base : sample.PlayerActor1Base;
+  snapshot.GUID = first ? sample.PlayerActor0GUID : sample.PlayerActor1GUID;
+  snapshot.Settings = first ? sample.PlayerActor0Settings : sample.PlayerActor1Settings;
+  snapshot.StateType = first ? sample.PlayerActor0StateType : sample.PlayerActor1StateType;
+  snapshot.Flags = first ? sample.PlayerActor0Flags : sample.PlayerActor1Flags;
+  snapshot.PosX = first ? sample.PlayerActor0PosX : sample.PlayerActor1PosX;
+  snapshot.PosY = first ? sample.PlayerActor0PosY : sample.PlayerActor1PosY;
+  snapshot.PosZ = first ? sample.PlayerActor0PosZ : sample.PlayerActor1PosZ;
+  snapshot.PrevX = first ? sample.PlayerActor0PrevX : sample.PlayerActor1PrevX;
+  snapshot.PrevY = first ? sample.PlayerActor0PrevY : sample.PlayerActor1PrevY;
+  snapshot.PrevZ = first ? sample.PlayerActor0PrevZ : sample.PlayerActor1PrevZ;
+  snapshot.VelX = first ? sample.PlayerActor0VelX : sample.PlayerActor1VelX;
+  snapshot.VelY = first ? sample.PlayerActor0VelY : sample.PlayerActor1VelY;
+  snapshot.VelZ = first ? sample.PlayerActor0VelZ : sample.PlayerActor1VelZ;
+  snapshot.ActionFlag = first ? sample.PlayerActor0ActionFlag : sample.PlayerActor1ActionFlag;
+  snapshot.SubActionFlag = first ? sample.PlayerActor0SubActionFlag : sample.PlayerActor1SubActionFlag;
+  snapshot.PhysicsFlag = first ? sample.PlayerActor0PhysicsFlag : sample.PlayerActor1PhysicsFlag;
+  snapshot.DamageCooldown = first ? sample.PlayerActor0DamageCooldown : sample.PlayerActor1DamageCooldown;
+  snapshot.TransitionFlag = first ? sample.PlayerActor0TransitionFlag : sample.PlayerActor1TransitionFlag;
+  snapshot.CollisionFlag = first ? sample.PlayerActor0CollisionFlag : sample.PlayerActor1CollisionFlag;
+  snapshot.EnvironmentFlag = first ? sample.PlayerActor0EnvironmentFlag : sample.PlayerActor1EnvironmentFlag;
+  snapshot.LinkedActor = first ? sample.PlayerActor0LinkedActor : sample.PlayerActor1LinkedActor;
+  snapshot.TransitionStep = first ? sample.PlayerActor0TransitionStep : sample.PlayerActor1TransitionStep;
+  snapshot.UpdateLocked = first ? sample.PlayerActor0UpdateLocked : sample.PlayerActor1UpdateLocked;
+  snapshot.CharacterIDBase = first ? sample.PlayerActor0CharacterIDBase : sample.PlayerActor1CharacterIDBase;
+  snapshot.TransitioningFlag = first ? sample.PlayerActor0TransitioningFlag : sample.PlayerActor1TransitioningFlag;
+  snapshot.CameraFocusMode = first ? sample.PlayerActor0CameraFocusMode : sample.PlayerActor1CameraFocusMode;
+  snapshot.DefeatedFlag = first ? sample.PlayerActor0DefeatedFlag : sample.PlayerActor1DefeatedFlag;
+  snapshot.PlayerBaseID = first ? sample.PlayerActor0PlayerBaseID : sample.PlayerActor1PlayerBaseID;
+  snapshot.VisibleFlag = first ? sample.PlayerActor0VisibleFlag : sample.PlayerActor1VisibleFlag;
+  snapshot.TransitFunc = first ? sample.PlayerActor0TransitFunc : sample.PlayerActor1TransitFunc;
+  snapshot.TransitArg = first ? sample.PlayerActor0TransitArg : sample.PlayerActor1TransitArg;
+  snapshot.Powerup = first ? sample.Player0Powerup : sample.Player1Powerup;
+  snapshot.InventoryPowerup = first ? sample.Player0InventoryPowerup : sample.Player1InventoryPowerup;
+  snapshot.Dead = first ? sample.Player0Dead : sample.Player1Dead;
+  snapshot.Character = first ? sample.Player0Character : sample.Player1Character;
+  snapshot.TransitionStatus = first ? sample.PlayerTransitionStatus0 : sample.PlayerTransitionStatus1;
+  snapshot.Lives = first ? sample.Player0Lives : sample.Player1Lives;
+  snapshot.BattleStars = first ? sample.Player0BattleStars : sample.Player1BattleStars;
+  snapshot.Coins = first ? sample.Player0Coins : sample.Player1Coins;
+  snapshot.Score = first ? sample.Player0Score : sample.Player1Score;
+  snapshot.DisplayedStars = first ? sample.Player0DisplayedStars : sample.Player1DisplayedStars;
+  snapshot.Deaths = first ? sample.Player0Deaths : sample.Player1Deaths;
+  snapshot.CollectedStars = first ? sample.Player0CollectedStars : sample.Player1CollectedStars;
+  AppendDiagnosticPlayerJson(out, snapshot);
+}
+
+namespace {
+
+constexpr melonDS::s32 kDiagnosticFixedOne = 0x1000;
+constexpr melonDS::s32 kDiagnosticOffscreenMargin =
+    512 * kDiagnosticFixedOne;
+constexpr melonDS::s32 kDiagnosticLargePositionDelta =
+    256 * kDiagnosticFixedOne;
+
+melonDS::s64 FixedDelta(melonDS::u32 lhs, melonDS::u32 rhs) {
+  return static_cast<melonDS::s64>(static_cast<melonDS::s32>(lhs)) -
+         static_cast<melonDS::s64>(static_cast<melonDS::s32>(rhs));
+}
+
+melonDS::u32 CameraX(const DiagnosticFrameSnapshot &snapshot, int player) {
+  return player == 0 ? snapshot.StageCameraGlobalX0
+                     : snapshot.StageCameraGlobalX1;
+}
+
+melonDS::u32 CameraY(const DiagnosticFrameSnapshot &snapshot, int player) {
+  return player == 0 ? snapshot.StageCameraGlobalY0
+                     : snapshot.StageCameraGlobalY1;
+}
+
+melonDS::u32 CameraWidth(const DiagnosticFrameSnapshot &snapshot, int player) {
+  const melonDS::u32 value = player == 0 ? snapshot.StageCameraGlobalWidth0
+                                         : snapshot.StageCameraGlobalWidth1;
+  return value != 0 ? value : 256 * kDiagnosticFixedOne;
+}
+
+melonDS::u32 CameraHeight(const DiagnosticFrameSnapshot &snapshot, int player) {
+  const melonDS::u32 value = player == 0 ? snapshot.StageCameraGlobalHeight0
+                                         : snapshot.StageCameraGlobalHeight1;
+  return value != 0 ? value : 192 * kDiagnosticFixedOne;
+}
+
+bool IsLiveForPositionCheck(const DiagnosticPlayerSnapshot &player) {
+  return player.Found != 0 && player.Dead == 0 && player.VisibleFlag != 0 &&
+         player.TransitioningFlag == 0 && player.DefeatedFlag == 0;
+}
+
+} // namespace
+
+void AppendDiagnosticPlayerContextJson(
+    std::ostream &out, const DiagnosticFrameSnapshot &snapshot,
+    const DiagnosticFrameSnapshot *previous, int player) {
+  const DiagnosticPlayerSnapshot &current = snapshot.Player[player];
+  const DiagnosticPlayerSnapshot *prior =
+      previous ? &previous->Player[player] : nullptr;
+  const melonDS::u32 cameraX = CameraX(snapshot, player);
+  const melonDS::u32 cameraY = CameraY(snapshot, player);
+  const melonDS::u32 cameraWidth = CameraWidth(snapshot, player);
+  const melonDS::u32 cameraHeight = CameraHeight(snapshot, player);
+  const melonDS::s64 screenX = FixedDelta(current.PosX, cameraX);
+  const melonDS::s64 screenY = FixedDelta(current.PosY, cameraY);
+  const melonDS::s64 deltaX = prior ? FixedDelta(current.PosX, prior->PosX) : 0;
+  const melonDS::s64 deltaY = prior ? FixedDelta(current.PosY, prior->PosY) : 0;
+
+  out << "\"player\":" << player << ",";
+  AppendJsonHex32(out, "cameraX", cameraX); out << ",";
+  AppendJsonHex32(out, "cameraY", cameraY); out << ",";
+  AppendJsonHex32(out, "cameraWidth", cameraWidth); out << ",";
+  AppendJsonHex32(out, "cameraHeight", cameraHeight); out << ",";
+  out << "\"screenX\":" << screenX << ",";
+  out << "\"screenY\":" << screenY << ",";
+  out << "\"screenXPx\":" << (screenX / kDiagnosticFixedOne) << ",";
+  out << "\"screenYPx\":" << (screenY / kDiagnosticFixedOne) << ",";
+  out << "\"deltaX\":" << deltaX << ",";
+  out << "\"deltaY\":" << deltaY << ",";
+  out << "\"deltaXPx\":" << (deltaX / kDiagnosticFixedOne) << ",";
+  out << "\"deltaYPx\":" << (deltaY / kDiagnosticFixedOne) << ",";
+  out << "\"current\":";
+  AppendDiagnosticPlayerJson(out, current);
+  if (prior) {
+    out << ",\"previous\":";
+    AppendDiagnosticPlayerJson(out, *prior);
+  }
+}
+
+bool IsPlayerScreenPositionAnomalous(
+    const DiagnosticFrameSnapshot &snapshot,
+    const DiagnosticFrameSnapshot *previous, int player) {
+  if (player < 0 || player > 1)
+    return false;
+  const DiagnosticPlayerSnapshot &current = snapshot.Player[player];
+  if (!IsLiveForPositionCheck(current))
+    return false;
+
+  const melonDS::s64 screenX = FixedDelta(current.PosX, CameraX(snapshot, player));
+  const melonDS::s64 cameraWidth = CameraWidth(snapshot, player);
+  if (screenX < -static_cast<melonDS::s64>(kDiagnosticOffscreenMargin) ||
+      screenX > cameraWidth + kDiagnosticOffscreenMargin)
+    return true;
+
+  if (previous && previous->Valid &&
+      IsLiveForPositionCheck(previous->Player[player])) {
+    const melonDS::s64 deltaX =
+        FixedDelta(current.PosX, previous->Player[player].PosX);
+    const melonDS::s64 deltaY =
+        FixedDelta(current.PosY, previous->Player[player].PosY);
+    if (std::llabs(deltaX) > kDiagnosticLargePositionDelta ||
+        std::llabs(deltaY) > kDiagnosticLargePositionDelta)
+      return true;
+  }
+  return false;
+}
 
 struct Runtime::Impl {
   struct ActivePerformanceState {
