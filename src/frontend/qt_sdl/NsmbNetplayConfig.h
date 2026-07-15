@@ -331,11 +331,6 @@ struct StateSyncConfig {
   bool GameApplyPlayerActors = true;
   bool GameApplyRemotePlayerOnly = false;
   int GameInterval = 60;
-  bool PlayerEnabled = false;
-  bool PlayerApplyEnabled = false;
-  bool PlayerGlobalsEnabled = false;
-  int PlayerInterval = 1;
-  int PlayerMaxPredictFrames = 2;
   bool WorldEnabled = false;
   bool WorldApplyEnabled = false;
   bool WorldApplyStarActor = true;

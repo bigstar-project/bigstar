@@ -77,13 +77,11 @@ constexpr melonDS::u32 kVersion = 1;
 using WireProtocol::WireGameState;
 using WireProtocol::WireMovingHazardState;
 using WireProtocol::WireNSMLPacket;
-using WireProtocol::WirePlayerState;
 using WireProtocol::WireWorldActorState;
 using WireProtocol::WireWorldState;
 using WireProtocol::kMaxWorldMovingHazards;
 using WireProtocol::kWireKindMovingHazardState;
 using WireProtocol::kWireKindPacket;
-using WireProtocol::kWireKindPlayerState;
 using WireProtocol::kWireKindState;
 using WireProtocol::kWireKindWorldState;
 using GameStateReader::WorldEffectSlotSample;
@@ -1080,42 +1078,6 @@ void HandleReceivedNSMLPacketLocked(
     }
 }
 
-ReceiveDisposition HandleReceivedPlayerStateLocked(
-    const void* data,
-    std::size_t size,
-    melonDS::u32 localFrame)
-{
-    WirePlayerState packet;
-    std::memcpy(&packet, data, size);
-    if (packet.Magic != kMagic || packet.Version != kVersion
-        || packet.Kind != kWireKindPlayerState || packet.Player > 1)
-    {
-        return ReceiveDisposition::CleanupPacket;
-    }
-
-    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
-    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
-        return ReceiveDisposition::SkipPacketCleanup;
-    const std::size_t storedCount = G.GameSync.RemoteState.StorePlayerState(packet);
-    if ((G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace)
-        && (G.Bootstrap.InputTraceInterval <= 1
-            || (localFrame != kNoFrameLimit
-                && (localFrame % static_cast<melonDS::u32>(G.Bootstrap.InputTraceInterval)) == 0)))
-    {
-        std::printf("NSMB PlayerState: recv localFrame=%u packetFrame=%u player=%u found=%u pos=%08X/%08X vel=%08X/%08X stored=%zu\n",
-            localFrame,
-            packet.Frame,
-            packet.Player,
-            packet.Found,
-            packet.PosX,
-            packet.PosY,
-            packet.VelX,
-            packet.VelY,
-            storedCount);
-    }
-    return ReceiveDisposition::CleanupPacket;
-}
-
 ReceiveDisposition HandleReceivedWorldStateLocked(
     const void* data,
     std::size_t size,
@@ -1223,7 +1185,6 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     InputProtocol::kInputPacketSize,
                     SessionProtocol::kSessionPacketSize,
                     sizeof(WireNSMLPacket),
-                    sizeof(WirePlayerState),
                     sizeof(WireWorldState),
                     sizeof(WireMovingHazardState),
                     sizeof(WireGameState),
@@ -1247,17 +1208,6 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     event.packet->dataLength,
                     nds,
                     localFrame);
-            }
-            else if (packetClass == PacketClassifier::PacketClass::PlayerState)
-            {
-                if (HandleReceivedPlayerStateLocked(
-                        event.packet->data,
-                        event.packet->dataLength,
-                        localFrame)
-                    == ReceiveDisposition::SkipPacketCleanup)
-                {
-                    break;
-                }
             }
             else if (packetClass == PacketClassifier::PacketClass::WorldState)
             {
@@ -4975,44 +4925,6 @@ void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::N
     GameStateWriter::ApplyMovingHazardState(nds, sample, G.GameSync, options);
 }
 
-void ApplyRemotePlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool preferFreshSample = false)
-{
-    if (!G.Enabled || !G.StateSync.PlayerApplyEnabled) return;
-    if (instanceID < 0 || instanceID >= 16 || !nds || !nds->MainRAM) return;
-    if (frame < G.Connection.StartFrame) return;
-
-    const int remotePlayer = CurrentPacketBridgeLocalPlayer() ^ 1;
-    WirePlayerState sample {};
-    melonDS::u32 sampleFrame = 0;
-    bool sampleValid = false;
-    const auto waitDeadline = std::chrono::steady_clock::now() + std::chrono::microseconds(500);
-    while (true)
-    {
-        {
-            std::lock_guard<std::mutex> lock(G.Mutex);
-            PumpNetworkLocked();
-            sampleValid = G.GameSync.RemoteState.FindLatestPlayerState(
-                static_cast<melonDS::u32>(remotePlayer), frame, sample, sampleFrame);
-        }
-        if (!preferFreshSample || (sampleValid && sampleFrame >= frame) || std::chrono::steady_clock::now() >= waitDeadline)
-            break;
-        std::this_thread::sleep_for(std::chrono::microseconds(100));
-    }
-    if (!sampleValid || (preferFreshSample && sampleFrame < frame))
-        return;
-
-    GameStateWriter::PlayerStateApplyOptions options;
-    options.InstanceID = instanceID;
-    options.RemotePlayer = remotePlayer;
-    options.Frame = frame;
-    options.SampleFrame = sampleFrame;
-    options.MaxPredictFrames = G.StateSync.PlayerMaxPredictFrames;
-    options.ApplyGlobals = G.StateSync.PlayerGlobalsEnabled;
-    options.Trace.Enabled = G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace;
-    options.Trace.Interval = G.Bootstrap.InputTraceInterval;
-    GameStateWriter::ApplyPlayerState(nds, sample, G.GameSync, options);
-}
-
 void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.Enabled || !G.StateSync.GameApplyEnabled) return;
@@ -5392,53 +5304,6 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         hashes);
 
     G.Transport.Send(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE, false);
-}
-
-void SyncPlayerState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.Enabled || !G.StateSync.PlayerEnabled || !nds) return;
-    if (instanceID < 0 || instanceID >= 16) return;
-    if (frame < G.Connection.StartFrame) return;
-    if ((frame % static_cast<melonDS::u32>(G.StateSync.PlayerInterval)) != 0) return;
-
-    const WirePlayerState packet = GameStateReader::BuildPlayerStatePacket(
-        nds,
-        static_cast<melonDS::u32>(instanceID),
-        frame,
-        CurrentPacketBridgeLocalPlayer(),
-        G.StateSync.PlayerGlobalsEnabled,
-        G.GameSync);
-
-    std::lock_guard<std::mutex> lock(G.Mutex);
-    if (G.GameSync.LastSentPlayerStateFrame[instanceID] == frame) return;
-    G.GameSync.LastSentPlayerStateFrame[instanceID] = frame;
-    if (!G.Transport.IsConnected())
-    {
-        if (G.Bootstrap.InputTraceEnabled &&
-            (G.Bootstrap.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.Bootstrap.InputTraceInterval)) == 0))
-        {
-            std::printf("NSMB PlayerState: send skipped inst=%d frame=%u reason=no-peer\n",
-                instanceID,
-                frame);
-        }
-        return;
-    }
-
-    if ((G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace) &&
-        (G.Bootstrap.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.Bootstrap.InputTraceInterval)) == 0))
-    {
-        std::printf("NSMB PlayerState: send inst=%d frame=%u player=%u found=%u pos=%08X/%08X vel=%08X/%08X\n",
-            instanceID,
-            frame,
-            packet.Player,
-            packet.Found,
-            packet.PosX,
-            packet.PosY,
-            packet.VelX,
-            packet.VelY);
-    }
-
-    G.Transport.Send(&packet, sizeof(packet), 0, false);
 }
 
 void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -6150,10 +6015,8 @@ void RunBeforeFrameActorStatePhase(int instanceID, melonDS::u32 frame, melonDS::
     ApplyRemoteGameState(instanceID, frame, nds);
     ApplyRemoteMovingHazardState(instanceID, frame, nds);
     ApplyRemoteWorldState(instanceID, frame, nds);
-    ApplyRemotePlayerState(instanceID, frame, nds);
     SyncWorldState(instanceID, frame, nds);
     SyncMovingHazardState(instanceID, frame, nds);
-    SyncPlayerState(instanceID, frame, nds);
 }
 
 InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, const InputState& polledInput)
@@ -6814,8 +6677,6 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         SyncWorldState(instanceID, logFrame, nds);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         SyncMovingHazardState(instanceID, logFrame, nds);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        SyncPlayerState(instanceID, logFrame, nds);
     TraceHangPhase("begin", "apply-hazard", instanceID, logFrame, logFrame, logFrame);
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteMovingHazardState(instanceID, logFrame, nds, true);
@@ -6824,10 +6685,6 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
         ApplyRemoteWorldState(instanceID, logFrame, nds);
     const auto afterApplyWorld = std::chrono::steady_clock::now();
-    TraceHangPhase("begin", "apply-player", instanceID, logFrame, logFrame, logFrame);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyRemotePlayerState(instanceID, logFrame, nds, true);
-    const auto afterApplyPlayer = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "game-state-trace", instanceID, logFrame, logFrame, logFrame);
     TraceGameState(instanceID, logFrame, nds);
     TraceAIPlayLog(instanceID, logFrame, nds);
@@ -6841,25 +6698,22 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     TraceHangPhase("begin", "sync-hazard-tail", instanceID, logFrame, logFrame, logFrame);
     SyncMovingHazardState(instanceID, logFrame, nds);
     const auto afterSyncHazard = std::chrono::steady_clock::now();
-    TraceHangPhase("begin", "sync-player-tail", instanceID, logFrame, logFrame, logFrame);
-    SyncPlayerState(instanceID, logFrame, nds);
-    const auto afterSyncPlayer = std::chrono::steady_clock::now();
     TraceHangPhase("end", "after-frame", instanceID, logFrame, logFrame, logFrame);
 
     if (G.Diagnostics.ActiveFrameSpikeTrace)
     {
         const auto totalUs = std::chrono::duration_cast<std::chrono::microseconds>(
-            afterSyncPlayer - afterHookCallStart).count();
+            afterSyncHazard - afterHookCallStart).count();
         if (totalUs >= std::min(G.Diagnostics.ActiveFrameSpikeThresholdUs, 10000))
         {
             const auto elapsedMs = [](auto start, auto end) {
                 return std::chrono::duration<double, std::milli>(end - start).count();
             };
             std::printf(
-                "NSMB AfterHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f heartbeatMs=%.3f barrierMs=%.3f bridgeMs=%.3f lifeTraceMs=%.3f diagnosticSnapshotMs=%.3f rollbackTraceMs=%.3f runtimeForceMs=%.3f artifactsMs=%.3f preSnapshotTailMs=%.3f applyHazardMs=%.3f applyWorldMs=%.3f applyPlayerMs=%.3f traceMs=%.3f syncGameMs=%.3f syncWorldMs=%.3f syncHazardMs=%.3f syncPlayerMs=%.3f\n",
+                "NSMB AfterHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f heartbeatMs=%.3f barrierMs=%.3f bridgeMs=%.3f lifeTraceMs=%.3f diagnosticSnapshotMs=%.3f rollbackTraceMs=%.3f runtimeForceMs=%.3f artifactsMs=%.3f preSnapshotTailMs=%.3f applyHazardMs=%.3f applyWorldMs=%.3f traceMs=%.3f syncGameMs=%.3f syncWorldMs=%.3f syncHazardMs=%.3f\n",
                 instanceID,
                 logFrame,
-                elapsedMs(afterHookCallStart, afterSyncPlayer),
+                elapsedMs(afterHookCallStart, afterSyncHazard),
                 elapsedMs(afterHookCallStart, afterInit),
                 elapsedMs(afterInit, afterHeartbeat),
                 elapsedMs(afterHeartbeat, afterBarrier),
@@ -6872,12 +6726,10 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                 elapsedMs(afterArtifacts, afterPreSnapshot),
                 elapsedMs(afterPreSnapshot, afterApplyHazard),
                 elapsedMs(afterApplyHazard, afterApplyWorld),
-                elapsedMs(afterApplyWorld, afterApplyPlayer),
-                elapsedMs(afterApplyPlayer, afterTrace),
+                elapsedMs(afterApplyWorld, afterTrace),
                 elapsedMs(afterTrace, afterSyncGame),
                 elapsedMs(afterSyncGame, afterSyncWorld),
-                elapsedMs(afterSyncWorld, afterSyncHazard),
-                elapsedMs(afterSyncHazard, afterSyncPlayer));
+                elapsedMs(afterSyncWorld, afterSyncHazard));
         }
     }
 

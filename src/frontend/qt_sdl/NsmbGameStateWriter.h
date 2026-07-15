@@ -103,16 +103,6 @@ struct MovingHazardApplyOptions {
   bool TraceMapping = false;
 };
 
-struct PlayerStateApplyOptions {
-  int InstanceID = 0;
-  int RemotePlayer = 0;
-  melonDS::u32 Frame = 0;
-  melonDS::u32 SampleFrame = 0;
-  int MaxPredictFrames = 0;
-  bool ApplyGlobals = false;
-  ApplyTraceOptions Trace;
-};
-
 bool WriteObjectTransformByBase(melonDS::NDS *nds, melonDS::u32 base,
                                 melonDS::u32 posX, melonDS::u32 posY,
                                 melonDS::u32 posZ, melonDS::u32 prevX,
@@ -146,16 +136,6 @@ melonDS::u64 WorldActorMatchDistance(
     const WireProtocol::WireWorldActorState &remoteActor,
     const GameStateReader::ObjectScanSample &localActor);
 
-bool WritePlayerRuntimeStateByBase(
-    melonDS::NDS *nds, melonDS::u32 base,
-    const WireProtocol::WirePlayerState &state);
-bool WritePlayerMinimalTransitionStateByBase(
-    melonDS::NDS *nds, melonDS::u32 base,
-    const WireProtocol::WirePlayerState &state);
-bool IsPlayerInActorTransition(melonDS::NDS *nds, melonDS::u32 base);
-bool WritePlayerGlobalState(melonDS::NDS *nds,
-                            const WireProtocol::WirePlayerState &state);
-
 GameStateApplyResult ApplyGameState(
     melonDS::NDS *nds, const GameStateModel::GameStateSample &sample,
     const GameStateApplyOptions &options);
@@ -167,11 +147,6 @@ void ApplyMovingHazardState(
     melonDS::NDS *nds, const WireProtocol::WireMovingHazardState &sample,
     GameStateModel::StateSyncRuntime &runtime,
     const MovingHazardApplyOptions &options);
-void ApplyPlayerState(melonDS::NDS *nds,
-                      const WireProtocol::WirePlayerState &sample,
-                      GameStateModel::StateSyncRuntime &runtime,
-                      const PlayerStateApplyOptions &options);
-
 } // namespace NsmbNetplayPoC::GameStateWriter
 
 #endif

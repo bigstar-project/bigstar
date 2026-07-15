@@ -635,16 +635,11 @@ struct DecodedGameState {
 };
 
 melonDS::u64 GameStateKey(int instanceID, melonDS::u32 frame);
-melonDS::u64 PlayerStateKey(melonDS::u32 player, melonDS::u32 frame);
 
 class RemoteStateStore {
 public:
-  static constexpr std::size_t PlayerHistoryLimit = 240;
-
   void ResetForRestart();
   void StoreGameState(const DecodedGameState &state);
-  std::size_t StorePlayerState(
-      const WireProtocol::WirePlayerState &state);
   bool StoreWorldState(const WireProtocol::WireWorldState &state);
   bool StoreMovingHazardState(
       const WireProtocol::WireMovingHazardState &state);
@@ -656,18 +651,12 @@ public:
   bool FindLatestGameState(int instanceID, melonDS::u32 frame,
                            GameStateSample &state,
                            melonDS::u32 &stateFrame) const;
-  bool FindLatestPlayerState(melonDS::u32 player, melonDS::u32 frame,
-                             WireProtocol::WirePlayerState &state,
-                             melonDS::u32 &stateFrame) const;
-
   const WireProtocol::WireWorldState *WorldState() const;
   const WireProtocol::WireMovingHazardState *MovingHazardState() const;
-  std::size_t PlayerStateCount() const;
 
 private:
   std::map<melonDS::u64, GameStateSyncHashes> GameStateHashes_;
   std::map<melonDS::u64, GameStateSample> GameStates_;
-  std::map<melonDS::u64, WireProtocol::WirePlayerState> PlayerStates_;
   std::optional<WireProtocol::WireWorldState> WorldState_;
   std::optional<WireProtocol::WireMovingHazardState> MovingHazardState_;
 };
@@ -683,9 +672,7 @@ public:
   RecordRemoteGameState(const DecodedGameState &state);
 
   RemoteStateStore RemoteState;
-  melonDS::u64 LastSentPlayerStateFrame[16]{};
   melonDS::u64 LastSentWorldStateFrame[16]{};
-  melonDS::u32 LastAppliedPlayerGlobalsFrame[16][2]{};
   melonDS::u32 PlayerActorBaseCache[16][2]{};
   melonDS::u32 PlayerActorGUIDCache[16][2]{};
   melonDS::u32 WorldStarActorBaseCache[16]{};

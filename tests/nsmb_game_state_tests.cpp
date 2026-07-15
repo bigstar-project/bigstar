@@ -71,7 +71,7 @@ void TestMalformedHeadersAreRejected() {
   invalid.Version++;
   CHECK(!GameStateModel::DecodeWireGameState(invalid, decoded));
   invalid = valid;
-  invalid.Kind = WireProtocol::kWireKindPlayerState;
+  invalid.Kind = WireProtocol::kWireKindWorldState;
   CHECK(!GameStateModel::DecodeWireGameState(invalid, decoded));
 }
 
@@ -154,23 +154,6 @@ void TestRemoteStateStoreSelectionAndRestart() {
   CHECK(!store.FindLatestGameState(1, 100, selected, selectedFrame));
   CHECK(selectedFrame == 0);
 
-  for (melonDS::u32 frame = 0;
-       frame <= GameStateModel::RemoteStateStore::PlayerHistoryLimit; frame++) {
-    WireProtocol::WirePlayerState player{};
-    player.Player = 0;
-    player.Frame = frame;
-    player.PosX = frame;
-    store.StorePlayerState(player);
-  }
-  CHECK(store.PlayerStateCount() ==
-        GameStateModel::RemoteStateStore::PlayerHistoryLimit);
-  WireProtocol::WirePlayerState player;
-  CHECK(!store.FindLatestPlayerState(0, 0, player, selectedFrame));
-  CHECK(store.FindLatestPlayerState(0, 150, player, selectedFrame));
-  CHECK(selectedFrame == 150);
-  CHECK(player.PosX == 150);
-  CHECK(!store.FindLatestPlayerState(1, 240, player, selectedFrame));
-
   WireProtocol::WireWorldState world{};
   world.Frame = 20;
   world.Star.GUID = 20;
@@ -191,7 +174,6 @@ void TestRemoteStateStoreSelectionAndRestart() {
   store.ResetForRestart();
   CHECK(store.FindGameStateHashes(2, 20) == nullptr);
   CHECK(store.FindGameState(2, 20) == nullptr);
-  CHECK(store.PlayerStateCount() == 0);
   CHECK(store.WorldState() == nullptr);
   CHECK(store.MovingHazardState() == nullptr);
 }
@@ -241,9 +223,7 @@ void TestStateSyncRuntimeRestartContract() {
   remote.Hashes.Basic = 2;
   CHECK(runtime.RecordRemoteGameState(remote).has_value());
   CHECK(runtime.BeginGameStateSync(3, 10));
-  runtime.LastSentPlayerStateFrame[3] = 11;
   runtime.LastSentWorldStateFrame[3] = 12;
-  runtime.LastAppliedPlayerGlobalsFrame[3][1] = 13;
   runtime.PlayerActorBaseCache[3][1] = 14;
   runtime.PlayerActorGUIDCache[3][1] = 15;
   runtime.WorldStarActorBaseCache[3] = 16;
@@ -265,9 +245,7 @@ void TestStateSyncRuntimeRestartContract() {
   CHECK(runtime.RemoteState.FindGameState(3, 10) == nullptr);
   CHECK(!runtime.RecordRemoteGameState(remote));
   CHECK(runtime.BeginGameStateSync(3, 10));
-  CHECK(runtime.LastSentPlayerStateFrame[3] == 0);
   CHECK(runtime.LastSentWorldStateFrame[3] == 0);
-  CHECK(runtime.LastAppliedPlayerGlobalsFrame[3][1] == 0);
   CHECK(runtime.PlayerActorBaseCache[3][1] == 0);
   CHECK(runtime.PlayerActorGUIDCache[3][1] == 0);
   CHECK(runtime.WorldStarActorBaseCache[3] == 0);

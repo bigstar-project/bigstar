@@ -12,10 +12,6 @@ melonDS::u64 GameStateKey(int instanceID, melonDS::u32 frame) {
          frame;
 }
 
-melonDS::u64 PlayerStateKey(melonDS::u32 player, melonDS::u32 frame) {
-  return (static_cast<melonDS::u64>(player) << 32) | frame;
-}
-
 namespace {
 
 template <typename State>
@@ -837,7 +833,6 @@ void GameStateTraceWriter::Close() {
 void RemoteStateStore::ResetForRestart() {
   GameStateHashes_.clear();
   GameStates_.clear();
-  PlayerStates_.clear();
   WorldState_.reset();
   MovingHazardState_.reset();
 }
@@ -847,14 +842,6 @@ void RemoteStateStore::StoreGameState(const DecodedGameState &state) {
       GameStateKey(static_cast<int>(state.Instance), state.Frame);
   GameStateHashes_[key] = state.Hashes;
   GameStates_[key] = state.Sample;
-}
-
-std::size_t RemoteStateStore::StorePlayerState(
-    const WireProtocol::WirePlayerState &state) {
-  PlayerStates_[PlayerStateKey(state.Player, state.Frame)] = state;
-  while (PlayerStates_.size() > PlayerHistoryLimit)
-    PlayerStates_.erase(PlayerStates_.begin());
-  return PlayerStates_.size();
 }
 
 bool RemoteStateStore::StoreWorldState(
@@ -899,25 +886,6 @@ bool RemoteStateStore::FindLatestGameState(int instanceID,
   return true;
 }
 
-bool RemoteStateStore::FindLatestPlayerState(
-    melonDS::u32 player, melonDS::u32 frame,
-    WireProtocol::WirePlayerState &state, melonDS::u32 &stateFrame) const {
-  const melonDS::u64 firstKey = PlayerStateKey(player, 0);
-  auto found = PlayerStates_.upper_bound(PlayerStateKey(player, frame));
-  if (found == PlayerStates_.begin()) {
-    stateFrame = 0;
-    return false;
-  }
-  --found;
-  if (found->first < firstKey) {
-    stateFrame = 0;
-    return false;
-  }
-  state = found->second;
-  stateFrame = state.Frame;
-  return true;
-}
-
 const WireProtocol::WireWorldState *RemoteStateStore::WorldState() const {
   return WorldState_ ? &*WorldState_ : nullptr;
 }
@@ -925,10 +893,6 @@ const WireProtocol::WireWorldState *RemoteStateStore::WorldState() const {
 const WireProtocol::WireMovingHazardState *
 RemoteStateStore::MovingHazardState() const {
   return MovingHazardState_ ? &*MovingHazardState_ : nullptr;
-}
-
-std::size_t RemoteStateStore::PlayerStateCount() const {
-  return PlayerStates_.size();
 }
 
 bool StateSyncRuntime::BeginGameStateSync(int instanceID,
@@ -980,10 +944,8 @@ void StateSyncRuntime::ResetForRestart(int instanceID) {
   LocalGameStateHashes_.clear();
   RemoteState.ResetForRestart();
   LastSentGameStateFrame_[instanceID] = 0;
-  LastSentPlayerStateFrame[instanceID] = 0;
   LastSentWorldStateFrame[instanceID] = 0;
   for (int player = 0; player < 2; player++) {
-    LastAppliedPlayerGlobalsFrame[instanceID][player] = 0;
     PlayerActorBaseCache[instanceID][player] = 0;
     PlayerActorGUIDCache[instanceID][player] = 0;
   }

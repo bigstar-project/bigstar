@@ -947,18 +947,6 @@ StateSyncConfig LoadStateSyncConfig(const Environment &environment) {
   config.GameInterval =
       std::max(1, ReadInt(environment, "MELONDS_NSML_STATE_SYNC_INTERVAL", 60));
 
-  config.PlayerEnabled =
-      ReadFlag(environment, "MELONDS_NSML_PLAYER_STATE_SYNC");
-  config.PlayerApplyEnabled =
-      ReadFlag(environment, "MELONDS_NSML_PLAYER_STATE_APPLY");
-  config.PlayerGlobalsEnabled =
-      ReadFlag(environment, "MELONDS_NSML_PLAYER_STATE_GLOBALS");
-  config.PlayerInterval = std::max(
-      1, ReadInt(environment, "MELONDS_NSML_PLAYER_STATE_SYNC_INTERVAL", 1));
-  config.PlayerMaxPredictFrames =
-      std::max(0, ReadInt(environment,
-                          "MELONDS_NSML_PLAYER_STATE_MAX_PREDICT_FRAMES", 2));
-
   config.WorldEnabled = ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_SYNC");
   config.WorldApplyEnabled =
       ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_APPLY");

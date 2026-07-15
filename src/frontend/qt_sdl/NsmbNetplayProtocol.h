@@ -15,8 +15,6 @@ constexpr melonDS::u32 kMagic = 0x4C4D534E; // "NSML", little endian
 constexpr melonDS::u32 kVersion = 1;
 constexpr melonDS::u32 kWireKindState = 0x54415453;  // "STAT", little endian
 constexpr melonDS::u32 kWireKindPacket = 0x4B434150; // "PACK", little endian
-constexpr melonDS::u32 kWireKindPlayerState =
-    0x41545350; // "PSTA", little endian
 constexpr melonDS::u32 kWireKindWorldState =
     0x41545357; // "WSTA", little endian
 constexpr melonDS::u32 kWireKindMovingHazardState =
@@ -134,53 +132,6 @@ struct WireGameState {
 };
 
 static_assert(sizeof(WireGameState) == 380);
-
-struct WirePlayerState {
-  melonDS::u32 Magic;
-  melonDS::u32 Version;
-  melonDS::u32 Kind;
-  melonDS::u32 Frame;
-  melonDS::u32 Instance;
-  melonDS::u32 Player;
-  melonDS::u32 Found;
-  melonDS::u32 GUID;
-  melonDS::u32 Settings;
-  melonDS::u32 StateType;
-  melonDS::u32 Flags;
-  melonDS::u32 PosX;
-  melonDS::u32 PosY;
-  melonDS::u32 PosZ;
-  melonDS::u32 PrevX;
-  melonDS::u32 PrevY;
-  melonDS::u32 PrevZ;
-  melonDS::u32 VelX;
-  melonDS::u32 VelY;
-  melonDS::u32 VelZ;
-  melonDS::u32 ActionFlag;
-  melonDS::u32 SubActionFlag;
-  melonDS::u32 PhysicsFlag;
-  melonDS::u32 DamageCooldown;
-  melonDS::u32 TransitionFlag;
-  melonDS::u32 CollisionFlag;
-  melonDS::u32 EnvironmentFlag;
-  melonDS::u32 RuntimeFlags0;
-  melonDS::u32 RuntimeFlags1;
-  melonDS::u32 PlayerCount;
-  melonDS::u32 Powerup;
-  melonDS::u32 InventoryPowerup;
-  melonDS::u32 Dead;
-  melonDS::u32 Character;
-  melonDS::u32 TransitionStatus;
-  melonDS::u32 Lives;
-  melonDS::u32 BattleStars;
-  melonDS::u32 Coins;
-  melonDS::u32 Score;
-  melonDS::u32 DisplayedStars;
-  melonDS::u32 Deaths;
-  melonDS::u32 CollectedStars;
-};
-
-static_assert(sizeof(WirePlayerState) == 168);
 
 struct WireWorldActorState {
   melonDS::u32 Found;
@@ -335,7 +286,6 @@ enum class PacketClass {
   InputBundleCandidate,
   Session,
   NSMLPacket,
-  PlayerState,
   WorldState,
   MovingHazardState,
   GameState,
@@ -345,7 +295,6 @@ struct KnownPacketSizes {
   std::size_t Input = 0;
   std::size_t Session = 0;
   std::size_t NSMLPacket = 0;
-  std::size_t PlayerState = 0;
   std::size_t WorldState = 0;
   std::size_t MovingHazardState = 0;
   std::size_t GameState = 0;

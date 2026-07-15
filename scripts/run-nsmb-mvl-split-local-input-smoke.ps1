@@ -59,11 +59,6 @@ param(
     [int]$StateSyncInterval = 60,
     [switch]$StateSyncExtended,
     [string]$StateApplyMode = "",
-    [switch]$PlayerStateSync,
-    [switch]$PlayerStateApply,
-    [switch]$PlayerStateGlobals,
-    [int]$PlayerStateSyncInterval = 1,
-    [int]$PlayerStateMaxPredictFrames = 2,
     [switch]$WorldStateSync,
     [switch]$WorldStateApply,
     [switch]$WorldStateSkipStar,
@@ -406,19 +401,6 @@ if ($StateSync) {
     }
     if ($StateApplyMode -ne "") {
         $common += @("-StateApplyMode", "$StateApplyMode")
-    }
-}
-if ($PlayerStateSync) {
-    $common += @(
-        "-PlayerStateSync",
-        "-PlayerStateSyncInterval", "$PlayerStateSyncInterval",
-        "-PlayerStateMaxPredictFrames", "$PlayerStateMaxPredictFrames"
-    )
-    if ($PlayerStateApply) {
-        $common += "-PlayerStateApply"
-    }
-    if ($PlayerStateGlobals) {
-        $common += "-PlayerStateGlobals"
     }
 }
 if ($WorldStateSync) {

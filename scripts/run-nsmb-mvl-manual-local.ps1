@@ -25,8 +25,6 @@ param(
     [int]$RollbackInputWaitUs = 0,
     [int]$RollbackMaxResimFrames = 0,
     [switch]$RollbackResimulate,
-    [int]$PlayerStateSyncInterval = 2,
-    [int]$PlayerStateMaxPredictFrames = 1,
     [int]$WorldStateSyncInterval = 2,
     [int]$WorldStateMaxPredictFrames = 1,
     [int]$WorldStateActorRescanInterval = 30,
@@ -176,7 +174,6 @@ if ($PlanDActorSnapshot) {
     if (-not $PSBoundParameters.ContainsKey('StallTimeoutMs')) { $StallTimeoutMs = 5000 }
     if (-not $PSBoundParameters.ContainsKey('WorldStateSyncInterval')) { $WorldStateSyncInterval = 1 }
     if (-not $PSBoundParameters.ContainsKey('WorldStateMaxPredictFrames')) { $WorldStateMaxPredictFrames = 2 }
-    if (-not $PSBoundParameters.ContainsKey('PlayerStateMaxPredictFrames')) { $PlayerStateMaxPredictFrames = 1 }
     if (-not $PSBoundParameters.ContainsKey('GameplayHeartbeatInterval')) { $GameplayHeartbeatInterval = 120 }
 }
 
@@ -342,11 +339,6 @@ if ($ForcePlayerStarCounters) {
 }
 if ($PlanDActorSnapshot) {
     $common += @(
-        "-PlayerStateSync",
-        "-PlayerStateApply",
-        "-PlayerStateGlobals",
-        "-PlayerStateSyncInterval", "$PlayerStateSyncInterval",
-        "-PlayerStateMaxPredictFrames", "$PlayerStateMaxPredictFrames",
         "-WorldStateSync",
         "-WorldStateApply",
         "-WorldStateApplyMovingHazard",
@@ -661,7 +653,7 @@ if ($HostAIObservationV3Log -or $ClientAIObservationV3Log) {
 Write-Host "trace gameState=$([bool]$GameStateTrace) interval=$GameStateTraceInterval extended=$([bool]$GameStateTraceExtended) lifeChanges=$([bool]$TracePlayerLifeChanges) defeated=$([bool]$TracePlayerDefeated)"
 Write-Host "recordInput=$([bool]$RecordInput) recordDir=$(if ($RecordInput) { $InputRecordDir } else { 'disabled' }) recordStart=$InputRecordStartFrame recordEnd=$InputRecordEndFrame"
 if ($PlanDActorSnapshot) {
-    Write-Host "Plan-D actor/global/world snapshot enabled playerInterval=$PlayerStateSyncInterval playerPredict=$PlayerStateMaxPredictFrames worldInterval=$WorldStateSyncInterval worldPredict=$WorldStateMaxPredictFrames worldRescan=$WorldStateActorRescanInterval"
+    Write-Host "Plan-D world snapshot enabled worldInterval=$WorldStateSyncInterval worldPredict=$WorldStateMaxPredictFrames worldRescan=$WorldStateActorRescanInterval"
 }
 Write-Host "mvlWins=$MvlWins mvlBigStars=$MvlBigStars mvlLives=$MvlLives mvlStage=$(if ($MvlStage -ge 0) { $MvlStage } else { 'auto/default' }) mvlSceneSettings=$(if ($MvlSceneSettings) { $MvlSceneSettings } else { 'derived' }) mvlCourseMode=$MvlCourseMode generateConfiguredRoms=$($GenerateMvlConfiguredRoms.IsPresent) mvlMatchSeed=$(if ($MvlMatchSeed) { $MvlMatchSeed } else { 'auto' })"
 if ($Rollback) {

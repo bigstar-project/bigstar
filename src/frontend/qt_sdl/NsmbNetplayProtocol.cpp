@@ -217,8 +217,8 @@ namespace NsmbNetplayPoC::PacketClassifier {
 namespace {
 
 bool IsGamePacketSize(std::size_t size, const KnownPacketSizes &known) {
-  return size == known.NSMLPacket || size == known.PlayerState ||
-         size == known.WorldState || size == known.MovingHazardState ||
+  return size == known.NSMLPacket || size == known.WorldState ||
+         size == known.MovingHazardState ||
          size == known.GameState;
 }
 
@@ -235,8 +235,6 @@ PacketClass Classify(std::size_t packetSize, const KnownPacketSizes &sizes) {
     return PacketClass::Session;
   if (packetSize == sizes.NSMLPacket)
     return PacketClass::NSMLPacket;
-  if (packetSize == sizes.PlayerState)
-    return PacketClass::PlayerState;
   if (packetSize == sizes.WorldState)
     return PacketClass::WorldState;
   if (packetSize == sizes.MovingHazardState)

@@ -20,7 +20,6 @@ constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
 constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
 constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
-constexpr melonDS::u16 kStageFXObjectID = 0x0012;
 constexpr melonDS::u32 kStageSceneUpdateDispatchTableAddr = 0x020CA378;
 constexpr melonDS::u32 kStageSceneRenderDispatchTableAddr = 0x020CA398;
 constexpr melonDS::u16 kStageActorManagerObjectID = 0x012F;
@@ -2244,114 +2243,6 @@ void FillWireWorldActorState(
   state.TargetVelX = actor.TargetVelX;
   state.TargetVelY = actor.TargetVelY;
   state.TargetVelZ = actor.TargetVelZ;
-}
-
-void ReadPlayerGlobalState(melonDS::NDS *nds, melonDS::u32 player,
-                           WireProtocol::WirePlayerState &state) {
-  if (!nds || !nds->MainRAM || player > 1)
-    return;
-  state.PlayerCount = nds->ARM9Read32(kGamePlayerCountAddr);
-  state.Powerup = nds->ARM9Read8(kGamePlayerPowerupAddr + player);
-  state.InventoryPowerup =
-      nds->ARM9Read8(kGamePlayerInventoryPowerupAddr + player);
-  state.Dead = nds->ARM9Read8(kGamePlayerDeadAddr + player);
-  state.Character = nds->ARM9Read8(kGamePlayerCharacterAddr + player);
-  state.TransitionStatus = nds->ARM9Read32(
-      kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32) * player);
-  state.Lives = nds->ARM9Read32(kGamePlayerLivesAddr +
-                                sizeof(melonDS::u32) * player);
-  state.BattleStars = nds->ARM9Read32(
-      kGamePlayerBattleStarsAddr + sizeof(melonDS::u32) * player);
-  state.Coins = nds->ARM9Read32(kGamePlayerCoinsAddr +
-                                sizeof(melonDS::u32) * player);
-  state.Score = nds->ARM9Read32(kGamePlayerScoreAddr +
-                                sizeof(melonDS::u32) * player);
-  state.DisplayedStars = nds->ARM9Read32(
-      kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32) * player);
-  state.Deaths = nds->ARM9Read32(kGamePlayerDeathsAddr +
-                                 sizeof(melonDS::u32) * player);
-  state.CollectedStars = nds->ARM9Read32(
-      kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32) * player);
-}
-
-WireProtocol::WirePlayerState BuildPlayerStatePacket(
-    melonDS::NDS *nds, melonDS::u32 instance, melonDS::u32 frame,
-    int player, bool includeGlobals,
-    GameStateModel::StateSyncRuntime &runtime) {
-  const ObjectScanSample actor =
-      GetPlayerActorCached(static_cast<int>(instance), player, nds, runtime);
-  const bool found = actor.Found != 0;
-
-  WireProtocol::WirePlayerState packet{};
-  packet.Magic = WireProtocol::kMagic;
-  packet.Version = WireProtocol::kVersion;
-  packet.Kind = WireProtocol::kWireKindPlayerState;
-  packet.Frame = frame;
-  packet.Instance = instance;
-  packet.Player = static_cast<melonDS::u32>(player);
-  packet.Found = found ? 1u : 0u;
-  if (includeGlobals)
-    ReadPlayerGlobalState(nds, packet.Player, packet);
-  packet.GUID = actor.GUID;
-  packet.Settings = actor.Settings;
-  packet.StateType = actor.StateType;
-  packet.Flags = actor.Flags;
-  packet.PosX = actor.PosX;
-  packet.PosY = actor.PosY;
-  packet.PosZ = actor.PosZ;
-  packet.PrevX = actor.PrevX;
-  packet.PrevY = actor.PrevY;
-  packet.PrevZ = actor.PrevZ;
-  packet.VelX = actor.VelX;
-  packet.VelY = actor.VelY;
-  packet.VelZ = actor.VelZ;
-  if (found && IsARM9MainRAMAddress(actor.Base)) {
-    packet.ActionFlag =
-        nds->ARM9Read32(actor.Base + kPlayerBaseActionFlagOffset);
-    packet.SubActionFlag =
-        nds->ARM9Read32(actor.Base + kPlayerBaseSubActionFlagOffset);
-    packet.PhysicsFlag =
-        nds->ARM9Read32(actor.Base + kPlayerBasePhysicsFlagOffset);
-    packet.DamageCooldown =
-        nds->ARM9Read16(actor.Base + kPlayerBaseDamageCooldownOffset);
-    packet.TransitionFlag =
-        nds->ARM9Read32(actor.Base + kPlayerBaseTransitionFlagOffset);
-    packet.CollisionFlag =
-        nds->ARM9Read32(actor.Base + kPlayerBaseCollisionFlagOffset);
-    packet.EnvironmentFlag =
-        nds->ARM9Read32(actor.Base + kPlayerBaseEnvironmentFlagOffset);
-    packet.RuntimeFlags0 =
-        (static_cast<melonDS::u32>(
-             nds->ARM9Read8(actor.Base + kPlayerBaseUpdateLockedOffset)) &
-         0xFFu) |
-        ((static_cast<melonDS::u32>(
-              nds->ARM9Read8(actor.Base + kPlayerBaseCharacterIDOffset)) &
-          0xFFu)
-         << 8) |
-        ((static_cast<melonDS::u32>(
-              nds->ARM9Read8(actor.Base +
-                             kPlayerBaseTransitioningFlagOffset)) &
-          0xFFu)
-         << 16) |
-        ((static_cast<melonDS::u32>(
-              nds->ARM9Read8(actor.Base +
-                             kPlayerBaseCameraFocusModeOffset)) &
-          0xFFu)
-         << 24);
-    packet.RuntimeFlags1 =
-        (static_cast<melonDS::u32>(
-             nds->ARM9Read8(actor.Base + kPlayerBaseDefeatedFlagOffset)) &
-         0xFFu) |
-        ((static_cast<melonDS::u32>(
-              nds->ARM9Read8(actor.Base + kPlayerBasePlayerIDOffset)) &
-          0xFFu)
-         << 8) |
-        ((static_cast<melonDS::u32>(
-              nds->ARM9Read8(actor.Base + kPlayerBaseVisibleFlagOffset)) &
-          0xFFu)
-         << 16);
-  }
-  return packet;
 }
 
 WireProtocol::WireWorldState BuildWorldStatePacket(

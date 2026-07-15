@@ -16,7 +16,7 @@ void Check(bool condition, const char *expression, int line) {
 #define CHECK(expression) Check((expression), #expression, __LINE__)
 
 NsmbNetplayPoC::PacketClassifier::KnownPacketSizes Sizes() {
-  return {24, 16, 80, 96, 112, 128, 176};
+  return {24, 16, 80, 112, 128, 176};
 }
 
 void TestEveryKnownClass() {
@@ -25,7 +25,6 @@ void TestEveryKnownClass() {
   CHECK(Classify(24, sizes) == PacketClass::Input);
   CHECK(Classify(16, sizes) == PacketClass::Session);
   CHECK(Classify(80, sizes) == PacketClass::NSMLPacket);
-  CHECK(Classify(96, sizes) == PacketClass::PlayerState);
   CHECK(Classify(112, sizes) == PacketClass::WorldState);
   CHECK(Classify(128, sizes) == PacketClass::MovingHazardState);
   CHECK(Classify(176, sizes) == PacketClass::GameState);
@@ -36,6 +35,7 @@ void TestBundleCandidateAndUnknownSizes() {
   const KnownPacketSizes sizes = Sizes();
   CHECK(Classify(17, sizes) == PacketClass::InputBundleCandidate);
   CHECK(Classify(64, sizes) == PacketClass::InputBundleCandidate);
+  CHECK(Classify(96, sizes) == PacketClass::InputBundleCandidate);
   CHECK(Classify(144, sizes) == PacketClass::InputBundleCandidate);
   CHECK(Classify(160, sizes) == PacketClass::InputBundleCandidate);
   CHECK(Classify(0, sizes) == PacketClass::Unknown);
@@ -47,10 +47,6 @@ void TestHistoricalPrecedenceIsPreserved() {
   KnownPacketSizes sizes = Sizes();
   sizes.NSMLPacket = sizes.Input;
   CHECK(Classify(sizes.Input, sizes) == PacketClass::Input);
-
-  sizes = Sizes();
-  sizes.PlayerState = sizes.Session;
-  CHECK(Classify(sizes.Session, sizes) == PacketClass::Session);
 
   sizes = Sizes();
   sizes.WorldState = sizes.NSMLPacket;

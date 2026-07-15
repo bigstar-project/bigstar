@@ -650,8 +650,6 @@ void TestStartupReportFormattingContract() {
   harness.NetworkPumpThreadEnabled = true;
   Config::StateSyncConfig stateSync;
   stateSync.GameEnabled = true;
-  stateSync.PlayerEnabled = true;
-  stateSync.PlayerMaxPredictFrames = 7;
   Config::PacketBridgeConfig packetBridge;
   packetBridge.Enabled = true;
   packetBridge.WaitEnabled = true;
@@ -698,7 +696,7 @@ void TestStartupReportFormattingContract() {
         std::string::npos);
   CHECK(!netplayReport.empty() && netplayReport.back() == '\n');
 
-  CHECK(Fnv1a64(testReport) == 16324978585019556272ull);
+  CHECK(Fnv1a64(testReport) == 10712281054962409865ull);
   CHECK(Fnv1a64(netplayReport) == 14124424877864246494ull);
 }
 

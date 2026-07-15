@@ -627,7 +627,7 @@ std::string FormatTestStartupReport(
     const Config::MvlConfig &mvl, std::size_t ramDumpRangeCount,
     int currentStage, melonDS::u32 currentSceneSettings) {
   return FormatPrintf(
-      "NSMB Test: enabled tUnixMs=%llu frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d playerStateSync=%d playerStateApply=%d playerStateGlobals=%d playerStateInterval=%d playerStatePredict=%d netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u mvlStage=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
+      "NSMB Test: enabled tUnixMs=%llu frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u mvlStage=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
       static_cast<unsigned long long>(unixMs), bootstrap.TestFrames,
       bootstrap.TestInstanceCount, harness.FrameBarrierEnabled ? 1 : 0,
       harness.SerialRunEnabled ? 1 : 0,
@@ -643,10 +643,7 @@ std::string FormatTestStartupReport(
           : diagnostics.GameStateTracePath.c_str(),
       diagnostics.GameStateTraceInterval, stateSync.GameEnabled ? 1 : 0,
       stateSync.GameApplyEnabled ? 1 : 0, stateSync.GameInterval,
-      stateSync.PlayerEnabled ? 1 : 0,
-      stateSync.PlayerApplyEnabled ? 1 : 0,
-      stateSync.PlayerGlobalsEnabled ? 1 : 0, stateSync.PlayerInterval,
-       stateSync.PlayerMaxPredictFrames, mvl.NetRandom.Enabled ? 1 : 0,
+      mvl.NetRandom.Enabled ? 1 : 0,
       mvl.NetRandom.Auto ? 1 : 0, mvl.NetRandom.Frame, mvl.NetRandom.Value,
       harness.StateSaveDir.empty() ? "<none>" : harness.StateSaveDir.c_str(),
       harness.StateSaveFrame,
