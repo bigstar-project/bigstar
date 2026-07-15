@@ -230,7 +230,7 @@ function New-MelonEnv {
         MELONDS_NSML_TEST = "1"
         MELONDS_NSML_TEST_INSTANCES = "1"
         MELONDS_NSML_TEST_FRAMES = "$Frames"
-        MELONDS_NSML_POC = "1"
+        MELONDS_NSML_NETPLAY = "1"
         MELONDS_NSML_ROLE = $Role
         MELONDS_NSML_PORT = "$Port"
         MELONDS_NSML_LOCAL_INSTANCE = $localInstance

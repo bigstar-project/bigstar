@@ -159,7 +159,10 @@ std::vector<std::uint32_t> ReadU32List(const Environment &environment,
 
 BootstrapConfig LoadBootstrapConfig(const Environment &environment) {
   BootstrapConfig config;
-  config.Enabled = ReadFlag(environment, "MELONDS_NSML_POC");
+  const char *netplayEnabled = environment.Get("MELONDS_NSML_NETPLAY");
+  config.Enabled = HasValue(netplayEnabled)
+                       ? ParseFlag(netplayEnabled)
+                       : ReadFlag(environment, "MELONDS_NSML_POC");
   config.TestEnabled = ReadFlag(environment, "MELONDS_NSML_TEST");
   config.TestFrames = static_cast<std::uint32_t>(
       std::max(0, ReadInt(environment, "MELONDS_NSML_TEST_FRAMES", 0)));

@@ -304,6 +304,8 @@ fn melon_env_carries_game_settings_and_netplay_start() {
         Path::new("logs/nsmb-mvl-gui-test"),
     );
     assert_eq!(env["MELONDS_NSML_ROLE"], "client");
+    assert_eq!(env["MELONDS_NSML_NETPLAY"], "1");
+    assert!(!env.contains_key("MELONDS_NSML_POC"));
     assert_eq!(env["MELONDS_NSML_PEER"], "127.0.0.1");
     assert_eq!(env["MELONDS_NSML_MVL_STAGE"], "2");
     assert_eq!(env["MELONDS_NSML_MVL_STAGE_SEQUENCE"], "2,3,4,0,1");
@@ -645,7 +647,7 @@ fn melon_diagnostics_reads_game_state_mismatch_json() {
             "player_global_matches": false,
             "wifi_candidate_matches": true,
             "render_candidate_matches": true,
-            "line": "NSMB PoC: game state mismatch inst=0 frame=180 local=0000000000000003 remote=0000000000000004 basic=0 playerGlobal=0 wifiCandidate=1 renderCandidate=1"
+            "line": "NSMB MvL Netplay: game state mismatch inst=0 frame=180 local=0000000000000003 remote=0000000000000004 basic=0 playerGlobal=0 wifiCandidate=1 renderCandidate=1"
           }
         }"#,
     )
@@ -975,7 +977,7 @@ fn game_state_mismatch(
         player_global_matches,
         wifi_candidate_matches,
         render_candidate_matches,
-        line: "NSMB PoC: game state mismatch".to_owned(),
+        line: "NSMB MvL Netplay: game state mismatch".to_owned(),
     }
 }
 

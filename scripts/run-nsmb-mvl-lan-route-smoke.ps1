@@ -1143,7 +1143,8 @@ function Start-MelonLANProcess {
         }
     }
     if ($PacketBridge -or $InputNetplay) {
-        $env:MELONDS_NSML_POC = "1"
+        $env:MELONDS_NSML_NETPLAY = "1"
+        Remove-Item Env:\MELONDS_NSML_POC -ErrorAction SilentlyContinue
         $env:MELONDS_NSML_ROLE = $Role
         $env:MELONDS_NSML_PORT = "$PacketBridgePort"
         if ($Role -eq "host" -and $HostLocalInstance) {
@@ -1435,6 +1436,7 @@ function Start-MelonLANProcess {
             }
         }
     } else {
+        Remove-Item Env:\MELONDS_NSML_NETPLAY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_POC -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_ROLE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PEER -ErrorAction SilentlyContinue

@@ -110,7 +110,7 @@ void TestBootstrapConfigDefaults() {
 void TestBootstrapConfigReadsAndClampsEnvironment() {
   MapEnvironment environment;
   environment.Values = {
-      {"MELONDS_NSML_POC", "1"},
+      {"MELONDS_NSML_NETPLAY", "1"},
       {"MELONDS_NSML_TEST", "1"},
       {"MELONDS_NSML_TEST_FRAMES", "-20"},
       {"MELONDS_NSML_TEST_INSTANCES", "99"},
@@ -133,6 +133,19 @@ void TestBootstrapConfigReadsAndClampsEnvironment() {
   CHECK(config.QuitGraceMs == 250);
   CHECK(config.InputTraceEnabled);
   CHECK(config.InputTraceInterval == 1);
+}
+
+void TestBootstrapConfigSupportsLegacyEnableAlias() {
+  MapEnvironment environment;
+  environment.Values = {{"MELONDS_NSML_POC", "1"}};
+  CHECK(NsmbMvlNetplay::Config::LoadBootstrapConfig(environment).Enabled);
+
+  environment.Values["MELONDS_NSML_NETPLAY"] = "0";
+  CHECK(!NsmbMvlNetplay::Config::LoadBootstrapConfig(environment).Enabled);
+
+  environment.Values["MELONDS_NSML_NETPLAY"] = "1";
+  environment.Values["MELONDS_NSML_POC"] = "0";
+  CHECK(NsmbMvlNetplay::Config::LoadBootstrapConfig(environment).Enabled);
 }
 
 void TestConnectionConfigDefaultsAndRoleFallback() {
@@ -1056,6 +1069,7 @@ int main() {
   TestUnsignedListParsingPreservesLegacySemantics();
   TestBootstrapConfigDefaults();
   TestBootstrapConfigReadsAndClampsEnvironment();
+  TestBootstrapConfigSupportsLegacyEnableAlias();
   TestConnectionConfigDefaultsAndRoleFallback();
   TestConnectionConfigReadsExistingValuesAndClamps();
   TestInputConfigDefaultsPreserveLegacyInitializationOrder();

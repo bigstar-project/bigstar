@@ -48,7 +48,8 @@ function Start-MelonRouteNetplayProcess {
     $env:MELONDS_NSML_SCREENSHOT_DIR = $ScreenshotDir
     $env:MELONDS_NSML_SCREENSHOT_INTERVAL = "600"
     $env:MELONDS_NSML_WAIT_TIMEOUT_MS = "60000"
-    $env:MELONDS_NSML_POC = "1"
+    $env:MELONDS_NSML_NETPLAY = "1"
+    Remove-Item Env:\MELONDS_NSML_POC -ErrorAction SilentlyContinue
     $env:MELONDS_NSML_ROLE = $Role
     $env:MELONDS_NSML_PORT = "$Port"
     $env:MELONDS_NSML_LOCAL_INSTANCE = "$LocalInstance"

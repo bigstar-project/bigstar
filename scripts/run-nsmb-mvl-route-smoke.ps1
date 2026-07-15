@@ -81,6 +81,7 @@ foreach ($suffix in @(".sav", ".sav.2")) {
 }
 
 foreach ($name in @(
+    "MELONDS_NSML_NETPLAY",
     "MELONDS_NSML_POC",
     "MELONDS_NSML_ROLE",
     "MELONDS_NSML_PEER",
