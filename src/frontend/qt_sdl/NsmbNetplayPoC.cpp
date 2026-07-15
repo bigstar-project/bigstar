@@ -343,12 +343,10 @@ const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings);
 GameStateSample ReadGameStateSample(melonDS::NDS* nds);
 using Diagnostics::DiagnosticFrameSnapshot;
 using Diagnostics::DiagnosticPlayerSnapshot;
-using Diagnostics::AppendDiagnosticFrameJson;
-using Diagnostics::AppendDiagnosticPlayerContextJson;
 using Diagnostics::AppendGameStatePlayerJson;
 using Diagnostics::AppendJsonHex32;
-using Diagnostics::AppendJsonHex64;
 using Diagnostics::IsPlayerScreenPositionAnomalous;
+using Diagnostics::JsonEscape;
 
 void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 
@@ -700,38 +698,6 @@ bool LoadInputScriptFileLocked(
 bool LoadInputScriptLocked()
 {
     return LoadInputScriptFileLocked(G.Harness.InputScriptPath, GInputScript);
-}
-
-std::string JsonEscape(const std::string& value)
-{
-    std::ostringstream out;
-    for (char ch : value)
-    {
-        switch (ch)
-        {
-        case '\\': out << "\\\\"; break;
-        case '"': out << "\\\""; break;
-        case '\b': out << "\\b"; break;
-        case '\f': out << "\\f"; break;
-        case '\n': out << "\\n"; break;
-        case '\r': out << "\\r"; break;
-        case '\t': out << "\\t"; break;
-        default:
-            if (static_cast<unsigned char>(ch) < 0x20)
-            {
-                out << "\\u"
-                    << std::hex << std::uppercase << std::setw(4) << std::setfill('0')
-                    << static_cast<int>(static_cast<unsigned char>(ch))
-                    << std::dec << std::nouppercase << std::setfill(' ');
-            }
-            else
-            {
-                out << ch;
-            }
-            break;
-        }
-    }
-    return out.str();
 }
 
 std::string Hex64(melonDS::u64 value)
@@ -3851,13 +3817,6 @@ void SaveMvlAutoRestartCheckpointIfNeeded(int instanceID, melonDS::u32 frame, me
     std::fflush(stdout);
 }
 
-std::string Hex32(melonDS::u32 value)
-{
-    std::ostringstream out;
-    out << std::hex << std::uppercase << std::setw(8) << std::setfill('0') << value;
-    return out.str();
-}
-
 void WriteDiagnosticEventLocked(const std::string& json)
 {
     if (!G.Diagnostics.DiagnosticEventsEnabled || G.Diagnostics.DiagnosticEventsPath.empty())
@@ -3871,24 +3830,12 @@ void EmitStartReadyEventLocked(const char* direction, melonDS::u32 localFrame, m
     if (!G.Diagnostics.DiagnosticEventsEnabled)
         return;
 
-    const long long delta = (localFrame == kNoFrameLimit || remoteFrame == kNoFrameLimit)
-        ? 0
-        : static_cast<long long>(remoteFrame) - static_cast<long long>(localFrame);
-    std::ostringstream json;
-    json << "{\"event\":\"start_ready\","
-         << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
-         << "\"direction\":\"" << (direction ? direction : "unknown") << "\","
-         << "\"localFrame\":" << localFrame << ","
-         << "\"remoteFrame\":" << remoteFrame << ","
-         << "\"delta\":" << delta << ","
-         << "\"logicalStart\":" << G.Connection.StartFrame << ","
-         << "\"lastSentInputFrame\":" << G.InputRuntime.LastSentInputFrame << ","
-         << "\"lastReceivedInputFrame\":" << G.InputRuntime.LastReceivedInputFrame << ","
-         << "\"localQueue\":" << G.InputRuntime.LocalInputs.size() << ","
-         << "\"remoteQueue\":" << G.InputRuntime.RemoteInputs.size() << ","
-         << "\"delayedInputs\":" << G.Delivery.PendingCount()
-         << "}";
-    WriteDiagnosticEventLocked(json.str());
+    WriteDiagnosticEventLocked(Diagnostics::FormatStartReadyEvent(
+        G.NetRole == Role::Host ? "host" : "client", direction, localFrame,
+        remoteFrame, kNoFrameLimit, G.Connection.StartFrame,
+        G.InputRuntime.LastSentInputFrame, G.InputRuntime.LastReceivedInputFrame,
+        G.InputRuntime.LocalInputs.size(), G.InputRuntime.RemoteInputs.size(),
+        G.Delivery.PendingCount()));
 }
 
 void EmitDiagnosticStartupEvent()
@@ -3896,39 +3843,21 @@ void EmitDiagnosticStartupEvent()
     if (!G.Diagnostics.DiagnosticEventsEnabled)
         return;
 
-    std::ostringstream json;
-    json << "{\"event\":\"diagnostic_started\","
-         << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
-         << "\"ringFrames\":" << G.Diagnostics.DiagnosticRingFrames << ","
-         << "\"stateSync\":" << (G.StateSync.GameEnabled ? "true" : "false") << ","
-         << "\"stateSyncExtended\":" << (G.StateSync.GameExtended ? "true" : "false") << ","
-         << "\"stateSyncInterval\":" << G.StateSync.GameInterval << ","
-         << "\"diagnosticsFile\":\"" << JsonEscape(G.Diagnostics.DiagnosticsPath) << "\","
-         << "\"eventsFile\":\"" << JsonEscape(G.Diagnostics.DiagnosticEventsPath) << "\""
-         << "}";
-    WriteDiagnosticEventLocked(json.str());
+    WriteDiagnosticEventLocked(Diagnostics::FormatDiagnosticStartupEvent(
+        G.NetRole == Role::Host ? "host" : "client",
+        G.Diagnostics.DiagnosticRingFrames, G.StateSync.GameEnabled,
+        G.StateSync.GameExtended, G.StateSync.GameInterval,
+        G.Diagnostics.DiagnosticsPath, G.Diagnostics.DiagnosticEventsPath));
 }
 
-void AppendDiagnosticRingJson(std::ostream& out, int instanceID)
+std::vector<DiagnosticFrameSnapshot> DiagnosticRingWindow(int instanceID)
 {
-    out << "\"ring\":[";
-    if (instanceID >= 0 && instanceID < 16)
-    {
-        bool first = true;
-        const std::size_t ringFrames = static_cast<std::size_t>(
-            std::clamp(G.Diagnostics.DiagnosticRingFrames, 1,
-                static_cast<int>(Diagnostics::kDiagnosticRingCapacity)));
-        const std::vector<DiagnosticFrameSnapshot> snapshots =
-            G.DiagnosticsRuntime.DiagnosticSnapshotWindow(instanceID, ringFrames);
-        for (const DiagnosticFrameSnapshot& snap : snapshots)
-        {
-            if (!first)
-                out << ",";
-            first = false;
-            AppendDiagnosticFrameJson(out, snap);
-        }
-    }
-    out << "]";
+    if (instanceID < 0 || instanceID >= 16)
+        return {};
+    const std::size_t ringFrames = static_cast<std::size_t>(
+        std::clamp(G.Diagnostics.DiagnosticRingFrames, 1,
+            static_cast<int>(Diagnostics::kDiagnosticRingCapacity)));
+    return G.DiagnosticsRuntime.DiagnosticSnapshotWindow(instanceID, ringFrames);
 }
 
 void EmitDiagnosticPitTransitionEvent(
@@ -3950,22 +3879,12 @@ void EmitDiagnosticPitTransitionEvent(
     G.DiagnosticsRuntime.ScheduleDiagnosticPostTrigger(
         instanceID, snap.Frame + kDiagnosticPostTriggerFrames);
 
-    std::ostringstream json;
-    json << "{\"event\":\"player_pit_transition\","
-         << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
-         << "\"instance\":" << instanceID << ","
-         << "\"frame\":" << snap.Frame << ","
-         << "\"stageID\":" << snap.StageID << ","
-         << "\"stageGroup\":" << snap.StageGroup << ","
-         << "\"scene\":" << snap.SceneCurrentSceneID << ","
-         << "\"nextScene\":" << snap.SceneNextSceneID << ",";
-    AppendDiagnosticPlayerContextJson(json, snap, previous, player);
-    json << ",";
-    AppendDiagnosticRingJson(json, instanceID);
-    json << "}";
+    const std::string json = Diagnostics::FormatDiagnosticPlayerSnapshotEvent(
+        "player_pit_transition", G.NetRole == Role::Host ? "host" : "client",
+        instanceID, snap, previous, player, DiagnosticRingWindow(instanceID));
 
     std::lock_guard<std::mutex> lock(G.Mutex);
-    WriteDiagnosticEventLocked(json.str());
+    WriteDiagnosticEventLocked(json);
 }
 
 void EmitDiagnosticPositionAnomalyEvent(
@@ -3982,22 +3901,12 @@ void EmitDiagnosticPositionAnomalyEvent(
             instanceID, player, snap.Frame, kDiagnosticRepeatedAnomalyFrames))
         return;
 
-    std::ostringstream json;
-    json << "{\"event\":\"player_position_anomaly\","
-         << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
-         << "\"instance\":" << instanceID << ","
-         << "\"frame\":" << snap.Frame << ","
-         << "\"stageID\":" << snap.StageID << ","
-         << "\"stageGroup\":" << snap.StageGroup << ","
-         << "\"scene\":" << snap.SceneCurrentSceneID << ","
-         << "\"nextScene\":" << snap.SceneNextSceneID << ",";
-    AppendDiagnosticPlayerContextJson(json, snap, previous, player);
-    json << ",";
-    AppendDiagnosticRingJson(json, instanceID);
-    json << "}";
+    const std::string json = Diagnostics::FormatDiagnosticPlayerSnapshotEvent(
+        "player_position_anomaly", G.NetRole == Role::Host ? "host" : "client",
+        instanceID, snap, previous, player, DiagnosticRingWindow(instanceID));
 
     std::lock_guard<std::mutex> lock(G.Mutex);
-    WriteDiagnosticEventLocked(json.str());
+    WriteDiagnosticEventLocked(json);
 }
 
 void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -4042,49 +3951,12 @@ void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonD
         G.DiagnosticsRuntime.TakeDueDiagnosticPostTrigger(instanceID, frame);
     if (triggerFrame)
     {
-        std::ostringstream json;
-        json << "{\"event\":\"diagnostic_post_window\","
-             << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
-             << "\"instance\":" << instanceID << ","
-             << "\"frame\":" << frame << ","
-             << "\"triggerUntilFrame\":" << triggerFrame.value() << ",";
-        AppendDiagnosticRingJson(json, instanceID);
-        json << "}";
+        const std::string json = Diagnostics::FormatDiagnosticPostWindowEvent(
+            G.NetRole == Role::Host ? "host" : "client", instanceID, frame,
+            triggerFrame.value(), DiagnosticRingWindow(instanceID));
         std::lock_guard<std::mutex> lock(G.Mutex);
-        WriteDiagnosticEventLocked(json.str());
+        WriteDiagnosticEventLocked(json);
     }
-}
-
-void AppendRemoteSampleDiffJson(std::ostream& out, const GameStateSample& local, const GameStateSample& remote)
-{
-    auto diffHex = [&out](const char* name, melonDS::u32 a, melonDS::u32 b, bool& first) {
-        if (a == b)
-            return;
-        if (!first)
-            out << ",";
-        first = false;
-        out << "{\"field\":\"" << name << "\",\"local\":\"0x" << Hex32(a)
-            << "\",\"remote\":\"0x" << Hex32(b) << "\"}";
-    };
-
-    bool first = true;
-    out << "\"remoteSampleDiffs\":[";
-    diffHex("stageID", local.StageID, remote.StageID, first);
-    diffHex("stageGroup", local.StageGroup, remote.StageGroup, first);
-    diffHex("player0PosX", local.PlayerActor0PosX, remote.PlayerActor0PosX, first);
-    diffHex("player0PosY", local.PlayerActor0PosY, remote.PlayerActor0PosY, first);
-    diffHex("player0VelX", local.PlayerActor0VelX, remote.PlayerActor0VelX, first);
-    diffHex("player0VelY", local.PlayerActor0VelY, remote.PlayerActor0VelY, first);
-    diffHex("player1PosX", local.PlayerActor1PosX, remote.PlayerActor1PosX, first);
-    diffHex("player1PosY", local.PlayerActor1PosY, remote.PlayerActor1PosY, first);
-    diffHex("player1VelX", local.PlayerActor1VelX, remote.PlayerActor1VelX, first);
-    diffHex("player1VelY", local.PlayerActor1VelY, remote.PlayerActor1VelY, first);
-    diffHex("player0Deaths", local.Player0Deaths, remote.Player0Deaths, first);
-    diffHex("player1Deaths", local.Player1Deaths, remote.Player1Deaths, first);
-    diffHex("player0BattleStars", local.Player0BattleStars, remote.Player0BattleStars, first);
-    diffHex("player1BattleStars", local.Player1BattleStars, remote.Player1BattleStars, first);
-    diffHex("vsCoinCount", local.VsCoinCount, remote.VsCoinCount, first);
-    out << "]";
 }
 
 void EmitGameStateMismatchEventLocked(
@@ -4104,79 +3976,21 @@ void EmitGameStateMismatchEventLocked(
         instanceID, frame + kDiagnosticPostTriggerFrames);
 
     GameStateSample remoteSample;
-    bool hasRemoteSample = false;
+    const GameStateSample* remoteSamplePtr = nullptr;
     if (const GameStateSample* stored = G.GameSync.RemoteState.FindGameState(instanceID, frame))
     {
         remoteSample = *stored;
-        hasRemoteSample = true;
+        remoteSamplePtr = &remoteSample;
     }
 
-    GameStateSample localSample;
-    bool hasLocalSample = false;
     const std::optional<DiagnosticFrameSnapshot> latestSnapshot =
         G.DiagnosticsRuntime.LatestDiagnosticSnapshot(instanceID);
     const DiagnosticFrameSnapshot* latest = latestSnapshot
         ? &latestSnapshot.value()
         : nullptr;
-
-    std::ostringstream json;
-    json << "{\"event\":\"player_global_mismatch\","
-         << "\"role\":\"" << (G.NetRole == Role::Host ? "host" : "client") << "\","
-         << "\"instance\":" << instanceID << ","
-         << "\"frame\":" << frame << ",";
-    AppendJsonHex64(json, "localBasic", local.Basic); json << ",";
-    AppendJsonHex64(json, "remoteBasic", remote.Basic); json << ",";
-    AppendJsonHex64(json, "localPlayerGlobal", local.PlayerGlobal); json << ",";
-    AppendJsonHex64(json, "remotePlayerGlobal", remote.PlayerGlobal); json << ",";
-    AppendJsonHex64(json, "localWifiCandidate", local.WifiCandidate); json << ",";
-    AppendJsonHex64(json, "remoteWifiCandidate", remote.WifiCandidate); json << ",";
-    AppendJsonHex64(json, "localRenderCandidate", local.RenderCandidate); json << ",";
-    AppendJsonHex64(json, "remoteRenderCandidate", remote.RenderCandidate); json << ",";
-    if (latest)
-    {
-        AppendJsonHex64(json, "localPlayerGlobalHash0", latest->PlayerGlobalHash0); json << ",";
-        AppendJsonHex64(json, "localPlayerGlobalHash1", latest->PlayerGlobalHash1); json << ",";
-        AppendJsonHex64(json, "localPlayerActorHash0", latest->PlayerActorHash0); json << ",";
-        AppendJsonHex64(json, "localPlayerActorHash1", latest->PlayerActorHash1); json << ",";
-        json << "\"latestLocal\":";
-        AppendDiagnosticFrameJson(json, *latest);
-        json << ",";
-    }
-    if (hasRemoteSample)
-    {
-        json << "\"remotePlayers\":[";
-        AppendGameStatePlayerJson(json, remoteSample, 0);
-        json << ",";
-        AppendGameStatePlayerJson(json, remoteSample, 1);
-        json << "],";
-        if (latest)
-        {
-            localSample.StageID = latest->StageID;
-            localSample.StageGroup = latest->StageGroup;
-            localSample.PlayerActor0PosX = latest->Player[0].PosX;
-            localSample.PlayerActor0PosY = latest->Player[0].PosY;
-            localSample.PlayerActor0VelX = latest->Player[0].VelX;
-            localSample.PlayerActor0VelY = latest->Player[0].VelY;
-            localSample.PlayerActor1PosX = latest->Player[1].PosX;
-            localSample.PlayerActor1PosY = latest->Player[1].PosY;
-            localSample.PlayerActor1VelX = latest->Player[1].VelX;
-            localSample.PlayerActor1VelY = latest->Player[1].VelY;
-            localSample.Player0Deaths = latest->Player[0].Deaths;
-            localSample.Player1Deaths = latest->Player[1].Deaths;
-            localSample.Player0BattleStars = latest->Player[0].BattleStars;
-            localSample.Player1BattleStars = latest->Player[1].BattleStars;
-            localSample.VsCoinCount = latest->Player[0].Coins + latest->Player[1].Coins;
-            hasLocalSample = true;
-        }
-        if (hasLocalSample)
-        {
-            AppendRemoteSampleDiffJson(json, localSample, remoteSample);
-            json << ",";
-        }
-    }
-    AppendDiagnosticRingJson(json, instanceID);
-    json << "}";
-    WriteDiagnosticEventLocked(json.str());
+    WriteDiagnosticEventLocked(Diagnostics::FormatPlayerGlobalMismatchEvent(
+        G.NetRole == Role::Host ? "host" : "client", instanceID, frame, local,
+        remote, latest, remoteSamplePtr, DiagnosticRingWindow(instanceID)));
 }
 
 void AppendNearbyHazardsJson(std::ostream& out, melonDS::NDS* nds)
@@ -4242,7 +4056,7 @@ void EmitPlayerLifeEvent(
     if (!transitionOnly)
     {
         json << ",";
-        AppendDiagnosticRingJson(json, instanceID);
+        Diagnostics::AppendDiagnosticRingJson(json, DiagnosticRingWindow(instanceID));
     }
     json << "}";
 

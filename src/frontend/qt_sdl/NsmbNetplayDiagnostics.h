@@ -133,6 +133,36 @@ void AppendDiagnosticPlayerContextJson(
 bool IsPlayerScreenPositionAnomalous(
     const DiagnosticFrameSnapshot &snapshot,
     const DiagnosticFrameSnapshot *previous, int player);
+std::string JsonEscape(const std::string &value);
+void AppendDiagnosticRingJson(
+    std::ostream &out,
+    const std::vector<DiagnosticFrameSnapshot> &snapshots);
+std::string FormatStartReadyEvent(
+    const char *role, const char *direction, melonDS::u32 localFrame,
+    melonDS::u32 remoteFrame, melonDS::u32 noFrameLimit,
+    melonDS::u32 logicalStart, melonDS::u32 lastSentInputFrame,
+    melonDS::u32 lastReceivedInputFrame, std::size_t localQueue,
+    std::size_t remoteQueue, std::size_t delayedInputs);
+std::string FormatDiagnosticStartupEvent(
+    const char *role, int ringFrames, bool stateSync, bool stateSyncExtended,
+    int stateSyncInterval, const std::string &diagnosticsPath,
+    const std::string &eventsPath);
+std::string FormatDiagnosticPlayerSnapshotEvent(
+    const char *event, const char *role, int instanceID,
+    const DiagnosticFrameSnapshot &snapshot,
+    const DiagnosticFrameSnapshot *previous, int player,
+    const std::vector<DiagnosticFrameSnapshot> &ring);
+std::string FormatDiagnosticPostWindowEvent(
+    const char *role, int instanceID, melonDS::u32 frame,
+    melonDS::u32 triggerUntilFrame,
+    const std::vector<DiagnosticFrameSnapshot> &ring);
+std::string FormatPlayerGlobalMismatchEvent(
+    const char *role, int instanceID, melonDS::u32 frame,
+    const GameStateModel::GameStateSyncHashes &local,
+    const GameStateModel::GameStateSyncHashes &remote,
+    const DiagnosticFrameSnapshot *latest,
+    const GameStateModel::GameStateSample *remoteSample,
+    const std::vector<DiagnosticFrameSnapshot> &ring);
 std::string FormatTestStartupReport(
     std::uint64_t unixMs, const Config::BootstrapConfig &bootstrap,
     const Config::DiagnosticsConfig &diagnostics,

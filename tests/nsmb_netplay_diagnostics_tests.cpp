@@ -495,6 +495,115 @@ void TestDiagnosticJsonAndPositionContract() {
   CHECK(context.str().find("\"previous\":{") != std::string::npos);
 }
 
+void TestDiagnosticEventFormattingContract() {
+  using namespace NsmbNetplayPoC;
+  using Diagnostics::DiagnosticFrameSnapshot;
+
+  CHECK(Diagnostics::JsonEscape("a\\b\"c\n\x01") ==
+        "a\\\\b\\\"c\\n\\u0001");
+  CHECK(Diagnostics::FormatStartReadyEvent(
+            "host", "send", 10, 13, 0, 8, 11, 12, 2, 3, 4) ==
+        "{\"event\":\"start_ready\",\"role\":\"host\",\"direction\":\"send\","
+        "\"localFrame\":10,\"remoteFrame\":13,\"delta\":3,\"logicalStart\":8,"
+        "\"lastSentInputFrame\":11,\"lastReceivedInputFrame\":12,"
+        "\"localQueue\":2,\"remoteQueue\":3,\"delayedInputs\":4}");
+  CHECK(Diagnostics::FormatStartReadyEvent(
+            "client", nullptr, 0, 20, 0, 8, 0, 0, 0, 0, 0)
+            .find("\"direction\":\"unknown\",\"localFrame\":0,"
+                  "\"remoteFrame\":20,\"delta\":0") != std::string::npos);
+  CHECK(Diagnostics::FormatDiagnosticStartupEvent(
+            "client", 120, true, false, 3, "C:\\diag\".json", "events\n.jsonl") ==
+        "{\"event\":\"diagnostic_started\",\"role\":\"client\",\"ringFrames\":120,"
+        "\"stateSync\":true,\"stateSyncExtended\":false,\"stateSyncInterval\":3,"
+        "\"diagnosticsFile\":\"C:\\\\diag\\\".json\","
+        "\"eventsFile\":\"events\\n.jsonl\"}");
+
+  DiagnosticFrameSnapshot previous;
+  previous.Valid = true;
+  previous.Frame = 19;
+  previous.Instance = 2;
+  previous.StageID = 9;
+  previous.StageGroup = 8;
+  previous.Player[0].Found = 1;
+  previous.Player[0].VisibleFlag = 1;
+  previous.Player[0].PosX = 0x1000;
+  previous.Player[0].PosY = 0x2000;
+
+  DiagnosticFrameSnapshot current = previous;
+  current.Frame = 20;
+  current.SceneCurrentSceneID = 7;
+  current.SceneNextSceneID = 6;
+  current.PlayerGlobalHash0 = 0x101;
+  current.PlayerGlobalHash1 = 0x202;
+  current.PlayerActorHash0 = 0x303;
+  current.PlayerActorHash1 = 0x404;
+  current.Player[0].PosX = 0x3000;
+  current.Player[0].PosY = 0x5000;
+  current.Player[0].VelX = 0x6000;
+  current.Player[0].VelY = 0x7000;
+  current.Player[0].Deaths = 2;
+  current.Player[0].BattleStars = 3;
+  current.Player[0].Coins = 4;
+  current.Player[1].Found = 1;
+  current.Player[1].Deaths = 5;
+  current.Player[1].BattleStars = 6;
+  current.Player[1].Coins = 7;
+  const std::vector<DiagnosticFrameSnapshot> ring{previous, current};
+
+  const std::string playerEvent =
+      Diagnostics::FormatDiagnosticPlayerSnapshotEvent(
+          "player_position_anomaly", "host", 2, current, &previous, 0, ring);
+  const std::string postEvent = Diagnostics::FormatDiagnosticPostWindowEvent(
+      "client", 2, 30, 30, ring);
+
+  GameStateModel::GameStateSyncHashes localHashes;
+  localHashes.Basic = 0x11;
+  localHashes.PlayerGlobal = 0x22;
+  localHashes.WifiCandidate = 0x33;
+  localHashes.RenderCandidate = 0x44;
+  GameStateModel::GameStateSyncHashes remoteHashes;
+  remoteHashes.Basic = 0x55;
+  remoteHashes.PlayerGlobal = 0x66;
+  remoteHashes.WifiCandidate = 0x77;
+  remoteHashes.RenderCandidate = 0x88;
+  GameStateModel::GameStateSample remoteSample;
+  remoteSample.StageID = 10;
+  remoteSample.StageGroup = 8;
+  remoteSample.PlayerActor0PosX = 0x3001;
+  remoteSample.PlayerActor0PosY = 0x5000;
+  remoteSample.PlayerActor0VelX = 0x6002;
+  remoteSample.PlayerActor0VelY = 0x7000;
+  remoteSample.PlayerActor1PosX = 0x8000;
+  remoteSample.PlayerActor1PosY = 0x9000;
+  remoteSample.PlayerActor1VelX = 0xA000;
+  remoteSample.PlayerActor1VelY = 0xB000;
+  remoteSample.Player0Deaths = 2;
+  remoteSample.Player1Deaths = 8;
+  remoteSample.Player0BattleStars = 3;
+  remoteSample.Player1BattleStars = 9;
+  remoteSample.VsCoinCount = 12;
+  const std::string mismatchEvent =
+      Diagnostics::FormatPlayerGlobalMismatchEvent(
+          "host", 2, 20, localHashes, remoteHashes, &current, &remoteSample,
+          ring);
+
+  CHECK(playerEvent.rfind(
+            "{\"event\":\"player_position_anomaly\",\"role\":\"host\","
+            "\"instance\":2,\"frame\":20,",
+            0) == 0);
+  CHECK(postEvent.rfind(
+            "{\"event\":\"diagnostic_post_window\",\"role\":\"client\","
+            "\"instance\":2,\"frame\":30,\"triggerUntilFrame\":30,",
+            0) == 0);
+  CHECK(mismatchEvent.find(
+            "\"remoteSampleDiffs\":[{\"field\":\"stageID\","
+            "\"local\":\"0x00000009\",\"remote\":\"0x0000000A\"}") !=
+        std::string::npos);
+  CHECK(Fnv1a64(playerEvent) == 17232318831486508629ull);
+  CHECK(Fnv1a64(postEvent) == 10915587500136319599ull);
+  CHECK(Fnv1a64(mismatchEvent) == 1812141437166136686ull);
+}
+
 void TestStartupReportFormattingContract() {
   using namespace NsmbNetplayPoC;
   Config::BootstrapConfig bootstrap;
@@ -695,6 +804,7 @@ int main() {
   TestPlayerLifeObservationContract();
   TestRuntimePatchLogContract();
   TestDiagnosticJsonAndPositionContract();
+  TestDiagnosticEventFormattingContract();
   TestStartupReportFormattingContract();
   TestAIStartupReportFormattingContract();
   if (Failures != 0) {

@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iomanip>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -372,6 +373,208 @@ bool IsPlayerScreenPositionAnomalous(
       return true;
   }
   return false;
+}
+
+std::string JsonEscape(const std::string &value) {
+  std::ostringstream out;
+  for (const char ch : value) {
+    switch (ch) {
+    case '\\': out << "\\\\"; break;
+    case '"': out << "\\\""; break;
+    case '\b': out << "\\b"; break;
+    case '\f': out << "\\f"; break;
+    case '\n': out << "\\n"; break;
+    case '\r': out << "\\r"; break;
+    case '\t': out << "\\t"; break;
+    default:
+      if (static_cast<unsigned char>(ch) < 0x20) {
+        out << "\\u" << std::hex << std::uppercase << std::setw(4)
+            << std::setfill('0')
+            << static_cast<int>(static_cast<unsigned char>(ch)) << std::dec
+            << std::nouppercase << std::setfill(' ');
+      } else {
+        out << ch;
+      }
+      break;
+    }
+  }
+  return out.str();
+}
+
+void AppendDiagnosticRingJson(
+    std::ostream &out,
+    const std::vector<DiagnosticFrameSnapshot> &snapshots) {
+  out << "\"ring\":[";
+  for (std::size_t i = 0; i < snapshots.size(); i++) {
+    if (i != 0)
+      out << ",";
+    AppendDiagnosticFrameJson(out, snapshots[i]);
+  }
+  out << "]";
+}
+
+std::string FormatStartReadyEvent(
+    const char *role, const char *direction, melonDS::u32 localFrame,
+    melonDS::u32 remoteFrame, melonDS::u32 noFrameLimit,
+    melonDS::u32 logicalStart, melonDS::u32 lastSentInputFrame,
+    melonDS::u32 lastReceivedInputFrame, std::size_t localQueue,
+    std::size_t remoteQueue, std::size_t delayedInputs) {
+  const long long delta =
+      (localFrame == noFrameLimit || remoteFrame == noFrameLimit)
+          ? 0
+          : static_cast<long long>(remoteFrame) -
+                static_cast<long long>(localFrame);
+  std::ostringstream json;
+  json << "{\"event\":\"start_ready\"," << "\"role\":\"" << role
+       << "\"," << "\"direction\":\""
+       << (direction ? direction : "unknown") << "\"," << "\"localFrame\":"
+       << localFrame << "," << "\"remoteFrame\":" << remoteFrame << ","
+       << "\"delta\":" << delta << "," << "\"logicalStart\":"
+       << logicalStart << "," << "\"lastSentInputFrame\":"
+       << lastSentInputFrame << "," << "\"lastReceivedInputFrame\":"
+       << lastReceivedInputFrame << "," << "\"localQueue\":" << localQueue
+       << "," << "\"remoteQueue\":" << remoteQueue << ","
+       << "\"delayedInputs\":" << delayedInputs << "}";
+  return json.str();
+}
+
+std::string FormatDiagnosticStartupEvent(
+    const char *role, int ringFrames, bool stateSync, bool stateSyncExtended,
+    int stateSyncInterval, const std::string &diagnosticsPath,
+    const std::string &eventsPath) {
+  std::ostringstream json;
+  json << "{\"event\":\"diagnostic_started\"," << "\"role\":\"" << role
+       << "\"," << "\"ringFrames\":" << ringFrames << ","
+       << "\"stateSync\":" << (stateSync ? "true" : "false") << ","
+       << "\"stateSyncExtended\":"
+       << (stateSyncExtended ? "true" : "false") << ","
+       << "\"stateSyncInterval\":" << stateSyncInterval << ","
+       << "\"diagnosticsFile\":\"" << JsonEscape(diagnosticsPath) << "\","
+       << "\"eventsFile\":\"" << JsonEscape(eventsPath) << "\"}";
+  return json.str();
+}
+
+std::string FormatDiagnosticPlayerSnapshotEvent(
+    const char *event, const char *role, int instanceID,
+    const DiagnosticFrameSnapshot &snapshot,
+    const DiagnosticFrameSnapshot *previous, int player,
+    const std::vector<DiagnosticFrameSnapshot> &ring) {
+  std::ostringstream json;
+  json << "{\"event\":\"" << event << "\"," << "\"role\":\"" << role
+       << "\"," << "\"instance\":" << instanceID << "," << "\"frame\":"
+       << snapshot.Frame << "," << "\"stageID\":" << snapshot.StageID << ","
+       << "\"stageGroup\":" << snapshot.StageGroup << "," << "\"scene\":"
+       << snapshot.SceneCurrentSceneID << "," << "\"nextScene\":"
+       << snapshot.SceneNextSceneID << ",";
+  AppendDiagnosticPlayerContextJson(json, snapshot, previous, player);
+  json << ",";
+  AppendDiagnosticRingJson(json, ring);
+  json << "}";
+  return json.str();
+}
+
+std::string FormatDiagnosticPostWindowEvent(
+    const char *role, int instanceID, melonDS::u32 frame,
+    melonDS::u32 triggerUntilFrame,
+    const std::vector<DiagnosticFrameSnapshot> &ring) {
+  std::ostringstream json;
+  json << "{\"event\":\"diagnostic_post_window\"," << "\"role\":\"" << role
+       << "\"," << "\"instance\":" << instanceID << "," << "\"frame\":"
+       << frame << "," << "\"triggerUntilFrame\":" << triggerUntilFrame
+       << ",";
+  AppendDiagnosticRingJson(json, ring);
+  json << "}";
+  return json.str();
+}
+
+std::string FormatPlayerGlobalMismatchEvent(
+    const char *role, int instanceID, melonDS::u32 frame,
+    const GameStateModel::GameStateSyncHashes &local,
+    const GameStateModel::GameStateSyncHashes &remote,
+    const DiagnosticFrameSnapshot *latest,
+    const GameStateModel::GameStateSample *remoteSample,
+    const std::vector<DiagnosticFrameSnapshot> &ring) {
+  std::ostringstream json;
+  json << "{\"event\":\"player_global_mismatch\"," << "\"role\":\"" << role
+       << "\"," << "\"instance\":" << instanceID << "," << "\"frame\":"
+       << frame << ",";
+  AppendJsonHex64(json, "localBasic", local.Basic); json << ",";
+  AppendJsonHex64(json, "remoteBasic", remote.Basic); json << ",";
+  AppendJsonHex64(json, "localPlayerGlobal", local.PlayerGlobal); json << ",";
+  AppendJsonHex64(json, "remotePlayerGlobal", remote.PlayerGlobal); json << ",";
+  AppendJsonHex64(json, "localWifiCandidate", local.WifiCandidate); json << ",";
+  AppendJsonHex64(json, "remoteWifiCandidate", remote.WifiCandidate); json << ",";
+  AppendJsonHex64(json, "localRenderCandidate", local.RenderCandidate); json << ",";
+  AppendJsonHex64(json, "remoteRenderCandidate", remote.RenderCandidate); json << ",";
+
+  if (latest) {
+    AppendJsonHex64(json, "localPlayerGlobalHash0", latest->PlayerGlobalHash0); json << ",";
+    AppendJsonHex64(json, "localPlayerGlobalHash1", latest->PlayerGlobalHash1); json << ",";
+    AppendJsonHex64(json, "localPlayerActorHash0", latest->PlayerActorHash0); json << ",";
+    AppendJsonHex64(json, "localPlayerActorHash1", latest->PlayerActorHash1); json << ",";
+    json << "\"latestLocal\":";
+    AppendDiagnosticFrameJson(json, *latest);
+    json << ",";
+  }
+
+  if (remoteSample) {
+    json << "\"remotePlayers\":[";
+    AppendGameStatePlayerJson(json, *remoteSample, 0);
+    json << ",";
+    AppendGameStatePlayerJson(json, *remoteSample, 1);
+    json << "],";
+    if (latest) {
+      GameStateModel::GameStateSample localSample;
+      localSample.StageID = latest->StageID;
+      localSample.StageGroup = latest->StageGroup;
+      localSample.PlayerActor0PosX = latest->Player[0].PosX;
+      localSample.PlayerActor0PosY = latest->Player[0].PosY;
+      localSample.PlayerActor0VelX = latest->Player[0].VelX;
+      localSample.PlayerActor0VelY = latest->Player[0].VelY;
+      localSample.PlayerActor1PosX = latest->Player[1].PosX;
+      localSample.PlayerActor1PosY = latest->Player[1].PosY;
+      localSample.PlayerActor1VelX = latest->Player[1].VelX;
+      localSample.PlayerActor1VelY = latest->Player[1].VelY;
+      localSample.Player0Deaths = latest->Player[0].Deaths;
+      localSample.Player1Deaths = latest->Player[1].Deaths;
+      localSample.Player0BattleStars = latest->Player[0].BattleStars;
+      localSample.Player1BattleStars = latest->Player[1].BattleStars;
+      localSample.VsCoinCount = latest->Player[0].Coins + latest->Player[1].Coins;
+
+      bool first = true;
+      json << "\"remoteSampleDiffs\":[";
+      const auto appendDiff = [&](const char *field, melonDS::u32 lhs,
+                                  melonDS::u32 rhs) {
+        if (lhs == rhs)
+          return;
+        if (!first)
+          json << ",";
+        first = false;
+        json << "{\"field\":\"" << field << "\",";
+        AppendJsonHex32(json, "local", lhs); json << ",";
+        AppendJsonHex32(json, "remote", rhs); json << "}";
+      };
+      appendDiff("stageID", localSample.StageID, remoteSample->StageID);
+      appendDiff("stageGroup", localSample.StageGroup, remoteSample->StageGroup);
+      appendDiff("player0PosX", localSample.PlayerActor0PosX, remoteSample->PlayerActor0PosX);
+      appendDiff("player0PosY", localSample.PlayerActor0PosY, remoteSample->PlayerActor0PosY);
+      appendDiff("player0VelX", localSample.PlayerActor0VelX, remoteSample->PlayerActor0VelX);
+      appendDiff("player0VelY", localSample.PlayerActor0VelY, remoteSample->PlayerActor0VelY);
+      appendDiff("player1PosX", localSample.PlayerActor1PosX, remoteSample->PlayerActor1PosX);
+      appendDiff("player1PosY", localSample.PlayerActor1PosY, remoteSample->PlayerActor1PosY);
+      appendDiff("player1VelX", localSample.PlayerActor1VelX, remoteSample->PlayerActor1VelX);
+      appendDiff("player1VelY", localSample.PlayerActor1VelY, remoteSample->PlayerActor1VelY);
+      appendDiff("player0Deaths", localSample.Player0Deaths, remoteSample->Player0Deaths);
+      appendDiff("player1Deaths", localSample.Player1Deaths, remoteSample->Player1Deaths);
+      appendDiff("player0BattleStars", localSample.Player0BattleStars, remoteSample->Player0BattleStars);
+      appendDiff("player1BattleStars", localSample.Player1BattleStars, remoteSample->Player1BattleStars);
+      appendDiff("vsCoinCount", localSample.VsCoinCount, remoteSample->VsCoinCount);
+      json << "],";
+    }
+  }
+  AppendDiagnosticRingJson(json, ring);
+  json << "}";
+  return json.str();
 }
 
 std::string FormatTestStartupReport(
