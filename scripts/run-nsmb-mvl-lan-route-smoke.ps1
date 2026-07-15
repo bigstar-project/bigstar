@@ -328,10 +328,6 @@ param(
     [int]$WriteTraceEndFrame = 0,
     [switch]$BadJumpTrace,
     [switch]$AllowJit,
-    [string]$HostMemPatchFile = "",
-    [string]$ClientMemPatchFile = "",
-    [string]$MemPatchFrame = "",
-    [string]$MemPatchRanges = "",
     [ValidateSet("both", "host", "client")]
     [string]$RunRole = "both",
     [string]$Peer = "127.0.0.1",
@@ -2247,16 +2243,6 @@ function Start-MelonLANProcess {
     } else {
         $env:MELONDS_NSML_FIRMWARE_MAC = "00:09:BF:11:22:43"
     }
-    $roleMemPatchFile = if ($Role -eq "host") { $HostMemPatchFile } else { $ClientMemPatchFile }
-    if ($roleMemPatchFile -and $MemPatchFrame -and $MemPatchRanges) {
-        $env:MELONDS_NSML_MEM_PATCH_FILE = (Resolve-Path $roleMemPatchFile).Path
-        $env:MELONDS_NSML_MEM_PATCH_FRAME = "$MemPatchFrame"
-        $env:MELONDS_NSML_MEM_PATCH_RANGES = "$MemPatchRanges"
-    } else {
-        Remove-Item Env:\MELONDS_NSML_MEM_PATCH_FILE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_MEM_PATCH_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_MEM_PATCH_RANGES -ErrorAction SilentlyContinue
-    }
     @(
         "role=$Role"
         "runRole=$RunRole"
@@ -2345,9 +2331,6 @@ function Start-MelonLANProcess {
         "clearMvlCameraInitHold=$($env:MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD)"
         "clearMvlCameraInitHoldStart=$($env:MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_START_FRAME)"
         "clearMvlCameraInitHoldEnd=$($env:MELONDS_NSML_CLEAR_MVL_CAMERA_INIT_HOLD_END_FRAME)"
-        "memPatchFile=$($env:MELONDS_NSML_MEM_PATCH_FILE)"
-        "memPatchFrame=$($env:MELONDS_NSML_MEM_PATCH_FRAME)"
-        "memPatchRanges=$($env:MELONDS_NSML_MEM_PATCH_RANGES)"
         "playerStickToStarStartFrame=$($env:MELONDS_NSML_PLAYER_STICK_TO_STAR_START_FRAME)"
         "playerStickToStarEndFrame=$($env:MELONDS_NSML_PLAYER_STICK_TO_STAR_END_FRAME)"
         "playerStickToStarSlot=$($env:MELONDS_NSML_PLAYER_STICK_TO_STAR_SLOT)"

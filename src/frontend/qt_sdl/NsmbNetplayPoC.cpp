@@ -5716,65 +5716,6 @@ void SaveRamDump(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         std::printf("NSMB Test: failed to write RAM dump: %ls\n", path.c_str());
 }
 
-void ApplyMemPatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!nds || !nds->MainRAM || G.Harness.MemPatchFile.empty() || !G.Harness.MemPatchFrameSet) return;
-    if (frame != G.Harness.MemPatchFrame || G.Coordinator.IsMemoryPatchApplied(instanceID)) return;
-    if (G.Harness.MemPatchInstance >= 0 && G.Harness.MemPatchInstance != instanceID) return;
-    if (G.Harness.MemPatchRanges.empty()) return;
-
-    std::string patchFile = G.Harness.MemPatchFile;
-    const std::string instToken = "{inst}";
-    if (const auto pos = patchFile.find(instToken); pos != std::string::npos)
-        patchFile.replace(pos, instToken.size(), std::to_string(instanceID));
-
-    std::ifstream file(patchFile, std::ios::binary);
-    if (!file)
-    {
-        std::printf("NSMB Test: failed to open memory patch source: %s\n", patchFile.c_str());
-        return;
-    }
-
-    std::vector<char> source(
-        (std::istreambuf_iterator<char>(file)),
-        std::istreambuf_iterator<char>());
-    if (source.empty())
-    {
-        std::printf("NSMB Test: memory patch source is empty: %s\n", patchFile.c_str());
-        return;
-    }
-
-    const melonDS::u32 ramLen = std::min<melonDS::u32>(nds->MainRAMMask + 1, 0x400000);
-    for (const auto& [start, end] : G.Harness.MemPatchRanges)
-    {
-        if (end < start || start >= ramLen)
-            continue;
-
-        const melonDS::u32 clampedEnd = std::min(end, ramLen - 1);
-        const melonDS::u32 len = clampedEnd - start + 1;
-        if (static_cast<size_t>(clampedEnd) >= source.size())
-        {
-            std::printf("NSMB Test: memory patch range outside source: 0x%06X-0x%06X sourceBytes=%zu\n",
-                start,
-                clampedEnd,
-                source.size());
-            continue;
-        }
-
-        std::memcpy(&nds->MainRAM[start], &source[start], len);
-        nds->JIT.CheckAndInvalidate<0, melonDS::ARMJIT_Memory::memregion_MainRAM>(0x02000000 + start);
-        nds->JIT.CheckAndInvalidate<1, melonDS::ARMJIT_Memory::memregion_MainRAM>(0x02000000 + start);
-        std::printf("NSMB Test: patched memory inst=%d frame=%u range=0x%06X-0x%06X source=%s\n",
-            instanceID,
-            frame,
-            start,
-            clampedEnd,
-            patchFile.c_str());
-    }
-
-    G.Coordinator.MarkMemoryPatchApplied(instanceID);
-}
-
 bool WriteNetAndGameRandomSeed(melonDS::NDS* nds, melonDS::u32 seed)
 {
     constexpr melonDS::u32 kNetRandomValueOffset = kNetRandomValueAddr - kMainRAMBase;
@@ -6411,10 +6352,6 @@ void InitFromEnvironment()
     }
     G.StateSync = Config::LoadStateSyncConfig();
 
-    if (!G.Harness.MemPatchRangesValid)
-    {
-        std::printf("NSMB Test: invalid memory patch range list\n");
-    }
     G.AI = Config::LoadAIConfig();
     const NsmbImitationAI::ModelInitializationResult imitationModelResult =
         G.ImitationAI.InitializeModel(
@@ -6697,8 +6634,6 @@ void RunBeforeFramePatchPhase(int instanceID, melonDS::u32 frame, melonDS::NDS* 
 {
     if (!CanRunFrameHooks(instanceID, nds))
         return;
-    if (G.TestEnabled)
-        ApplyMemPatch(instanceID, frame, nds);
     ApplyNetRandomPatch(instanceID, frame, nds);
 }
 

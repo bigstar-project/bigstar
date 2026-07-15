@@ -405,20 +405,6 @@ HarnessConfig LoadHarnessConfig(const Environment &environment) {
   config.NetworkPumpSleepUs = std::clamp(
       ReadInt(environment, "MELONDS_NSML_NET_PUMP_SLEEP_US", 250), 50, 5000);
 
-  config.MemPatchFile =
-      ReadCString(environment, "MELONDS_NSML_MEM_PATCH_FILE", "");
-  config.MemPatchFrameSet =
-      ReadHasValue(environment, "MELONDS_NSML_MEM_PATCH_FRAME");
-  if (config.MemPatchFrameSet) {
-    config.MemPatchFrame = static_cast<std::uint32_t>(std::max(
-        0, std::atoi(environment.Get("MELONDS_NSML_MEM_PATCH_FRAME"))));
-  }
-  config.MemPatchInstance =
-      ReadInt(environment, "MELONDS_NSML_MEM_PATCH_INSTANCE", -1);
-  config.MemPatchRangesValid = ParseFrameRanges(
-      environment.Get("MELONDS_NSML_MEM_PATCH_RANGES"), config.MemPatchRanges);
-  if (!config.MemPatchRangesValid)
-    config.MemPatchRanges.clear();
 
   config.StateSaveDir =
       ReadCString(environment, "MELONDS_NSML_STATE_SAVE_DIR", "");

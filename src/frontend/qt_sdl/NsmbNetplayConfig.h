@@ -114,12 +114,6 @@ struct HarnessConfig {
   bool NeutralizePolledInputPreserveTouch = false;
   bool NetworkPumpThreadEnabled = false;
   int NetworkPumpSleepUs = 250;
-  std::string MemPatchFile;
-  std::uint32_t MemPatchFrame = 0;
-  bool MemPatchFrameSet = false;
-  int MemPatchInstance = -1;
-  std::vector<FrameRange> MemPatchRanges;
-  bool MemPatchRangesValid = true;
   std::string StateSaveDir;
   std::uint32_t StateSaveFrame = 0;
   std::string StateLoadDir;
