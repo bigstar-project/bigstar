@@ -99,8 +99,6 @@ struct WorldStateApplyOptions {
   int ActorRescanInterval = 0;
   bool Client = false;
   bool ApplyStarActor = false;
-  bool SpawnItem = false;
-  bool TraceItems = false;
   ApplyTraceOptions Trace;
 };
 
@@ -121,10 +119,6 @@ struct PlayerStateApplyOptions {
   bool ApplyGlobals = false;
   ApplyTraceOptions Trace;
 };
-
-using SpawnWorldItemCallback = bool (*)(
-    int instanceID, melonDS::u32 frame, melonDS::NDS *nds,
-    const WireProtocol::WireWorldActorState &state);
 
 bool WriteObjectTransformByBase(melonDS::NDS *nds, melonDS::u32 base,
                                 melonDS::u32 posX, melonDS::u32 posY,
@@ -180,8 +174,7 @@ void ApplyWorldActorSnapshotState(
 void ApplyWorldState(melonDS::NDS *nds,
                      const WireProtocol::WireWorldState &sample,
                      GameStateModel::StateSyncRuntime &runtime,
-                     const WorldStateApplyOptions &options,
-                     SpawnWorldItemCallback spawnWorldItem);
+                     const WorldStateApplyOptions &options);
 void ApplyMovingHazardState(
     melonDS::NDS *nds, const WireProtocol::WireMovingHazardState &sample,
     GameStateModel::StateSyncRuntime &runtime,

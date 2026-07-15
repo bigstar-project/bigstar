@@ -1012,18 +1012,6 @@ void StateSyncRuntime::ResetForRestart(int instanceID) {
 
   WorldStarActorBaseCache[instanceID] = 0;
   WorldStarActorGUIDCache[instanceID] = 0;
-  LastSpawnedWorldItemRemoteGUID[instanceID] = 0;
-  LastConfirmedWorldItemRemoteGUID[instanceID] = 0;
-  PendingWorldItemRemoteGUID[instanceID] = 0;
-  PendingWorldItemFirstMissingFrame[instanceID] = 0;
-  LastSpawnedNeutralWorldItemRemoteGUID[instanceID] = 0;
-  LastConfirmedNeutralWorldItemRemoteGUID[instanceID] = 0;
-  PendingNeutralWorldItemRemoteGUID[instanceID] = 0;
-  PendingNeutralWorldItemFirstMissingFrame[instanceID] = 0;
-  LastSpawnedDroppedStarItemRemoteGUID[instanceID] = 0;
-  LastConfirmedDroppedStarItemRemoteGUID[instanceID] = 0;
-  PendingDroppedStarItemRemoteGUID[instanceID] = 0;
-  PendingDroppedStarItemFirstMissingFrame[instanceID] = 0;
   WorldMovingHazardBaseCache[instanceID] = 0;
   WorldMovingHazardGUIDCache[instanceID] = 0;
   WorldMovingHazardCacheCounts[instanceID] = 0;

@@ -165,8 +165,7 @@ WireProtocol::WirePlayerState BuildPlayerStatePacket(
     GameStateModel::StateSyncRuntime &runtime);
 WireProtocol::WireWorldState BuildWorldStatePacket(
     melonDS::NDS *nds, melonDS::u32 instance, melonDS::u32 frame,
-    bool includeItems, int actorRescanInterval,
-    GameStateModel::StateSyncRuntime &runtime);
+    int actorRescanInterval, GameStateModel::StateSyncRuntime &runtime);
 bool ReadWorldEffectSlot(melonDS::NDS *nds, melonDS::u32 base,
                          WireProtocol::WireWorldEffectSlot &slot);
 bool BuildWorldEffectStatePacket(

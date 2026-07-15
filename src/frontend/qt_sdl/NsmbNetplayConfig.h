@@ -339,7 +339,6 @@ struct StateSyncConfig {
   bool WorldEnabled = false;
   bool WorldApplyEnabled = false;
   bool WorldApplyStarActor = true;
-  bool WorldSpawnItem = false;
   bool WorldApplyMovingHazard = false;
   bool WorldApplyEffects = false;
   bool WorldApplyActorSnapshot = false;

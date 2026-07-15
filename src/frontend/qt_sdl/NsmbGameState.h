@@ -699,18 +699,6 @@ public:
   melonDS::u32 PlayerActorGUIDCache[16][2]{};
   melonDS::u32 WorldStarActorBaseCache[16]{};
   melonDS::u32 WorldStarActorGUIDCache[16]{};
-  melonDS::u32 LastSpawnedWorldItemRemoteGUID[16]{};
-  melonDS::u32 LastConfirmedWorldItemRemoteGUID[16]{};
-  melonDS::u32 PendingWorldItemRemoteGUID[16]{};
-  melonDS::u32 PendingWorldItemFirstMissingFrame[16]{};
-  melonDS::u32 LastSpawnedNeutralWorldItemRemoteGUID[16]{};
-  melonDS::u32 LastConfirmedNeutralWorldItemRemoteGUID[16]{};
-  melonDS::u32 PendingNeutralWorldItemRemoteGUID[16]{};
-  melonDS::u32 PendingNeutralWorldItemFirstMissingFrame[16]{};
-  melonDS::u32 LastSpawnedDroppedStarItemRemoteGUID[16]{};
-  melonDS::u32 LastConfirmedDroppedStarItemRemoteGUID[16]{};
-  melonDS::u32 PendingDroppedStarItemRemoteGUID[16]{};
-  melonDS::u32 PendingDroppedStarItemFirstMissingFrame[16]{};
   melonDS::u32 WorldMovingHazardBaseCache[16]{};
   melonDS::u32 WorldMovingHazardGUIDCache[16]{};
   melonDS::u32 WorldMovingHazardBaseCaches

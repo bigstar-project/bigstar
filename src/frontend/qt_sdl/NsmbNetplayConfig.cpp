@@ -964,8 +964,6 @@ StateSyncConfig LoadStateSyncConfig(const Environment &environment) {
       ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_APPLY");
   config.WorldApplyStarActor =
       !ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_SKIP_STAR");
-  config.WorldSpawnItem =
-      ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_SPAWN_ITEM");
   config.WorldApplyMovingHazard =
       ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD") &&
       !ReadFlag(environment, "MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD");

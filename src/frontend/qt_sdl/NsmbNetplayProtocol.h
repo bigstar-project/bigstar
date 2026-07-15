@@ -224,14 +224,10 @@ struct WireWorldState {
   melonDS::u32 Frame;
   melonDS::u32 Instance;
   WireWorldActorState Star;
-  WireWorldActorState NeutralItem;
-  WireWorldActorState Item;
-  WireWorldActorState DroppedStarItem;
-  WireWorldActorState MovingHazard;
 };
 
 static_assert(sizeof(WireWorldActorState) == 100);
-static_assert(sizeof(WireWorldState) == 520);
+static_assert(sizeof(WireWorldState) == 120);
 
 struct WireMovingHazardState {
   melonDS::u32 Magic;

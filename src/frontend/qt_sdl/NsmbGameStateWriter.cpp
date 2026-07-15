@@ -52,8 +52,6 @@ constexpr melonDS::u32 kPlayerBasePowerupFormStateOffset = 0x7AC;
 constexpr melonDS::u32 kPlayerBasePowerupSubStateOffset = 0x7AD;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
-constexpr melonDS::u16 kVsWorldItemObjectID = 0x001F;
-constexpr melonDS::u32 kVsWorldItemNaturalSpawnGraceFrames = 4;
 constexpr melonDS::u32 kEffectVTableStart = 0x02126A24;
 constexpr melonDS::u32 kEffectVTablePtr = 0x02126A2C;
 constexpr melonDS::u32 kWorldEffectWordStart = 0x04;
@@ -274,69 +272,6 @@ bool WriteObjectTransformByGUID(melonDS::NDS *nds, melonDS::u32 guid,
     return true;
   }
   return false;
-}
-
-struct WorldItemApplyResult {
-  bool Applied = false;
-  bool Spawned = false;
-};
-
-WorldItemApplyResult ApplyWorldItemLikeState(
-    melonDS::NDS *nds, const WireProtocol::WireWorldActorState &sample,
-    const WorldStateApplyOptions &options, melonDS::u32 predictFrames,
-    melonDS::u32 &lastSpawnedRemoteGUID,
-    melonDS::u32 &lastConfirmedRemoteGUID, melonDS::u32 &pendingRemoteGUID,
-    melonDS::u32 &pendingFirstMissingFrame, const char *label,
-    SpawnWorldItemCallback spawnWorldItem) {
-  WorldItemApplyResult result;
-  if (!sample.Found) {
-    lastSpawnedRemoteGUID = 0;
-    lastConfirmedRemoteGUID = 0;
-    pendingRemoteGUID = 0;
-    pendingFirstMissingFrame = 0;
-    return result;
-  }
-  if (sample.StateType != 1 && sample.StateType != 2)
-    return result;
-  if (pendingRemoteGUID != sample.GUID) {
-    pendingRemoteGUID = sample.GUID;
-    pendingFirstMissingFrame = options.Frame;
-  }
-
-  GameStateReader::ObjectScanSample localItem =
-      GameStateReader::FindNewestActiveObjectByIDAndSettings(
-          nds, kVsWorldItemObjectID, sample.Settings, true);
-  if (localItem.StateType == 1 || localItem.StateType == 2) {
-    result.Applied =
-        ApplyWireWorldActorState(nds, sample, predictFrames, localItem.Base);
-    lastSpawnedRemoteGUID = sample.GUID;
-    pendingRemoteGUID = 0;
-    pendingFirstMissingFrame = 0;
-    if (lastConfirmedRemoteGUID != sample.GUID) {
-      lastConfirmedRemoteGUID = sample.GUID;
-      if (options.TraceItems) {
-        std::printf(
-            "NSMB %s: active inst=%d frame=%u remoteGuid=%u localGuid=%u settings=%08X pos=%08X/%08X/%08X\n",
-            label, options.InstanceID, options.Frame, sample.GUID,
-            localItem.GUID, localItem.Settings,
-            nds->ARM9Read32(localItem.Base + 0x60),
-            nds->ARM9Read32(localItem.Base + 0x64),
-            nds->ARM9Read32(localItem.Base + 0x68));
-        std::fflush(stdout);
-      }
-    }
-    return result;
-  }
-
-  if (lastSpawnedRemoteGUID != sample.GUID && spawnWorldItem &&
-      options.Frame - pendingFirstMissingFrame >=
-          kVsWorldItemNaturalSpawnGraceFrames) {
-    result.Spawned = spawnWorldItem(options.InstanceID, options.Frame, nds,
-                                    sample);
-    if (result.Spawned)
-      lastSpawnedRemoteGUID = sample.GUID;
-  }
-  return result;
 }
 
 } // namespace
@@ -940,8 +875,7 @@ void ApplyWorldActorSnapshotState(
 void ApplyWorldState(melonDS::NDS *nds,
                      const WireProtocol::WireWorldState &sample,
                      GameStateModel::StateSyncRuntime &runtime,
-                     const WorldStateApplyOptions &options,
-                     SpawnWorldItemCallback spawnWorldItem) {
+                     const WorldStateApplyOptions &options) {
   const melonDS::u32 predictFrames = std::min(
       options.Frame > sample.Frame ? options.Frame - sample.Frame : 0,
       static_cast<melonDS::u32>(std::max(0, options.MaxPredictFrames)));
@@ -958,45 +892,11 @@ void ApplyWorldState(melonDS::NDS *nds,
                                            star.Base);
   }
 
-  WorldItemApplyResult worldItemResult;
-  WorldItemApplyResult neutralWorldItemResult;
-  WorldItemApplyResult droppedStarItemResult;
-  if (options.SpawnItem) {
-    neutralWorldItemResult = ApplyWorldItemLikeState(
-        nds, sample.NeutralItem, options, predictFrames,
-        runtime.LastSpawnedNeutralWorldItemRemoteGUID[options.InstanceID],
-        runtime.LastConfirmedNeutralWorldItemRemoteGUID[options.InstanceID],
-        runtime.PendingNeutralWorldItemRemoteGUID[options.InstanceID],
-        runtime.PendingNeutralWorldItemFirstMissingFrame[options.InstanceID],
-        "NeutralWorldItem", spawnWorldItem);
-    if (options.Client) {
-      worldItemResult = ApplyWorldItemLikeState(
-          nds, sample.Item, options, predictFrames,
-          runtime.LastSpawnedWorldItemRemoteGUID[options.InstanceID],
-          runtime.LastConfirmedWorldItemRemoteGUID[options.InstanceID],
-          runtime.PendingWorldItemRemoteGUID[options.InstanceID],
-          runtime.PendingWorldItemFirstMissingFrame[options.InstanceID],
-          "WorldItem", spawnWorldItem);
-    }
-    droppedStarItemResult = ApplyWorldItemLikeState(
-        nds, sample.DroppedStarItem, options, predictFrames,
-        runtime.LastSpawnedDroppedStarItemRemoteGUID[options.InstanceID],
-        runtime.LastConfirmedDroppedStarItemRemoteGUID[options.InstanceID],
-        runtime.PendingDroppedStarItemRemoteGUID[options.InstanceID],
-        runtime.PendingDroppedStarItemFirstMissingFrame[options.InstanceID],
-        "DroppedStarItem", spawnWorldItem);
-  }
-
   if (options.Trace.ShouldTrace(options.Frame)) {
     std::printf(
-        "NSMB WorldState: apply inst=%d frame=%u sampleFrame=%u predict=%u star=%d neutralItem=%d neutralSpawn=%d item=%d itemSpawn=%d droppedItem=%d droppedSpawn=%d hazard=%d hazardPos=%08X/%08X\n",
+        "NSMB WorldState: apply inst=%d frame=%u sampleFrame=%u predict=%u star=%d\n",
         options.InstanceID, options.Frame, sample.Frame, predictFrames,
-        starApplied ? 1 : 0, neutralWorldItemResult.Applied ? 1 : 0,
-        neutralWorldItemResult.Spawned ? 1 : 0,
-        worldItemResult.Applied ? 1 : 0, worldItemResult.Spawned ? 1 : 0,
-        droppedStarItemResult.Applied ? 1 : 0,
-        droppedStarItemResult.Spawned ? 1 : 0, 0,
-        sample.MovingHazard.PosX, sample.MovingHazard.PosY);
+        starApplied ? 1 : 0);
   }
 }
 

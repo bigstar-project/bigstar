@@ -262,9 +262,6 @@ constexpr melonDS::u16 kThwompAltObjectID = 0x0026;
 constexpr melonDS::u16 kFirebarObjectID = 0x0041;
 constexpr melonDS::u16 kBobOmbObjectID = 0x0023;
 constexpr melonDS::u16 kItemSpawnEffectObjectID = 0x00F0;
-constexpr melonDS::u32 kA2DEActorSpawnActorAddr = 0x020A0B64;
-constexpr melonDS::u32 kDirectBootTrampolineAddr = 0x023C0000;
-constexpr melonDS::u32 kDirectBootTrampolineDataAddr = 0x023C0400;
 // Overlay0 padding cave. Keep runtime settings out of high Main RAM, which NSMB
 // can use for stage graphics/model buffers during MvL gameplay.
 constexpr melonDS::u32 kMvlRuntimeConfigAddr = 0x020C5360;
@@ -1150,16 +1147,10 @@ ReceiveDisposition HandleReceivedWorldStateLocked(
             || (localFrame != kNoFrameLimit
                 && (localFrame % static_cast<melonDS::u32>(G.Bootstrap.InputTraceInterval)) == 0)))
     {
-        std::printf("NSMB WorldState: recv localFrame=%u packetFrame=%u star=%u neutralItem=%u item=%u droppedItem=%u hazard=%u hazardPos=%08X/%08X\n",
+        std::printf("NSMB WorldState: recv localFrame=%u packetFrame=%u star=%u\n",
             localFrame,
             packet.Frame,
-            packet.Star.Found,
-            packet.NeutralItem.Found,
-            packet.Item.Found,
-            packet.DroppedStarItem.Found,
-            packet.MovingHazard.Found,
-            packet.MovingHazard.PosX,
-            packet.MovingHazard.PosY);
+            packet.Star.Found);
     }
     return ReceiveDisposition::CleanupPacket;
 }
@@ -3139,50 +3130,6 @@ bool WriteARM9U32(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 value)
     return true;
 }
 
-void EmitARM(std::vector<melonDS::u32>& code, melonDS::u32 instr)
-{
-    code.push_back(instr);
-}
-
-void EmitMovImm(std::vector<melonDS::u32>& code, int reg, melonDS::u32 value)
-{
-    EmitARM(code, 0xE3A00000u | (static_cast<melonDS::u32>(reg & 0xF) << 12) | (value & 0xFF));
-}
-
-void EmitLoadImm(std::vector<melonDS::u32>& code, int reg, melonDS::u32 value)
-{
-    if (value <= 0xFF)
-    {
-        EmitMovImm(code, reg, value);
-        return;
-    }
-
-    EmitARM(code, 0xE59F0000u | (static_cast<melonDS::u32>(reg & 0xF) << 12)); // ldr reg, [pc]
-    EmitARM(code, 0xEA000000u); // skip literal
-    EmitARM(code, value);
-}
-
-void EmitMvnImm(std::vector<melonDS::u32>& code, int reg, melonDS::u32 value)
-{
-    EmitARM(code, 0xE3E00000u | (static_cast<melonDS::u32>(reg & 0xF) << 12) | (value & 0xFF));
-}
-
-void EmitStrR4SP(std::vector<melonDS::u32>& code, melonDS::u32 offset)
-{
-    EmitARM(code, 0xE58D4000u | (offset & 0xFFF));
-}
-
-void EmitStackArg(std::vector<melonDS::u32>& code, melonDS::u32 offset, melonDS::u32 value)
-{
-    if (value <= 0xFF)
-        EmitMovImm(code, 4, value);
-    else if (value == 0xFFFFFFFFu)
-        EmitMvnImm(code, 4, 0);
-    else
-        EmitMovImm(code, 4, 0);
-    EmitStrR4SP(code, offset);
-}
-
 bool WriteNetAndGameRandomSeed(melonDS::NDS* nds, melonDS::u32 seed);
 
 void SaveMvlAutoRestartBootstrapCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -5054,73 +5001,6 @@ void ApplyRemoteWorldActorSnapshotState(int instanceID, melonDS::u32 frame, melo
     GameStateWriter::ApplyWorldActorSnapshotState(nds, sample, G.GameSync, options);
 }
 
-bool SpawnRemoteWorldItem(
-    int instanceID,
-    melonDS::u32 frame,
-    melonDS::NDS* nds,
-    const WireWorldActorState& state)
-{
-    if (!nds || !nds->MainRAM || !state.Found || (state.StateType != 1 && state.StateType != 2))
-        return false;
-
-    WriteARM9U32(nds, kDirectBootTrampolineDataAddr + 0x00, state.PosX);
-    WriteARM9U32(nds, kDirectBootTrampolineDataAddr + 0x04, state.PosY);
-    WriteARM9U32(nds, kDirectBootTrampolineDataAddr + 0x08, state.PosZ);
-    WriteARM9U32(nds, kDirectBootTrampolineDataAddr + 0x0C, 0);
-    WriteARM9U32(nds, kDirectBootTrampolineDataAddr + 0x10, 0);
-
-    const melonDS::u32 oldPC = nds->ARM9.R[15] - ((nds->ARM9.CPSR & 0x20) ? 2 : 4);
-    const melonDS::u32 returnPC = oldPC | ((nds->ARM9.CPSR & 0x20) ? 1u : 0u);
-
-    std::vector<melonDS::u32> code;
-    code.reserve(48);
-    EmitARM(code, 0xE92D5FFFu); // push {r0-r12, lr}
-    EmitARM(code, 0xE10F5000u); // mrs r5, cpsr
-    EmitARM(code, 0xE92D0020u); // push {r5}
-    EmitARM(code, 0xE24DD00Cu); // sub sp, sp, #0x0c
-    EmitStackArg(code, 0x00, 0);
-    EmitStackArg(code, 0x04, 0);
-    EmitStackArg(code, 0x08, 0);
-    EmitLoadImm(code, 0, kVsWorldItemObjectID);
-    EmitLoadImm(code, 1, state.Settings);
-    EmitLoadImm(code, 2, kDirectBootTrampolineDataAddr);
-    EmitLoadImm(code, 3, kDirectBootTrampolineDataAddr + 0x0C);
-    EmitARM(code, 0xE59FC008u); // ldr ip, [pc, #8]
-    EmitARM(code, 0xE28FE008u); // add lr, pc, #8
-    EmitARM(code, 0xE12FFF1Cu); // bx ip
-    EmitARM(code, 0xE1A00000u); // nop
-    EmitARM(code, kA2DEActorSpawnActorAddr);
-    EmitARM(code, 0xE28DD00Cu); // add sp, sp, #0x0c
-    EmitARM(code, 0xE8BD0020u); // pop {r5}
-    EmitARM(code, 0xE128F005u); // msr apsr_nzcvq, r5
-    EmitARM(code, 0xE8BD5FFFu); // pop {r0-r12, lr}
-    EmitARM(code, 0xE59FC004u); // ldr ip, [pc, #4]
-    EmitARM(code, 0xE12FFF1Cu); // bx ip
-    EmitARM(code, 0xE1A00000u); // nop
-    EmitARM(code, returnPC);
-
-    for (size_t i = 0; i < code.size(); i++)
-    {
-        if (!WriteARM9U32(nds, kDirectBootTrampolineAddr + static_cast<melonDS::u32>(i * sizeof(melonDS::u32)), code[i]))
-            return false;
-    }
-
-    std::printf(
-        "NSMB WorldItem: spawn inst=%d frame=%u remoteGuid=%u settings=%08X pos=%08X/%08X/%08X trampoline=%08X return=%08X\n",
-        instanceID,
-        frame,
-        state.GUID,
-        state.Settings,
-        state.PosX,
-        state.PosY,
-        state.PosZ,
-        kDirectBootTrampolineAddr,
-        returnPC);
-    std::fflush(stdout);
-    nds->ARM9.JumpTo(kDirectBootTrampolineAddr);
-    return true;
-}
-
 void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.Enabled || !G.StateSync.WorldApplyEnabled) return;
@@ -5147,16 +5027,9 @@ void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds
     options.ActorRescanInterval = G.StateSync.WorldActorRescanInterval;
     options.Client = G.NetRole == Role::Client;
     options.ApplyStarActor = G.StateSync.WorldApplyStarActor;
-    options.SpawnItem = G.StateSync.WorldSpawnItem;
-    options.TraceItems =
-        G.StateSync.WorldTraceMovingHazards ||
-        G.StateSync.WorldTraceObjectLifecycles ||
-        G.Bootstrap.InputTraceEnabled ||
-        G.Input.NetplayTrace;
     options.Trace.Enabled = G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace;
     options.Trace.Interval = G.Bootstrap.InputTraceInterval;
-    GameStateWriter::ApplyWorldState(
-        nds, sample, G.GameSync, options, SpawnRemoteWorldItem);
+    GameStateWriter::ApplyWorldState(nds, sample, G.GameSync, options);
 }
 
 void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool preferFreshSample = false)
@@ -5694,7 +5567,6 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         nds,
         static_cast<melonDS::u32>(instanceID),
         frame,
-        G.StateSync.WorldSpawnItem,
         G.StateSync.WorldActorRescanInterval,
         G.GameSync);
 
@@ -5706,16 +5578,10 @@ void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if ((G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace) &&
         (G.Bootstrap.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.Bootstrap.InputTraceInterval)) == 0))
     {
-        std::printf("NSMB WorldState: send inst=%d frame=%u star=%u neutralItem=%u item=%u droppedItem=%u hazard=%u hazardPos=%08X/%08X\n",
+        std::printf("NSMB WorldState: send inst=%d frame=%u star=%u\n",
             instanceID,
             frame,
-            packet.Star.Found,
-            packet.NeutralItem.Found,
-            packet.Item.Found,
-            packet.DroppedStarItem.Found,
-            packet.MovingHazard.Found,
-            packet.MovingHazard.PosX,
-            packet.MovingHazard.PosY);
+            packet.Star.Found);
     }
 
     G.Transport.Send(&packet, sizeof(packet), 0, false);

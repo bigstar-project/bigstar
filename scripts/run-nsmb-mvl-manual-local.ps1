@@ -352,7 +352,6 @@ if ($PlanDActorSnapshot) {
         "-PlayerStateMaxPredictFrames", "$PlayerStateMaxPredictFrames",
         "-WorldStateSync",
         "-WorldStateApply",
-        "-WorldStateSpawnItem",
         "-WorldStateApplyMovingHazard",
         "-WorldStateApplyEffects",
         "-WorldStateApplyActorSnapshot",
@@ -670,7 +669,7 @@ if ($HostAIObservationV3Log -or $ClientAIObservationV3Log) {
 Write-Host "trace gameState=$([bool]$GameStateTrace) interval=$GameStateTraceInterval extended=$([bool]$GameStateTraceExtended) lifeChanges=$([bool]$TracePlayerLifeChanges) defeated=$([bool]$TracePlayerDefeated)"
 Write-Host "recordInput=$([bool]$RecordInput) recordDir=$(if ($RecordInput) { $InputRecordDir } else { 'disabled' }) recordStart=$InputRecordStartFrame recordEnd=$InputRecordEndFrame"
 if ($PlanDActorSnapshot) {
-    Write-Host "Plan-D actor/global/world snapshot enabled playerInterval=$PlayerStateSyncInterval playerPredict=$PlayerStateMaxPredictFrames worldInterval=$WorldStateSyncInterval worldPredict=$WorldStateMaxPredictFrames worldRescan=$WorldStateActorRescanInterval itemSpawn=1 actorSnapshot=$([bool]$WorldStateApplyActorSnapshot)"
+    Write-Host "Plan-D actor/global/world snapshot enabled playerInterval=$PlayerStateSyncInterval playerPredict=$PlayerStateMaxPredictFrames worldInterval=$WorldStateSyncInterval worldPredict=$WorldStateMaxPredictFrames worldRescan=$WorldStateActorRescanInterval actorSnapshot=$([bool]$WorldStateApplyActorSnapshot)"
 }
 Write-Host "mvlWins=$MvlWins mvlBigStars=$MvlBigStars mvlLives=$MvlLives mvlStage=$(if ($MvlStage -ge 0) { $MvlStage } else { 'auto/default' }) mvlSceneSettings=$(if ($MvlSceneSettings) { $MvlSceneSettings } else { 'derived' }) mvlCourseMode=$MvlCourseMode generateConfiguredRoms=$($GenerateMvlConfiguredRoms.IsPresent) mvlMatchSeed=$(if ($MvlMatchSeed) { $MvlMatchSeed } else { 'auto' })"
 if ($Rollback) {

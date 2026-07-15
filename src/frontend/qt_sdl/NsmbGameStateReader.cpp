@@ -17,10 +17,6 @@ constexpr melonDS::u16 kPlayerObjectID = 0x0015;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
 constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
-constexpr melonDS::u16 kVsWorldItemObjectID = 0x001F;
-constexpr melonDS::u32 kVsNeutralWorldItemSettings = 0x00080000;
-constexpr melonDS::u32 kVsWorldItemSettings = 0x00080002;
-constexpr melonDS::u32 kVsDroppedStarItemSettings = 0x00090002;
 constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
 constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
@@ -2411,23 +2407,11 @@ WireProtocol::WirePlayerState BuildPlayerStatePacket(
 
 WireProtocol::WireWorldState BuildWorldStatePacket(
     melonDS::NDS *nds, melonDS::u32 instance, melonDS::u32 frame,
-    bool includeItems, int actorRescanInterval,
-    GameStateModel::StateSyncRuntime &runtime) {
+    int actorRescanInterval, GameStateModel::StateSyncRuntime &runtime) {
   const ObjectScanSample star = GetWorldActorCached(
       static_cast<int>(instance), frame, nds, kVsBattleStarActorObjectID,
       kVsBattleStarActorSettings, runtime.WorldStarActorBaseCache,
       runtime.WorldStarActorGUIDCache, actorRescanInterval);
-  ObjectScanSample neutralItem;
-  ObjectScanSample item;
-  ObjectScanSample droppedStarItem;
-  if (includeItems) {
-    neutralItem = FindNewestActiveObjectByIDAndSettings(
-        nds, kVsWorldItemObjectID, kVsNeutralWorldItemSettings, true);
-    item = FindNewestActiveObjectByIDAndSettings(
-        nds, kVsWorldItemObjectID, kVsWorldItemSettings, true);
-    droppedStarItem = FindNewestActiveObjectByIDAndSettings(
-        nds, kVsWorldItemObjectID, kVsDroppedStarItemSettings, true);
-  }
 
   WireProtocol::WireWorldState packet{};
   packet.Magic = WireProtocol::kMagic;
@@ -2436,9 +2420,6 @@ WireProtocol::WireWorldState BuildWorldStatePacket(
   packet.Frame = frame;
   packet.Instance = instance;
   FillWireWorldActorState(star, packet.Star);
-  FillWireWorldActorState(neutralItem, packet.NeutralItem);
-  FillWireWorldActorState(item, packet.Item);
-  FillWireWorldActorState(droppedStarItem, packet.DroppedStarItem);
   return packet;
 }
 
