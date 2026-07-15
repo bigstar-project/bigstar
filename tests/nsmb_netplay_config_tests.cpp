@@ -442,10 +442,6 @@ void TestPacketBridgeConfigDefaults() {
   CHECK(!config.TraceEnabled);
   CHECK(config.SendLocalPlayerOnly);
   CHECK(config.LocalPlayerOverride == -1);
-  CHECK(!config.WaitEnabled);
-  CHECK(config.WaitTimeoutMs == 0);
-  CHECK(config.WaitStartFrame == 0u);
-  CHECK(config.WaitTickAhead == 0);
   CHECK(!config.DirectCaptureEnabled);
   CHECK(!config.ForceTickEnabled);
   CHECK(config.ForceTickStartFrame == 0u);
@@ -475,10 +471,6 @@ void TestPacketBridgeConfigReadsAndClampsEnvironment() {
       {"MELONDS_NSML_PACKET_BRIDGE_TRACE", "1"},
       {"MELONDS_NSML_PACKET_BRIDGE_SEND_ALL", "1"},
       {"MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER", "9"},
-      {"MELONDS_NSML_PACKET_BRIDGE_WAIT", "1"},
-      {"MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS", "-1"},
-      {"MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME", "-2"},
-      {"MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD", "99"},
       {"MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE", "1"},
       {"MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK", "1"},
       {"MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME", "-3"},
@@ -506,10 +498,6 @@ void TestPacketBridgeConfigReadsAndClampsEnvironment() {
   CHECK(config.TraceEnabled);
   CHECK(!config.SendLocalPlayerOnly);
   CHECK(config.LocalPlayerOverride == 1);
-  CHECK(config.WaitEnabled);
-  CHECK(config.WaitTimeoutMs == 0);
-  CHECK(config.WaitStartFrame == 0u);
-  CHECK(config.WaitTickAhead == 32);
   CHECK(config.DirectCaptureEnabled);
   CHECK(config.ForceTickEnabled);
   CHECK(config.ForceTickStartFrame == 0u);
@@ -530,10 +518,8 @@ void TestPacketBridgeConfigReadsAndClampsEnvironment() {
   CHECK(config.SendJitterFrames == 15);
 
   environment.Values["MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS"] = "0";
-  environment.Values["MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD"] = "-1";
   config = NsmbNetplayPoC::Config::LoadPacketBridgeConfig(environment);
   CHECK(config.MaxPumpEvents == 1);
-  CHECK(config.WaitTickAhead == 0);
 
   environment.Values["MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER"] = "";
   config = NsmbNetplayPoC::Config::LoadPacketBridgeConfig(environment);

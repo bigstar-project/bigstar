@@ -439,15 +439,6 @@ PacketBridgeConfig LoadPacketBridgeConfig(const Environment &environment) {
           environment.Get("MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER")) {
     config.LocalPlayerOverride = std::clamp(std::atoi(localPlayer), 0, 1);
   }
-  config.WaitEnabled = ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_WAIT");
-  config.WaitTimeoutMs = std::max(
-      0, ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS", 0));
-  config.WaitStartFrame = static_cast<std::uint32_t>(
-      std::max(0, ReadInt(environment,
-                          "MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME", 0)));
-  config.WaitTickAhead = std::clamp(
-      ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD", 0), 0,
-      32);
   config.DirectCaptureEnabled =
       ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE");
   config.ForceTickEnabled =

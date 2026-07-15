@@ -23,12 +23,10 @@
 #include <algorithm>
 #include <array>
 #include <fstream>
-#include <chrono>
 #include <map>
 #include <mutex>
 #include <sstream>
 #include <string>
-#include <thread>
 #include <vector>
 #include "NDS.h"
 #include "DSi.h"
@@ -399,32 +397,6 @@ static bool NSMLPacketBridgeCheckPacketBitsOverride()
     if (enabled < 0)
         enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_CHECK_PACKET_BITS") ? 1 : 0;
     return enabled != 0;
-}
-
-static u32 NSMLPacketBridgeWaitTimeoutMs()
-{
-    static u32 timeout = 0xFFFFFFFF;
-    if (timeout == 0xFFFFFFFF)
-    {
-        if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS"))
-            timeout = static_cast<u32>(strtoul(value, nullptr, 0));
-        else
-            timeout = 0;
-    }
-    return timeout;
-}
-
-static u32 NSMLPacketBridgeWaitStartFrame()
-{
-    static u32 frame = 0xFFFFFFFF;
-    if (frame == 0xFFFFFFFF)
-    {
-        if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME"))
-            frame = static_cast<u32>(strtoul(value, nullptr, 0));
-        else
-            frame = 0;
-    }
-    return frame;
 }
 
 static bool IsNSMLMarioVsLuigiGGID(u32 value)
@@ -1364,25 +1336,15 @@ static bool NSMLSelectBridgePacketForPlayer(
         normalizeTick = NSMLEnvFlag("MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK") ? 1 : 0;
 
     bool found = false;
-    const u32 waitTimeoutMs = nds.NumFrames >= NSMLPacketBridgeWaitStartFrame()
-        ? NSMLPacketBridgeWaitTimeoutMs()
-        : 0;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(waitTimeoutMs);
-    do
     {
-        {
-            std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
-            found = NSMLFindLiveReplayPacketLocked(
-                &nds,
-                player,
-                tick,
-                static_cast<u32>(fallbackWindow),
-                packet);
-        }
-        if (found || waitTimeoutMs == 0)
-            break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    } while (std::chrono::steady_clock::now() < deadline);
+        std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
+        found = NSMLFindLiveReplayPacketLocked(
+            &nds,
+            player,
+            tick,
+            static_cast<u32>(fallbackWindow),
+            packet);
+    }
 
     if (found && normalizeTick)
     {

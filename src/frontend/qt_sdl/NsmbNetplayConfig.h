@@ -130,10 +130,6 @@ struct PacketBridgeConfig {
   bool TraceEnabled = false;
   bool SendLocalPlayerOnly = true;
   int LocalPlayerOverride = -1;
-  bool WaitEnabled = false;
-  int WaitTimeoutMs = 0;
-  std::uint32_t WaitStartFrame = 0;
-  int WaitTickAhead = 0;
   bool DirectCaptureEnabled = false;
   bool ForceTickEnabled = false;
   std::uint32_t ForceTickStartFrame = 0;

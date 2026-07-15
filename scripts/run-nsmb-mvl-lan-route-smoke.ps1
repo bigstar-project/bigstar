@@ -105,10 +105,6 @@ param(
     [int]$PacketBridgeReplayTickOffset = 0,
     [int]$HostPacketBridgeReplayTickOffset = [int]::MinValue,
     [int]$ClientPacketBridgeReplayTickOffset = [int]::MinValue,
-    [switch]$PacketBridgeWait,
-    [int]$PacketBridgeWaitTimeoutMs = 5,
-    [int]$PacketBridgeWaitStartFrame = 0,
-    [int]$PacketBridgeWaitTickAhead = 0,
     [switch]$PacketBridgeStrictRemote,
     [string]$PacketBridgeStrictPlayers = "",
     [int]$PacketBridgeStrictStartFrame = 0,
@@ -1274,17 +1270,6 @@ function Start-MelonLANProcess {
             $roleReplayOffset = $ClientPacketBridgeReplayTickOffset
         }
         $env:MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET = "$roleReplayOffset"
-        if ($PacketBridgeWait) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_WAIT = "1"
-            $env:MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS = "$PacketBridgeWaitTimeoutMs"
-            $env:MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME = "$PacketBridgeWaitStartFrame"
-            $env:MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD = "$PacketBridgeWaitTickAhead"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD -ErrorAction SilentlyContinue
-        }
         if ($PacketBridgeDirectCapture) {
             $env:MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE = "1"
         } else {
@@ -1710,10 +1695,6 @@ function Start-MelonLANProcess {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME -ErrorAction SilentlyContinue
         }
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TIMEOUT_MS -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_WAIT_TICK_AHEAD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_CLIENT_CONFIRM_TO_STAGE_START -ErrorAction SilentlyContinue
@@ -2035,7 +2016,6 @@ function Start-MelonLANProcess {
         "packetBridgeLiveFallbackNearest=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST)"
         "packetBridgeLiveFallbackLatestBefore=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE)"
         "packetBridgeLiveFallbackStartFrame=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_START_FRAME)"
-        "packetBridgeWaitStartFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_WAIT_START_FRAME)"
         "waitForPeer=$($env:MELONDS_NSML_WAIT_FOR_PEER)"
         "packetBridgeMaintainPacketFreeBytes=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_PACKET_FREE_BYTES)"
         "packetBridgeMaintainSessionPeers=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS)"

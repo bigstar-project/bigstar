@@ -711,8 +711,6 @@ void TestStartupReportFormattingContract() {
   stateSync.GameEnabled = true;
   Config::PacketBridgeConfig packetBridge;
   packetBridge.Enabled = true;
-  packetBridge.WaitEnabled = true;
-  packetBridge.WaitTimeoutMs = 33;
   Config::MvlConfig mvl;
   mvl.NetRandom.Enabled = true;
   mvl.NetRandom.Value = 0xABCDEF01;
@@ -755,8 +753,8 @@ void TestStartupReportFormattingContract() {
         std::string::npos);
   CHECK(!netplayReport.empty() && netplayReport.back() == '\n');
 
-  CHECK(Fnv1a64(testReport) == 10712281054962409865ull);
-  CHECK(Fnv1a64(netplayReport) == 14124424877864246494ull);
+  CHECK(Fnv1a64(testReport) == 17818733127289311667ull);
+  CHECK(Fnv1a64(netplayReport) == 3455746755802390722ull);
 }
 
 void TestAIStartupReportFormattingContract() {

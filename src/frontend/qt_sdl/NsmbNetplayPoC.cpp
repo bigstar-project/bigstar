@@ -470,7 +470,6 @@ void RebaseMvlAutoRestartStartupFrames(int instanceID, melonDS::u32 restartFrame
         return;
 
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.Connection.StartFrame);
-    G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.WaitStartFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ForceTickStartFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ForceGameLocalPlayerIDStartFrame);
     G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ThrottleStartFrame);
@@ -499,7 +498,6 @@ void RebaseMvlAutoRestartStartupFramesFromCheckpoint(
         return;
 
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Connection.StartFrame);
-    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.WaitStartFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ForceTickStartFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ForceGameLocalPlayerIDStartFrame);
     G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ThrottleStartFrame);
@@ -2124,59 +2122,6 @@ void PumpNSMLPacketBridgeLocked(melonDS::NDS* nds, melonDS::u32 frame)
     PumpNetworkLocked(nds, frame);
     ApplyPendingNSMLPacketsLocked(nds);
     SendMatchSeedLocked();
-}
-
-void WaitForNSMLPacketBridgeRemote(melonDS::NDS* nds, melonDS::u32 frame)
-{
-    if (!G.PacketBridge.WaitEnabled || !nds)
-        return;
-    if (frame < G.PacketBridge.WaitStartFrame)
-        return;
-
-    const melonDS::u32 remotePlayer = LocalPlayerID(nds) ^ 1;
-    const melonDS::u32 currentTick = PacketBridgeCanonicalTick(nds, frame);
-    const melonDS::u32 tick = (currentTick + static_cast<melonDS::u32>(G.PacketBridge.WaitTickAhead)) & 0xFFFF;
-    if (melonDS::NSML_HasMarioVsLuigiRemotePacket(nds, remotePlayer, tick))
-        return;
-    {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        if (G.PacketBridgeRuntime.ReceivedPacketProgress(remotePlayer).Tick
-            == PacketBridge::kUnsetProgress)
-            return;
-    }
-
-    const auto start = std::chrono::steady_clock::now();
-    for (;;)
-    {
-        {
-            std::lock_guard<std::mutex> lock(G.Mutex);
-            PumpNSMLPacketBridgeLocked(nds, frame);
-        }
-
-        if (melonDS::NSML_HasMarioVsLuigiRemotePacket(nds, remotePlayer, tick))
-            return;
-
-        if (G.PacketBridge.WaitTimeoutMs > 0)
-        {
-            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start).count();
-            if (elapsed >= G.PacketBridge.WaitTimeoutMs)
-            {
-                if (G.PacketBridge.TraceEnabled
-                    && G.PacketBridgeRuntime.ShouldTraceWaitTimeout(tick))
-                {
-                    std::printf("NSMB PacketBridge: wait timeout player=%u tick=0x%04X frame=%u waitedMs=%d\n",
-                        remotePlayer,
-                        tick,
-                        frame,
-                        G.PacketBridge.WaitTimeoutMs);
-                }
-                return;
-            }
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
 }
 
 int NSMLPacketTickLead(melonDS::u32 localTick, melonDS::u32 remoteTick)
@@ -5773,7 +5718,6 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);
             ForceNSMLGameLocalPlayerIDIfNeeded(syncFrame, nds);
             ThrottleNSMLPacketBridgeLead(nds, syncFrame);
-            WaitForNSMLPacketBridgeRemote(nds, syncFrame);
         }
         return ConvertStockXToTouch(packetBridgeInput);
     }
