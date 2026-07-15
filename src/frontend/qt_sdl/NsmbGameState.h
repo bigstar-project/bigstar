@@ -640,9 +640,6 @@ class RemoteStateStore {
 public:
   void ResetForRestart();
   void StoreGameState(const DecodedGameState &state);
-  bool StoreWorldState(const WireProtocol::WireWorldState &state);
-  bool StoreMovingHazardState(
-      const WireProtocol::WireMovingHazardState &state);
 
   const GameStateSyncHashes *FindGameStateHashes(int instanceID,
                                                  melonDS::u32 frame) const;
@@ -651,14 +648,9 @@ public:
   bool FindLatestGameState(int instanceID, melonDS::u32 frame,
                            GameStateSample &state,
                            melonDS::u32 &stateFrame) const;
-  const WireProtocol::WireWorldState *WorldState() const;
-  const WireProtocol::WireMovingHazardState *MovingHazardState() const;
-
 private:
   std::map<melonDS::u64, GameStateSyncHashes> GameStateHashes_;
   std::map<melonDS::u64, GameStateSample> GameStates_;
-  std::optional<WireProtocol::WireWorldState> WorldState_;
-  std::optional<WireProtocol::WireMovingHazardState> MovingHazardState_;
 };
 
 class StateSyncRuntime {
@@ -672,22 +664,8 @@ public:
   RecordRemoteGameState(const DecodedGameState &state);
 
   RemoteStateStore RemoteState;
-  melonDS::u64 LastSentWorldStateFrame[16]{};
   melonDS::u32 PlayerActorBaseCache[16][2]{};
   melonDS::u32 PlayerActorGUIDCache[16][2]{};
-  melonDS::u32 WorldStarActorBaseCache[16]{};
-  melonDS::u32 WorldStarActorGUIDCache[16]{};
-  melonDS::u32 WorldMovingHazardBaseCache[16]{};
-  melonDS::u32 WorldMovingHazardGUIDCache[16]{};
-  melonDS::u32 WorldMovingHazardBaseCaches
-      [16][WireProtocol::kMaxWorldMovingHazards]{};
-  melonDS::u32 WorldMovingHazardGUIDCaches
-      [16][WireProtocol::kMaxWorldMovingHazards]{};
-  melonDS::u32 WorldMovingHazardRemoteGUIDMaps
-      [16][WireProtocol::kMaxWorldMovingHazards]{};
-  melonDS::u32 WorldMovingHazardLocalGUIDMaps
-      [16][WireProtocol::kMaxWorldMovingHazards]{};
-  melonDS::u32 WorldMovingHazardCacheCounts[16]{};
   melonDS::u32 LastTracedWorldMovingHazardsFrame[16]{};
   melonDS::u32 LastTracedWorldEffectsFrame[16]{};
   melonDS::u32 LastTracedWorldObjectLifecyclesFrame[16]{};

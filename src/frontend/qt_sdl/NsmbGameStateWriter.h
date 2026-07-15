@@ -44,22 +44,6 @@ struct PlayerStarCounterPatchResult {
   melonDS::u32 OldCollectedStars[2]{};
 };
 
-inline ObjectTransform PredictWorldActorTransform(
-    const WireProtocol::WireWorldActorState &state,
-    melonDS::u32 predictFrames) {
-  return {
-      state.PosX + state.VelX * predictFrames,
-      state.PosY + state.VelY * predictFrames,
-      state.PosZ + state.VelZ * predictFrames,
-      state.PrevX + state.VelX * predictFrames,
-      state.PrevY + state.VelY * predictFrames,
-      state.PrevZ + state.VelZ * predictFrames,
-      state.VelX,
-      state.VelY,
-      state.VelZ,
-  };
-}
-
 struct GameStateApplyOptions {
   bool RemotePlayerOnly = false;
   int RemotePlayer = 0;
@@ -72,35 +56,6 @@ struct GameStateApplyOptions {
 
 struct GameStateApplyResult {
   bool RemotePlayerApplied = false;
-};
-
-struct ApplyTraceOptions {
-  bool Enabled = false;
-  int Interval = 1;
-
-  bool ShouldTrace(melonDS::u32 frame) const {
-    return Enabled &&
-           (Interval <= 1 ||
-            frame % static_cast<melonDS::u32>(Interval) == 0);
-  }
-};
-
-struct WorldStateApplyOptions {
-  int InstanceID = 0;
-  melonDS::u32 Frame = 0;
-  int MaxPredictFrames = 0;
-  int ActorRescanInterval = 0;
-  bool Client = false;
-  bool ApplyStarActor = false;
-  ApplyTraceOptions Trace;
-};
-
-struct MovingHazardApplyOptions {
-  int InstanceID = 0;
-  melonDS::u32 Frame = 0;
-  int MaxPredictFrames = 0;
-  int ActorRescanInterval = 0;
-  bool TraceMapping = false;
 };
 
 bool WriteObjectTransformByBase(melonDS::NDS *nds, melonDS::u32 base,
@@ -126,27 +81,9 @@ bool WritePlayerStarCounterPatch(
     const melonDS::u32 displayedStars[2],
     const melonDS::u32 collectedStars[2],
     PlayerStarCounterPatchResult &result);
-bool ApplyWireWorldActorState(
-    melonDS::NDS *nds, const WireProtocol::WireWorldActorState &state,
-    melonDS::u32 predictFrames, melonDS::u32 localBase);
-bool ApplyWireWorldMovingHazardState(
-    melonDS::NDS *nds, const WireProtocol::WireWorldActorState &state,
-    melonDS::u32 predictFrames, melonDS::u32 localBase);
-melonDS::u64 WorldActorMatchDistance(
-    const WireProtocol::WireWorldActorState &remoteActor,
-    const GameStateReader::ObjectScanSample &localActor);
-
 GameStateApplyResult ApplyGameState(
     melonDS::NDS *nds, const GameStateModel::GameStateSample &sample,
     const GameStateApplyOptions &options);
-void ApplyWorldState(melonDS::NDS *nds,
-                     const WireProtocol::WireWorldState &sample,
-                     GameStateModel::StateSyncRuntime &runtime,
-                     const WorldStateApplyOptions &options);
-void ApplyMovingHazardState(
-    melonDS::NDS *nds, const WireProtocol::WireMovingHazardState &sample,
-    GameStateModel::StateSyncRuntime &runtime,
-    const MovingHazardApplyOptions &options);
 } // namespace NsmbNetplayPoC::GameStateWriter
 
 #endif

@@ -71,7 +71,7 @@ void TestMalformedHeadersAreRejected() {
   invalid.Version++;
   CHECK(!GameStateModel::DecodeWireGameState(invalid, decoded));
   invalid = valid;
-  invalid.Kind = WireProtocol::kWireKindWorldState;
+  invalid.Kind = WireProtocol::kWireKindPacket;
   CHECK(!GameStateModel::DecodeWireGameState(invalid, decoded));
 }
 
@@ -96,32 +96,6 @@ void TestGameStateHashes() {
   hashes.WifiCandidate = 0x2122232425262728ull;
   hashes.RenderCandidate = 0x3132333435363738ull;
   CHECK(CombinedGameStateHash(hashes) == 0x81FED12C6E7300F0ull);
-}
-
-void TestWorldActorPredictionContract() {
-  using namespace NsmbNetplayPoC;
-  WireProtocol::WireWorldActorState state{};
-  state.PosX = 0x00001000u;
-  state.PosY = 0xFFFFFF00u;
-  state.PosZ = 0x7FFFFFF0u;
-  state.PrevX = 0x00000800u;
-  state.PrevY = 0x00000400u;
-  state.PrevZ = 0xFFFFFFF0u;
-  state.VelX = 0x00000100u;
-  state.VelY = 0xFFFFFF80u;
-  state.VelZ = 0x00000020u;
-
-  const GameStateWriter::ObjectTransform predicted =
-      GameStateWriter::PredictWorldActorTransform(state, 4);
-  CHECK(predicted.PosX == 0x00001400u);
-  CHECK(predicted.PosY == 0xFFFFFD00u);
-  CHECK(predicted.PosZ == 0x80000070u);
-  CHECK(predicted.PrevX == 0x00000C00u);
-  CHECK(predicted.PrevY == 0x00000200u);
-  CHECK(predicted.PrevZ == 0x00000070u);
-  CHECK(predicted.VelX == state.VelX);
-  CHECK(predicted.VelY == state.VelY);
-  CHECK(predicted.VelZ == state.VelZ);
 }
 
 void TestRemoteStateStoreSelectionAndRestart() {
@@ -154,28 +128,9 @@ void TestRemoteStateStoreSelectionAndRestart() {
   CHECK(!store.FindLatestGameState(1, 100, selected, selectedFrame));
   CHECK(selectedFrame == 0);
 
-  WireProtocol::WireWorldState world{};
-  world.Frame = 20;
-  world.Star.GUID = 20;
-  CHECK(store.StoreWorldState(world));
-  world.Frame = 19;
-  world.Star.GUID = 19;
-  CHECK(!store.StoreWorldState(world));
-  CHECK(store.WorldState() && store.WorldState()->Frame == 20);
-  CHECK(store.WorldState() && store.WorldState()->Star.GUID == 20);
-  world.Frame = 20;
-  world.Star.GUID = 21;
-  CHECK(store.StoreWorldState(world));
-  CHECK(store.WorldState() && store.WorldState()->Star.GUID == 21);
-
-  WireProtocol::WireMovingHazardState hazard{};
-  hazard.Frame = 30;
-  CHECK(store.StoreMovingHazardState(hazard));
   store.ResetForRestart();
   CHECK(store.FindGameStateHashes(2, 20) == nullptr);
   CHECK(store.FindGameState(2, 20) == nullptr);
-  CHECK(store.WorldState() == nullptr);
-  CHECK(store.MovingHazardState() == nullptr);
 }
 
 void TestStateSyncHashComparisonContract() {
@@ -223,18 +178,8 @@ void TestStateSyncRuntimeRestartContract() {
   remote.Hashes.Basic = 2;
   CHECK(runtime.RecordRemoteGameState(remote).has_value());
   CHECK(runtime.BeginGameStateSync(3, 10));
-  runtime.LastSentWorldStateFrame[3] = 12;
   runtime.PlayerActorBaseCache[3][1] = 14;
   runtime.PlayerActorGUIDCache[3][1] = 15;
-  runtime.WorldStarActorBaseCache[3] = 16;
-  runtime.WorldStarActorGUIDCache[3] = 17;
-  runtime.WorldMovingHazardBaseCache[3] = 30;
-  runtime.WorldMovingHazardGUIDCache[3] = 31;
-  runtime.WorldMovingHazardCacheCounts[3] = 1;
-  runtime.WorldMovingHazardBaseCaches[3][0] = 32;
-  runtime.WorldMovingHazardGUIDCaches[3][0] = 33;
-  runtime.WorldMovingHazardRemoteGUIDMaps[3][0] = 34;
-  runtime.WorldMovingHazardLocalGUIDMaps[3][0] = 35;
   runtime.LastTracedWorldMovingHazardsFrame[3] = 38;
   runtime.LastTracedWorldEffectsFrame[3] = 39;
   runtime.LastTracedWorldObjectLifecyclesFrame[3] = 40;
@@ -245,18 +190,8 @@ void TestStateSyncRuntimeRestartContract() {
   CHECK(runtime.RemoteState.FindGameState(3, 10) == nullptr);
   CHECK(!runtime.RecordRemoteGameState(remote));
   CHECK(runtime.BeginGameStateSync(3, 10));
-  CHECK(runtime.LastSentWorldStateFrame[3] == 0);
   CHECK(runtime.PlayerActorBaseCache[3][1] == 0);
   CHECK(runtime.PlayerActorGUIDCache[3][1] == 0);
-  CHECK(runtime.WorldStarActorBaseCache[3] == 0);
-  CHECK(runtime.WorldStarActorGUIDCache[3] == 0);
-  CHECK(runtime.WorldMovingHazardBaseCache[3] == 0);
-  CHECK(runtime.WorldMovingHazardGUIDCache[3] == 0);
-  CHECK(runtime.WorldMovingHazardCacheCounts[3] == 0);
-  CHECK(runtime.WorldMovingHazardBaseCaches[3][0] == 0);
-  CHECK(runtime.WorldMovingHazardGUIDCaches[3][0] == 0);
-  CHECK(runtime.WorldMovingHazardRemoteGUIDMaps[3][0] == 0);
-  CHECK(runtime.WorldMovingHazardLocalGUIDMaps[3][0] == 0);
   CHECK(runtime.LastTracedWorldMovingHazardsFrame[3] == 38);
   CHECK(runtime.LastTracedWorldEffectsFrame[3] == 39);
   CHECK(runtime.LastTracedWorldObjectLifecyclesFrame[3] == 40);
@@ -480,7 +415,6 @@ int main() {
   TestEveryWireWordRoundTrips();
   TestMalformedHeadersAreRejected();
   TestGameStateHashes();
-  TestWorldActorPredictionContract();
   TestRemoteStateStoreSelectionAndRestart();
   TestStateSyncHashComparisonContract();
   TestStateSyncRuntimeRestartContract();

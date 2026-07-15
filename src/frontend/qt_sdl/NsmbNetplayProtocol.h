@@ -15,11 +15,6 @@ constexpr melonDS::u32 kMagic = 0x4C4D534E; // "NSML", little endian
 constexpr melonDS::u32 kVersion = 1;
 constexpr melonDS::u32 kWireKindState = 0x54415453;  // "STAT", little endian
 constexpr melonDS::u32 kWireKindPacket = 0x4B434150; // "PACK", little endian
-constexpr melonDS::u32 kWireKindWorldState =
-    0x41545357; // "WSTA", little endian
-constexpr melonDS::u32 kWireKindMovingHazardState =
-    0x415A4148; // "HAZA", little endian
-constexpr std::size_t kMaxWorldMovingHazards = 4;
 
 struct WireNSMLPacket {
   melonDS::u32 Magic;
@@ -133,58 +128,6 @@ struct WireGameState {
 
 static_assert(sizeof(WireGameState) == 380);
 
-struct WireWorldActorState {
-  melonDS::u32 Found;
-  melonDS::u32 GUID;
-  melonDS::u32 Settings;
-  melonDS::u32 StateType;
-  melonDS::u32 Flags;
-  melonDS::u32 PosX;
-  melonDS::u32 PosY;
-  melonDS::u32 PosZ;
-  melonDS::u32 PrevX;
-  melonDS::u32 PrevY;
-  melonDS::u32 PrevZ;
-  melonDS::u32 VelX;
-  melonDS::u32 VelY;
-  melonDS::u32 VelZ;
-  melonDS::u32 LastStepX;
-  melonDS::u32 LastStepY;
-  melonDS::u32 LastStepZ;
-  melonDS::u32 VelH;
-  melonDS::u32 TargetVelH;
-  melonDS::u32 AccelV;
-  melonDS::u32 TargetVelV;
-  melonDS::u32 AccelH;
-  melonDS::u32 TargetVelX;
-  melonDS::u32 TargetVelY;
-  melonDS::u32 TargetVelZ;
-};
-
-struct WireWorldState {
-  melonDS::u32 Magic;
-  melonDS::u32 Version;
-  melonDS::u32 Kind;
-  melonDS::u32 Frame;
-  melonDS::u32 Instance;
-  WireWorldActorState Star;
-};
-
-static_assert(sizeof(WireWorldActorState) == 100);
-static_assert(sizeof(WireWorldState) == 120);
-
-struct WireMovingHazardState {
-  melonDS::u32 Magic;
-  melonDS::u32 Version;
-  melonDS::u32 Kind;
-  melonDS::u32 Frame;
-  melonDS::u32 Instance;
-  melonDS::u32 Count;
-  WireWorldActorState Actors[kMaxWorldMovingHazards];
-};
-
-static_assert(sizeof(WireMovingHazardState) == 424);
-
 } // namespace NsmbNetplayPoC::WireProtocol
 
 namespace NsmbNetplayPoC::SessionProtocol {
@@ -286,8 +229,6 @@ enum class PacketClass {
   InputBundleCandidate,
   Session,
   NSMLPacket,
-  WorldState,
-  MovingHazardState,
   GameState,
 };
 
@@ -295,8 +236,6 @@ struct KnownPacketSizes {
   std::size_t Input = 0;
   std::size_t Session = 0;
   std::size_t NSMLPacket = 0;
-  std::size_t WorldState = 0;
-  std::size_t MovingHazardState = 0;
   std::size_t GameState = 0;
 };
 

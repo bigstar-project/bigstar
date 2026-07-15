@@ -28,10 +28,6 @@ param(
     [int]$StateSyncInterval = 60,
     [switch]$StateSyncExtended,
     [string]$StateApplyMode = "",
-    [switch]$WorldStateSync,
-    [switch]$WorldStateApply,
-    [switch]$WorldStateSkipStar,
-    [switch]$WorldStateApplyMovingHazard,
     [switch]$WorldStateTraceMovingHazards,
     [switch]$WorldStateTraceObjectLifecycles,
     [switch]$WorldStateTraceActorInternals,
@@ -39,10 +35,6 @@ param(
     [int]$WorldStateTraceObjectLifecyclesInterval = 60,
     [int]$WorldStateTraceObjectLifecyclesStartFrame = 0,
     [int]$WorldStateTraceObjectLifecyclesEndFrame = 0,
-    [switch]$WorldStateSkipMovingHazard,
-    [int]$WorldStateSyncInterval = 2,
-    [int]$WorldStateMaxPredictFrames = 1,
-    [int]$WorldStateActorRescanInterval = 0,
     [int]$ScreenshotInterval = 600,
     [string]$RamDumpFrames = "",
     [int]$RamDumpInterval = 0,
@@ -928,72 +920,30 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_STATE_SYNC_EXTENDED -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_STATE_APPLY_MODE -ErrorAction SilentlyContinue
     }
-    if ($WorldStateSync) {
-        $env:MELONDS_NSML_WORLD_STATE_SYNC = "1"
-        $env:MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL = "$WorldStateSyncInterval"
-        $env:MELONDS_NSML_WORLD_STATE_MAX_PREDICT_FRAMES = "$WorldStateMaxPredictFrames"
-        $env:MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL = "$WorldStateActorRescanInterval"
-        if ($WorldStateApply) {
-            $env:MELONDS_NSML_WORLD_STATE_APPLY = "1"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY -ErrorAction SilentlyContinue
-        }
-        if ($WorldStateSkipStar) {
-            $env:MELONDS_NSML_WORLD_STATE_SKIP_STAR = "1"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_STAR -ErrorAction SilentlyContinue
-        }
-        if ($WorldStateSkipMovingHazard) {
-            $env:MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD = "1"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD -ErrorAction SilentlyContinue
-        }
-        if ($WorldStateApplyMovingHazard) {
-            $env:MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD = "1"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD -ErrorAction SilentlyContinue
-        }
-        if ($WorldStateTraceMovingHazards) {
-            $env:MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS = "1"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS -ErrorAction SilentlyContinue
-        }
-        if ($WorldStateTraceObjectLifecycles) {
-            $env:MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES = "1"
-            $env:MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_INTERVAL = "$WorldStateTraceObjectLifecyclesInterval"
-            $env:MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_START_FRAME = "$WorldStateTraceObjectLifecyclesStartFrame"
-            $env:MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_END_FRAME = "$WorldStateTraceObjectLifecyclesEndFrame"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_INTERVAL -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_START_FRAME -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_END_FRAME -ErrorAction SilentlyContinue
-        }
-        if ($WorldStateTraceActorInternals) {
-            $env:MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS = "1"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS -ErrorAction SilentlyContinue
-        }
-        if ($WorldStateTraceEffects) {
-            $env:MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS = "1"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS -ErrorAction SilentlyContinue
-        }
+    if ($WorldStateTraceMovingHazards) {
+        $env:MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS = "1"
     } else {
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SYNC -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_MAX_PREDICT_FRAMES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_STAR -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS -ErrorAction SilentlyContinue
+    }
+    if ($WorldStateTraceObjectLifecycles) {
+        $env:MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES = "1"
+        $env:MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_INTERVAL = "$WorldStateTraceObjectLifecyclesInterval"
+        $env:MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_START_FRAME = "$WorldStateTraceObjectLifecyclesStartFrame"
+        $env:MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_END_FRAME = "$WorldStateTraceObjectLifecyclesEndFrame"
+    } else {
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_INTERVAL -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_END_FRAME -ErrorAction SilentlyContinue
+    }
+    if ($WorldStateTraceActorInternals) {
+        $env:MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS = "1"
+    } else {
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS -ErrorAction SilentlyContinue
+    }
+    if ($WorldStateTraceEffects) {
+        $env:MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS = "1"
+    } else {
         Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS -ErrorAction SilentlyContinue
     }
     if ($RamDumpFrames -or $RamDumpInterval -gt 0) {
@@ -2039,21 +1989,6 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_STATE_SYNC_EXTENDED -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_STATE_APPLY_MODE -ErrorAction SilentlyContinue
     }
-    if (-not $WorldStateSync) {
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SYNC -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_MAX_PREDICT_FRAMES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_STAR -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_INTERVAL -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_END_FRAME -ErrorAction SilentlyContinue
-    }
     if (-not $StateSaveDir) {
         Remove-Item Env:\MELONDS_NSML_STATE_SAVE_DIR -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_STATE_SAVE_FRAME -ErrorAction SilentlyContinue
@@ -2220,14 +2155,9 @@ function Start-MelonLANProcess {
         "packetBridgeStageSceneReadyClose=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE)"
         "packetBridgeStageSceneReadyCloseStartFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_STAGE_SCENE_READY_CLOSE_START_FRAME)"
         "inputMaxFrameLead=$($env:MELONDS_NSML_INPUT_MAX_FRAME_LEAD)"
-        "worldStateSync=$($env:MELONDS_NSML_WORLD_STATE_SYNC)"
-        "worldStateApply=$($env:MELONDS_NSML_WORLD_STATE_APPLY)"
-        "worldStateApplyMovingHazard=$($env:MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD)"
         "gameplayHeartbeatInterval=$($env:MELONDS_NSML_GAMEPLAY_HEARTBEAT_INTERVAL)"
         "worldStateTraceActorInternals=$($env:MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS)"
         "worldStateTraceEffects=$($env:MELONDS_NSML_WORLD_STATE_TRACE_EFFECTS)"
-        "worldStateSyncInterval=$($env:MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL)"
-        "worldStateActorRescanInterval=$($env:MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL)"
         "perfSpikePhaseTrace=$($env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE)"
         "packetBridgeReadPacketByte=$($env:MELONDS_NSML_PACKET_BRIDGE_READ_PACKET_BYTE)"
         "packetBridgeCheckPacketBits=$($env:MELONDS_NSML_PACKET_BRIDGE_CHECK_PACKET_BITS)"

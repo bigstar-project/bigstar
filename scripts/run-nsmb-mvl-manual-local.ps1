@@ -15,7 +15,6 @@ param(
     [int]$NetworkPumpSleepUs = 250,
     [switch]$LowDelayWan,
     [switch]$LowLatencyRollback,
-    [switch]$PlanDActorSnapshot,
     [switch]$Rollback,
     [string]$RollbackBackend = "",
     [string]$RollbackTinyCoreFlags = "",
@@ -25,9 +24,6 @@ param(
     [int]$RollbackInputWaitUs = 0,
     [int]$RollbackMaxResimFrames = 0,
     [switch]$RollbackResimulate,
-    [int]$WorldStateSyncInterval = 2,
-    [int]$WorldStateMaxPredictFrames = 1,
-    [int]$WorldStateActorRescanInterval = 30,
     [switch]$WorldStateTraceObjectLifecycles,
     [switch]$WorldStateTraceActorInternals,
     [switch]$WorldStateTraceEffects,
@@ -109,10 +105,6 @@ if ($AllowJit -and $NoJit) {
     throw "AllowJit and NoJit cannot be used together"
 }
 
-if ($LowLatencyRollback -and $PlanDActorSnapshot) {
-    throw "LowLatencyRollback and PlanDActorSnapshot cannot be enabled together"
-}
-
 function Set-MelonTomlValue {
     param(
         [string]$Text,
@@ -164,17 +156,6 @@ if ($LowLatencyRollback) {
     if (-not $PSBoundParameters.ContainsKey('PacketBridgeStartFrame')) { $PacketBridgeStartFrame = 870 }
     if (-not $PSBoundParameters.ContainsKey('StallTimeoutMs')) { $StallTimeoutMs = 10000 }
     $RollbackResimulate = $true
-}
-
-if ($PlanDActorSnapshot) {
-    if (-not $PSBoundParameters.ContainsKey('InputDelayFrames')) { $InputDelayFrames = 0 }
-    if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 4 }
-    if (-not $PSBoundParameters.ContainsKey('NetworkPumpThread')) { $NetworkPumpThread = $true }
-    if (-not $PSBoundParameters.ContainsKey('NetworkPumpSleepUs')) { $NetworkPumpSleepUs = 50 }
-    if (-not $PSBoundParameters.ContainsKey('StallTimeoutMs')) { $StallTimeoutMs = 5000 }
-    if (-not $PSBoundParameters.ContainsKey('WorldStateSyncInterval')) { $WorldStateSyncInterval = 1 }
-    if (-not $PSBoundParameters.ContainsKey('WorldStateMaxPredictFrames')) { $WorldStateMaxPredictFrames = 2 }
-    if (-not $PSBoundParameters.ContainsKey('GameplayHeartbeatInterval')) { $GameplayHeartbeatInterval = 120 }
 }
 
 $isTinyCorePreimageRollback = $RollbackBackend -eq "tinycorepreimage" -or $RollbackBackend -eq "tiny-core-preimage"
@@ -337,16 +318,6 @@ if ($ForcePlayerStarCounters) {
         "-ForcePlayerCollectedStars1", "$ForcePlayerCollectedStars1"
     )
 }
-if ($PlanDActorSnapshot) {
-    $common += @(
-        "-WorldStateSync",
-        "-WorldStateApply",
-        "-WorldStateApplyMovingHazard",
-        "-WorldStateSyncInterval", "$WorldStateSyncInterval",
-        "-WorldStateMaxPredictFrames", "$WorldStateMaxPredictFrames",
-        "-WorldStateActorRescanInterval", "$WorldStateActorRescanInterval"
-    )
-}
 if ($WorldStateTraceObjectLifecycles) {
     $common += @(
         "-WorldStateTraceObjectLifecycles",
@@ -440,11 +411,6 @@ if ($LowLatencyRollback) {
         Remove-Item Env:\MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS -ErrorAction SilentlyContinue
     }
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK -ErrorAction SilentlyContinue
-}
-if ($PlanDActorSnapshot) {
-    $env:MELONDS_NSML_FPS_SPIKE_THRESHOLD_MS = "33"
-    $env:MELONDS_NSML_FPS_SPIKE_TRACE = "1"
-    $env:MELONDS_NSML_PERF_SPIKE_PHASE_TRACE = "1"
 }
 if ($RollbackInputWaitUs -gt 0) {
     $env:MELONDS_NSML_ROLLBACK_INPUT_WAIT_US = "$RollbackInputWaitUs"
@@ -652,9 +618,6 @@ if ($HostAIObservationV3Log -or $ClientAIObservationV3Log) {
 }
 Write-Host "trace gameState=$([bool]$GameStateTrace) interval=$GameStateTraceInterval extended=$([bool]$GameStateTraceExtended) lifeChanges=$([bool]$TracePlayerLifeChanges) defeated=$([bool]$TracePlayerDefeated)"
 Write-Host "recordInput=$([bool]$RecordInput) recordDir=$(if ($RecordInput) { $InputRecordDir } else { 'disabled' }) recordStart=$InputRecordStartFrame recordEnd=$InputRecordEndFrame"
-if ($PlanDActorSnapshot) {
-    Write-Host "Plan-D world snapshot enabled worldInterval=$WorldStateSyncInterval worldPredict=$WorldStateMaxPredictFrames worldRescan=$WorldStateActorRescanInterval"
-}
 Write-Host "mvlWins=$MvlWins mvlBigStars=$MvlBigStars mvlLives=$MvlLives mvlStage=$(if ($MvlStage -ge 0) { $MvlStage } else { 'auto/default' }) mvlSceneSettings=$(if ($MvlSceneSettings) { $MvlSceneSettings } else { 'derived' }) mvlCourseMode=$MvlCourseMode generateConfiguredRoms=$($GenerateMvlConfiguredRoms.IsPresent) mvlMatchSeed=$(if ($MvlMatchSeed) { $MvlMatchSeed } else { 'auto' })"
 if ($Rollback) {
     $backendLabel = if ($RollbackBackend -ne "") { $RollbackBackend } else { "savestate" }

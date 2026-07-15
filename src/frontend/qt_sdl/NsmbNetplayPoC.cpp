@@ -74,16 +74,11 @@ namespace
 
 constexpr melonDS::u32 kMagic = 0x4C4D534E; // "NSML", little endian
 constexpr melonDS::u32 kVersion = 1;
+constexpr std::size_t kTrackedWorldMovingHazardCount = 4;
 using WireProtocol::WireGameState;
-using WireProtocol::WireMovingHazardState;
 using WireProtocol::WireNSMLPacket;
-using WireProtocol::WireWorldActorState;
-using WireProtocol::WireWorldState;
-using WireProtocol::kMaxWorldMovingHazards;
-using WireProtocol::kWireKindMovingHazardState;
 using WireProtocol::kWireKindPacket;
 using WireProtocol::kWireKindState;
-using WireProtocol::kWireKindWorldState;
 using GameStateReader::WorldEffectSlotSample;
 using GameStateModel::AITerrainDerivedSummary;
 using GameStateModel::AITileGridSample;
@@ -1078,50 +1073,6 @@ void HandleReceivedNSMLPacketLocked(
     }
 }
 
-ReceiveDisposition HandleReceivedWorldStateLocked(
-    const void* data,
-    std::size_t size,
-    melonDS::u32 localFrame)
-{
-    WireWorldState packet;
-    std::memcpy(&packet, data, size);
-    if (packet.Magic != kMagic || packet.Version != kVersion || packet.Kind != kWireKindWorldState)
-        return ReceiveDisposition::CleanupPacket;
-
-    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
-    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
-        return ReceiveDisposition::SkipPacketCleanup;
-    G.GameSync.RemoteState.StoreWorldState(packet);
-    if ((G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace)
-        && (G.Bootstrap.InputTraceInterval <= 1
-            || (localFrame != kNoFrameLimit
-                && (localFrame % static_cast<melonDS::u32>(G.Bootstrap.InputTraceInterval)) == 0)))
-    {
-        std::printf("NSMB WorldState: recv localFrame=%u packetFrame=%u star=%u\n",
-            localFrame,
-            packet.Frame,
-            packet.Star.Found);
-    }
-    return ReceiveDisposition::CleanupPacket;
-}
-
-ReceiveDisposition HandleReceivedMovingHazardStateLocked(const void* data, std::size_t size)
-{
-    WireMovingHazardState packet;
-    std::memcpy(&packet, data, size);
-    if (packet.Magic != kMagic || packet.Version != kVersion
-        || packet.Kind != kWireKindMovingHazardState || packet.Count > kMaxWorldMovingHazards)
-    {
-        return ReceiveDisposition::CleanupPacket;
-    }
-
-    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
-    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
-        return ReceiveDisposition::SkipPacketCleanup;
-    G.GameSync.RemoteState.StoreMovingHazardState(packet);
-    return ReceiveDisposition::CleanupPacket;
-}
-
 void HandleReceivedGameStateLocked(const void* data, std::size_t size)
 {
     WireGameState packet;
@@ -1185,8 +1136,6 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     InputProtocol::kInputPacketSize,
                     SessionProtocol::kSessionPacketSize,
                     sizeof(WireNSMLPacket),
-                    sizeof(WireWorldState),
-                    sizeof(WireMovingHazardState),
                     sizeof(WireGameState),
                 });
             if (packetClass == PacketClassifier::PacketClass::Input)
@@ -1208,27 +1157,6 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
                     event.packet->dataLength,
                     nds,
                     localFrame);
-            }
-            else if (packetClass == PacketClassifier::PacketClass::WorldState)
-            {
-                if (HandleReceivedWorldStateLocked(
-                        event.packet->data,
-                        event.packet->dataLength,
-                        localFrame)
-                    == ReceiveDisposition::SkipPacketCleanup)
-                {
-                    break;
-                }
-            }
-            else if (packetClass == PacketClassifier::PacketClass::MovingHazardState)
-            {
-                if (HandleReceivedMovingHazardStateLocked(
-                        event.packet->data,
-                        event.packet->dataLength)
-                    == ReceiveDisposition::SkipPacketCleanup)
-                {
-                    break;
-                }
             }
             else if (packetClass == PacketClassifier::PacketClass::GameState)
             {
@@ -3625,7 +3553,8 @@ ReadNearbyDiagnosticHazards(melonDS::NDS* nds)
 {
     const std::vector<ObjectScanSample> actors =
         FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
-    const std::size_t count = std::min<std::size_t>(actors.size(), kMaxWorldMovingHazards);
+    const std::size_t count = std::min<std::size_t>(
+        actors.size(), kTrackedWorldMovingHazardCount);
     std::vector<Diagnostics::DiagnosticMovingHazardSnapshot> hazards;
     hazards.reserve(count);
     for (std::size_t i = 0; i < count; i++)
@@ -4858,73 +4787,6 @@ void ClearMvlCameraInitHoldIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
     std::fflush(stdout);
 }
 
-void ApplyRemoteWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.Enabled || !G.StateSync.WorldApplyEnabled) return;
-    if (instanceID < 0 || instanceID >= 16 || !nds || !nds->MainRAM) return;
-    if (frame < G.Connection.StartFrame) return;
-    TraceWorldMovingHazardsIfNeeded(instanceID, frame, nds);
-    TraceWorldObjectLifecyclesIfNeeded(instanceID, frame, nds);
-    TraceWorldEffectsIfNeeded(instanceID, frame, nds);
-
-    WireWorldState sample {};
-    {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        PumpNetworkLocked();
-        const WireWorldState* stored = G.GameSync.RemoteState.WorldState();
-        if (!stored)
-            return;
-        sample = *stored;
-    }
-
-    GameStateWriter::WorldStateApplyOptions options;
-    options.InstanceID = instanceID;
-    options.Frame = frame;
-    options.MaxPredictFrames = G.StateSync.WorldMaxPredictFrames;
-    options.ActorRescanInterval = G.StateSync.WorldActorRescanInterval;
-    options.Client = G.NetRole == Role::Client;
-    options.ApplyStarActor = G.StateSync.WorldApplyStarActor;
-    options.Trace.Enabled = G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace;
-    options.Trace.Interval = G.Bootstrap.InputTraceInterval;
-    GameStateWriter::ApplyWorldState(nds, sample, G.GameSync, options);
-}
-
-void ApplyRemoteMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, bool preferFreshSample = false)
-{
-    if (!G.Enabled || !G.StateSync.WorldApplyMovingHazard || G.NetRole != Role::Client) return;
-    if (instanceID < 0 || instanceID >= 16 || !nds || !nds->MainRAM) return;
-    if (frame < G.Connection.StartFrame) return;
-
-    WireMovingHazardState sample {};
-    bool sampleValid = false;
-    const auto waitDeadline = std::chrono::steady_clock::now() + std::chrono::microseconds(1500);
-    while (true)
-    {
-        {
-            std::lock_guard<std::mutex> lock(G.Mutex);
-            PumpNetworkLocked();
-            if (const WireMovingHazardState* stored = G.GameSync.RemoteState.MovingHazardState())
-            {
-                sample = *stored;
-                sampleValid = true;
-            }
-        }
-        if (!preferFreshSample || sample.Frame >= frame || std::chrono::steady_clock::now() >= waitDeadline)
-            break;
-        std::this_thread::sleep_for(std::chrono::microseconds(100));
-    }
-    if (!sampleValid || (preferFreshSample && sample.Frame < frame))
-        return;
-
-    GameStateWriter::MovingHazardApplyOptions options;
-    options.InstanceID = instanceID;
-    options.Frame = frame;
-    options.MaxPredictFrames = G.StateSync.WorldMaxPredictFrames;
-    options.ActorRescanInterval = G.StateSync.WorldActorRescanInterval;
-    options.TraceMapping = G.StateSync.WorldTraceMovingHazards;
-    GameStateWriter::ApplyMovingHazardState(nds, sample, G.GameSync, options);
-}
-
 void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.Enabled || !G.StateSync.GameApplyEnabled) return;
@@ -5304,59 +5166,6 @@ void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         hashes);
 
     G.Transport.Send(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE, false);
-}
-
-void SyncWorldState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.Enabled || !G.StateSync.WorldEnabled || !nds) return;
-    if (instanceID < 0 || instanceID >= 16) return;
-    if (frame < G.Connection.StartFrame) return;
-    if ((frame % static_cast<melonDS::u32>(G.StateSync.WorldInterval)) != 0) return;
-    TraceWorldMovingHazardsIfNeeded(instanceID, frame, nds);
-    TraceWorldObjectLifecyclesIfNeeded(instanceID, frame, nds);
-    TraceWorldEffectsIfNeeded(instanceID, frame, nds);
-
-    const WireWorldState packet = GameStateReader::BuildWorldStatePacket(
-        nds,
-        static_cast<melonDS::u32>(instanceID),
-        frame,
-        G.StateSync.WorldActorRescanInterval,
-        G.GameSync);
-
-    std::lock_guard<std::mutex> lock(G.Mutex);
-    if (G.GameSync.LastSentWorldStateFrame[instanceID] == frame) return;
-    G.GameSync.LastSentWorldStateFrame[instanceID] = frame;
-    if (!G.Transport.IsConnected()) return;
-
-    if ((G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace) &&
-        (G.Bootstrap.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.Bootstrap.InputTraceInterval)) == 0))
-    {
-        std::printf("NSMB WorldState: send inst=%d frame=%u star=%u\n",
-            instanceID,
-            frame,
-            packet.Star.Found);
-    }
-
-    G.Transport.Send(&packet, sizeof(packet), 0, false);
-}
-
-void SyncMovingHazardState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.Enabled || !G.StateSync.WorldApplyMovingHazard || G.NetRole != Role::Host || !nds) return;
-    if (instanceID < 0 || instanceID >= 16) return;
-    if (frame < G.Connection.StartFrame) return;
-    if ((frame % static_cast<melonDS::u32>(G.StateSync.WorldInterval)) != 0) return;
-
-    const WireMovingHazardState packet = GameStateReader::BuildMovingHazardStatePacket(
-        nds,
-        static_cast<melonDS::u32>(instanceID),
-        frame,
-        G.StateSync.WorldActorRescanInterval,
-        G.GameSync);
-
-    std::lock_guard<std::mutex> lock(G.Mutex);
-    if (!G.Transport.IsConnected()) return;
-    G.Transport.Send(&packet, sizeof(packet), 0, false);
 }
 
 std::filesystem::path StatePath(const std::string& dir, int instanceID)
@@ -6013,10 +5822,6 @@ void RunBeforeFrameActorStatePhase(int instanceID, melonDS::u32 frame, melonDS::
     if (!G.Enabled || instanceID < 0 || instanceID >= 16 || !nds)
         return;
     ApplyRemoteGameState(instanceID, frame, nds);
-    ApplyRemoteMovingHazardState(instanceID, frame, nds);
-    ApplyRemoteWorldState(instanceID, frame, nds);
-    SyncWorldState(instanceID, frame, nds);
-    SyncMovingHazardState(instanceID, frame, nds);
 }
 
 InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, const InputState& polledInput)
@@ -6455,8 +6260,9 @@ void TraceGameplayHeartbeatIfNeeded(int instanceID, melonDS::u32 frame, melonDS:
     const std::vector<ObjectScanSample> hazards =
         FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
     std::printf(" hazards=");
-    const std::size_t hazardCount = std::min(hazards.size(), kMaxWorldMovingHazards);
-    for (std::size_t i = 0; i < kMaxWorldMovingHazards; i++)
+    const std::size_t hazardCount =
+        std::min(hazards.size(), kTrackedWorldMovingHazardCount);
+    for (std::size_t i = 0; i < kTrackedWorldMovingHazardCount; i++)
     {
         if (i != 0)
             std::printf(",");
@@ -6672,19 +6478,14 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     SaveAfterFrameArtifacts(instanceID, logFrame, nds);
     const auto afterArtifacts = std::chrono::steady_clock::now();
     const auto afterPreSnapshot = std::chrono::steady_clock::now();
-    TraceHangPhase("begin", "sync-world", instanceID, logFrame, logFrame, logFrame);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        SyncWorldState(instanceID, logFrame, nds);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        SyncMovingHazardState(instanceID, logFrame, nds);
-    TraceHangPhase("begin", "apply-hazard", instanceID, logFrame, logFrame, logFrame);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyRemoteMovingHazardState(instanceID, logFrame, nds, true);
-    const auto afterApplyHazard = std::chrono::steady_clock::now();
-    TraceHangPhase("begin", "apply-world", instanceID, logFrame, logFrame, logFrame);
-    if (G.Enabled && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyRemoteWorldState(instanceID, logFrame, nds);
-    const auto afterApplyWorld = std::chrono::steady_clock::now();
+    TraceHangPhase("begin", "world-trace", instanceID, logFrame, logFrame, logFrame);
+    if (CanRunFrameHooks(instanceID, nds))
+    {
+        TraceWorldMovingHazardsIfNeeded(instanceID, logFrame, nds);
+        TraceWorldObjectLifecyclesIfNeeded(instanceID, logFrame, nds);
+        TraceWorldEffectsIfNeeded(instanceID, logFrame, nds);
+    }
+    const auto afterWorldTrace = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "game-state-trace", instanceID, logFrame, logFrame, logFrame);
     TraceGameState(instanceID, logFrame, nds);
     TraceAIPlayLog(instanceID, logFrame, nds);
@@ -6692,28 +6493,22 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     TraceHangPhase("begin", "sync-game", instanceID, logFrame, logFrame, logFrame);
     SyncGameState(instanceID, logFrame, nds);
     const auto afterSyncGame = std::chrono::steady_clock::now();
-    TraceHangPhase("begin", "sync-world-tail", instanceID, logFrame, logFrame, logFrame);
-    SyncWorldState(instanceID, logFrame, nds);
-    const auto afterSyncWorld = std::chrono::steady_clock::now();
-    TraceHangPhase("begin", "sync-hazard-tail", instanceID, logFrame, logFrame, logFrame);
-    SyncMovingHazardState(instanceID, logFrame, nds);
-    const auto afterSyncHazard = std::chrono::steady_clock::now();
     TraceHangPhase("end", "after-frame", instanceID, logFrame, logFrame, logFrame);
 
     if (G.Diagnostics.ActiveFrameSpikeTrace)
     {
         const auto totalUs = std::chrono::duration_cast<std::chrono::microseconds>(
-            afterSyncHazard - afterHookCallStart).count();
+            afterSyncGame - afterHookCallStart).count();
         if (totalUs >= std::min(G.Diagnostics.ActiveFrameSpikeThresholdUs, 10000))
         {
             const auto elapsedMs = [](auto start, auto end) {
                 return std::chrono::duration<double, std::milli>(end - start).count();
             };
             std::printf(
-                "NSMB AfterHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f heartbeatMs=%.3f barrierMs=%.3f bridgeMs=%.3f lifeTraceMs=%.3f diagnosticSnapshotMs=%.3f rollbackTraceMs=%.3f runtimeForceMs=%.3f artifactsMs=%.3f preSnapshotTailMs=%.3f applyHazardMs=%.3f applyWorldMs=%.3f traceMs=%.3f syncGameMs=%.3f syncWorldMs=%.3f syncHazardMs=%.3f\n",
+                "NSMB AfterHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f heartbeatMs=%.3f barrierMs=%.3f bridgeMs=%.3f lifeTraceMs=%.3f diagnosticSnapshotMs=%.3f rollbackTraceMs=%.3f runtimeForceMs=%.3f artifactsMs=%.3f preSnapshotTailMs=%.3f worldTraceMs=%.3f traceMs=%.3f syncGameMs=%.3f\n",
                 instanceID,
                 logFrame,
-                elapsedMs(afterHookCallStart, afterSyncHazard),
+                elapsedMs(afterHookCallStart, afterSyncGame),
                 elapsedMs(afterHookCallStart, afterInit),
                 elapsedMs(afterInit, afterHeartbeat),
                 elapsedMs(afterHeartbeat, afterBarrier),
@@ -6724,12 +6519,9 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
                 elapsedMs(afterRollbackTrace, afterRuntimeForce),
                 elapsedMs(afterRuntimeForce, afterArtifacts),
                 elapsedMs(afterArtifacts, afterPreSnapshot),
-                elapsedMs(afterPreSnapshot, afterApplyHazard),
-                elapsedMs(afterApplyHazard, afterApplyWorld),
-                elapsedMs(afterApplyWorld, afterTrace),
-                elapsedMs(afterTrace, afterSyncGame),
-                elapsedMs(afterSyncGame, afterSyncWorld),
-                elapsedMs(afterSyncWorld, afterSyncHazard));
+                elapsedMs(afterPreSnapshot, afterWorldTrace),
+                elapsedMs(afterWorldTrace, afterTrace),
+                elapsedMs(afterTrace, afterSyncGame));
         }
     }
 

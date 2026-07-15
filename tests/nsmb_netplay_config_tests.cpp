@@ -1025,10 +1025,6 @@ void TestStateSyncConfigDefaultsAndApplyModes() {
   CHECK(config.GameApplyPlayerActors);
   CHECK(!config.GameApplyRemotePlayerOnly);
   CHECK(config.GameInterval == 60);
-  CHECK(!config.WorldEnabled);
-  CHECK(config.WorldApplyStarActor);
-  CHECK(config.WorldInterval == 2);
-  CHECK(config.WorldMaxPredictFrames == 1);
   CHECK(config.WorldTraceObjectLifecyclesInterval == 60);
 
   environment.Values["MELONDS_NSML_STATE_APPLY_MODE"] = "critical";
@@ -1076,11 +1072,6 @@ void TestStateSyncConfigReadsClampsAndSkipPriorities() {
       {"MELONDS_NSML_STATE_SYNC_EXTENDED", "1"},
       {"MELONDS_NSML_STATE_APPLY", "1"},
       {"MELONDS_NSML_STATE_SYNC_INTERVAL", "0"},
-      {"MELONDS_NSML_WORLD_STATE_SYNC", "1"},
-      {"MELONDS_NSML_WORLD_STATE_APPLY", "1"},
-      {"MELONDS_NSML_WORLD_STATE_SKIP_STAR", "1"},
-      {"MELONDS_NSML_WORLD_STATE_APPLY_MOVING_HAZARD", "1"},
-      {"MELONDS_NSML_WORLD_STATE_SKIP_MOVING_HAZARD", "1"},
       {"MELONDS_NSML_WORLD_STATE_TRACE_MOVING_HAZARDS", "1"},
       {"MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES", "1"},
       {"MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS", "1"},
@@ -1088,9 +1079,6 @@ void TestStateSyncConfigReadsClampsAndSkipPriorities() {
       {"MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_INTERVAL", "0"},
       {"MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_START_FRAME", "-1"},
       {"MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_END_FRAME", "-2"},
-      {"MELONDS_NSML_WORLD_STATE_SYNC_INTERVAL", "0"},
-      {"MELONDS_NSML_WORLD_STATE_MAX_PREDICT_FRAMES", "-3"},
-      {"MELONDS_NSML_WORLD_STATE_ACTOR_RESCAN_INTERVAL", "-4"},
   };
 
   const auto config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
@@ -1098,10 +1086,6 @@ void TestStateSyncConfigReadsClampsAndSkipPriorities() {
   CHECK(config.GameExtended);
   CHECK(config.GameApplyEnabled);
   CHECK(config.GameInterval == 1);
-  CHECK(config.WorldEnabled);
-  CHECK(config.WorldApplyEnabled);
-  CHECK(!config.WorldApplyStarActor);
-  CHECK(!config.WorldApplyMovingHazard);
   CHECK(config.WorldTraceMovingHazards);
   CHECK(config.WorldTraceObjectLifecycles);
   CHECK(config.WorldTraceActorInternals);
@@ -1109,9 +1093,6 @@ void TestStateSyncConfigReadsClampsAndSkipPriorities() {
   CHECK(config.WorldTraceObjectLifecyclesInterval == 1);
   CHECK(config.WorldTraceObjectLifecyclesStartFrame == 0u);
   CHECK(config.WorldTraceObjectLifecyclesEndFrame == 0u);
-  CHECK(config.WorldInterval == 1);
-  CHECK(config.WorldMaxPredictFrames == 0);
-  CHECK(config.WorldActorRescanInterval == 0);
 }
 
 } // namespace

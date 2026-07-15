@@ -331,10 +331,6 @@ struct StateSyncConfig {
   bool GameApplyPlayerActors = true;
   bool GameApplyRemotePlayerOnly = false;
   int GameInterval = 60;
-  bool WorldEnabled = false;
-  bool WorldApplyEnabled = false;
-  bool WorldApplyStarActor = true;
-  bool WorldApplyMovingHazard = false;
   bool WorldTraceMovingHazards = false;
   bool WorldTraceObjectLifecycles = false;
   bool WorldTraceActorInternals = false;
@@ -342,9 +338,6 @@ struct StateSyncConfig {
   int WorldTraceObjectLifecyclesInterval = 60;
   std::uint32_t WorldTraceObjectLifecyclesStartFrame = 0;
   std::uint32_t WorldTraceObjectLifecyclesEndFrame = 0;
-  int WorldInterval = 2;
-  int WorldMaxPredictFrames = 1;
-  int WorldActorRescanInterval = 0;
 };
 
 bool ParseFlag(const char *value);

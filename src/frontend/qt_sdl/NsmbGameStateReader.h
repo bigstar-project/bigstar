@@ -149,24 +149,8 @@ void ReadDiagnosticPlayerSnapshot(
     int instanceID, melonDS::u32 frame, melonDS::NDS *nds, int player,
     GameStateModel::StateSyncRuntime &runtime,
     Diagnostics::DiagnosticPlayerSnapshot &snapshot);
-std::vector<ObjectScanSample> GetWorldMovingHazardsCached(
-    int instanceID, melonDS::u32 frame, melonDS::NDS *nds,
-    GameStateModel::StateSyncRuntime &runtime, int actorRescanInterval);
-ObjectScanSample GetWorldActorCached(
-    int instanceID, melonDS::u32 frame, melonDS::NDS *nds,
-    melonDS::u16 objectID, melonDS::u32 settings, melonDS::u32 *baseCache,
-    melonDS::u32 *guidCache, int actorRescanInterval);
-void FillWireWorldActorState(
-    const ObjectScanSample &actor,
-    WireProtocol::WireWorldActorState &state);
-WireProtocol::WireWorldState BuildWorldStatePacket(
-    melonDS::NDS *nds, melonDS::u32 instance, melonDS::u32 frame,
-    int actorRescanInterval, GameStateModel::StateSyncRuntime &runtime);
 bool ReadWorldEffectSlot(melonDS::NDS *nds, melonDS::u32 base,
                          WorldEffectSlotSample &slot);
-WireProtocol::WireMovingHazardState BuildMovingHazardStatePacket(
-    melonDS::NDS *nds, melonDS::u32 instance, melonDS::u32 frame,
-    int actorRescanInterval, GameStateModel::StateSyncRuntime &runtime);
 void ReadCoreState(melonDS::NDS *nds, GameStateModel::GameStateSample &sample);
 void ReadBattleStarState(melonDS::NDS *nds,
                          GameStateModel::GameStateSample &sample);

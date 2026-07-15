@@ -13,15 +13,6 @@ melonDS::u64 GameStateKey(int instanceID, melonDS::u32 frame) {
 }
 
 namespace {
-
-template <typename State>
-bool StoreLatest(std::optional<State> &stored, const State &received) {
-  if (stored && received.Frame < stored->Frame)
-    return false;
-  stored = received;
-  return true;
-}
-
 void MixGameStateValue(melonDS::u64 &hash, melonDS::u32 value) {
   for (int index = 0; index < 4; index++) {
     hash ^= (value >> (index * 8)) & 0xFF;
@@ -833,8 +824,6 @@ void GameStateTraceWriter::Close() {
 void RemoteStateStore::ResetForRestart() {
   GameStateHashes_.clear();
   GameStates_.clear();
-  WorldState_.reset();
-  MovingHazardState_.reset();
 }
 
 void RemoteStateStore::StoreGameState(const DecodedGameState &state) {
@@ -842,16 +831,6 @@ void RemoteStateStore::StoreGameState(const DecodedGameState &state) {
       GameStateKey(static_cast<int>(state.Instance), state.Frame);
   GameStateHashes_[key] = state.Hashes;
   GameStates_[key] = state.Sample;
-}
-
-bool RemoteStateStore::StoreWorldState(
-    const WireProtocol::WireWorldState &state) {
-  return StoreLatest(WorldState_, state);
-}
-
-bool RemoteStateStore::StoreMovingHazardState(
-    const WireProtocol::WireMovingHazardState &state) {
-  return StoreLatest(MovingHazardState_, state);
 }
 
 const GameStateSyncHashes *RemoteStateStore::FindGameStateHashes(
@@ -884,15 +863,6 @@ bool RemoteStateStore::FindLatestGameState(int instanceID,
   state = found->second;
   stateFrame = static_cast<melonDS::u32>(found->first);
   return true;
-}
-
-const WireProtocol::WireWorldState *RemoteStateStore::WorldState() const {
-  return WorldState_ ? &*WorldState_ : nullptr;
-}
-
-const WireProtocol::WireMovingHazardState *
-RemoteStateStore::MovingHazardState() const {
-  return MovingHazardState_ ? &*MovingHazardState_ : nullptr;
 }
 
 bool StateSyncRuntime::BeginGameStateSync(int instanceID,
@@ -944,25 +914,11 @@ void StateSyncRuntime::ResetForRestart(int instanceID) {
   LocalGameStateHashes_.clear();
   RemoteState.ResetForRestart();
   LastSentGameStateFrame_[instanceID] = 0;
-  LastSentWorldStateFrame[instanceID] = 0;
   for (int player = 0; player < 2; player++) {
     PlayerActorBaseCache[instanceID][player] = 0;
     PlayerActorGUIDCache[instanceID][player] = 0;
   }
 
-  WorldStarActorBaseCache[instanceID] = 0;
-  WorldStarActorGUIDCache[instanceID] = 0;
-  WorldMovingHazardBaseCache[instanceID] = 0;
-  WorldMovingHazardGUIDCache[instanceID] = 0;
-  WorldMovingHazardCacheCounts[instanceID] = 0;
-  std::fill(std::begin(WorldMovingHazardBaseCaches[instanceID]),
-            std::end(WorldMovingHazardBaseCaches[instanceID]), 0);
-  std::fill(std::begin(WorldMovingHazardGUIDCaches[instanceID]),
-            std::end(WorldMovingHazardGUIDCaches[instanceID]), 0);
-  std::fill(std::begin(WorldMovingHazardRemoteGUIDMaps[instanceID]),
-            std::end(WorldMovingHazardRemoteGUIDMaps[instanceID]), 0);
-  std::fill(std::begin(WorldMovingHazardLocalGUIDMaps[instanceID]),
-            std::end(WorldMovingHazardLocalGUIDMaps[instanceID]), 0);
 }
 
 } // namespace NsmbNetplayPoC::GameStateModel
