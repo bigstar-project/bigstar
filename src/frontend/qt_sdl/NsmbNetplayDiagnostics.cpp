@@ -150,6 +150,8 @@ struct Runtime::Impl {
     melonDS::u32 LastPositionAnomalyFrame[2]{};
     std::array<DiagnosticFrameSnapshot, kDiagnosticRingCapacity> Ring{};
     std::size_t RingNext = 0;
+    bool HasPlayerLifeState = false;
+    PlayerLifeState LastPlayerLifeState;
   };
   mutable std::mutex DiagnosticStateMutex;
   std::array<DiagnosticInstanceState, 16> DiagnosticState{};
@@ -773,6 +775,35 @@ bool Runtime::ShouldEmitDiagnosticPositionAnomaly(
     return false;
   last = frame;
   return true;
+}
+
+PlayerLifeObservation
+Runtime::ObservePlayerLifeState(int instanceID,
+                                const PlayerLifeState &current) {
+  std::lock_guard<std::mutex> lock(State->DiagnosticStateMutex);
+  PlayerLifeObservation observation;
+  if (instanceID < 0 ||
+      instanceID >= static_cast<int>(State->DiagnosticState.size())) {
+    return observation;
+  }
+
+  auto &instance = State->DiagnosticState[instanceID];
+  observation.Accepted = true;
+  observation.HadPrevious = instance.HasPlayerLifeState;
+  observation.Previous = instance.LastPlayerLifeState;
+  observation.Changed =
+      !instance.HasPlayerLifeState ||
+      !std::equal(std::begin(current.Lives), std::end(current.Lives),
+                  std::begin(instance.LastPlayerLifeState.Lives)) ||
+      !std::equal(std::begin(current.Deaths), std::end(current.Deaths),
+                  std::begin(instance.LastPlayerLifeState.Deaths)) ||
+      !std::equal(std::begin(current.Dead), std::end(current.Dead),
+                  std::begin(instance.LastPlayerLifeState.Dead)) ||
+      !std::equal(std::begin(current.Transition), std::end(current.Transition),
+                  std::begin(instance.LastPlayerLifeState.Transition));
+  instance.LastPlayerLifeState = current;
+  instance.HasPlayerLifeState = true;
+  return observation;
 }
 
 void Runtime::StartHangDiagnostics(const Config::DiagnosticsConfig &config,

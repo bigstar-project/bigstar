@@ -440,8 +440,6 @@ struct State
     bool ForcePlayerPowerupsLogged[16] {};
     bool ForcePlayerInventoryPowerupsLogged[16] {};
     bool ForcePlayerStarCountersLogged[16] {};
-    bool LastPlayerLifeSampleValid[16] {};
-    GameStateSample LastPlayerLifeSample[16] {};
     bool ScriptRemotePacketLogged[16] {};
     Config::RollbackConfig Rollback;
     RollbackStorage::Store RollbackStore;
@@ -8021,158 +8019,122 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     return ConvertStockXToTouch(remoteInput);
 }
 
-void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if ((!G.RuntimePatch.TracePlayerLifeChanges && !G.Diagnostics.DiagnosticEventsEnabled) || !nds || !nds->MainRAM) return;
-    if (instanceID < 0 || instanceID >= 16) return;
+void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame,
+                            melonDS::NDS *nds) {
+  if ((!G.RuntimePatch.TracePlayerLifeChanges &&
+       !G.Diagnostics.DiagnosticEventsEnabled) ||
+      !nds || !nds->MainRAM)
+    return;
+  if (instanceID < 0 || instanceID >= 16)
+    return;
 
-    GameStateSample& last = G.LastPlayerLifeSample[instanceID];
-    const bool valid = G.LastPlayerLifeSampleValid[instanceID];
-    const melonDS::u32 oldPlayer0Lives = last.Player0Lives;
-    const melonDS::u32 oldPlayer1Lives = last.Player1Lives;
-    const melonDS::u32 oldPlayer0Deaths = last.Player0Deaths;
-    const melonDS::u32 oldPlayer1Deaths = last.Player1Deaths;
-    const melonDS::u32 oldPlayer0Dead = last.Player0Dead;
-    const melonDS::u32 oldPlayer1Dead = last.Player1Dead;
-    const melonDS::u32 oldTransition0 = last.PlayerTransitionStatus0;
-    const melonDS::u32 oldTransition1 = last.PlayerTransitionStatus1;
-    const melonDS::u32 player0Lives = nds->ARM9Read32(kGamePlayerLivesAddr);
-    const melonDS::u32 player1Lives = nds->ARM9Read32(kGamePlayerLivesAddr + sizeof(melonDS::u32));
-    const melonDS::u32 player0Deaths = nds->ARM9Read32(kGamePlayerDeathsAddr);
-    const melonDS::u32 player1Deaths = nds->ARM9Read32(kGamePlayerDeathsAddr + sizeof(melonDS::u32));
-    const melonDS::u32 player0Dead = nds->ARM9Read8(kGamePlayerDeadAddr);
-    const melonDS::u32 player1Dead = nds->ARM9Read8(kGamePlayerDeadAddr + 1);
-    const melonDS::u32 transition0 = nds->ARM9Read32(kGamePlayerTransitionStatusAddr);
-    const melonDS::u32 transition1 = nds->ARM9Read32(kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32));
-    const bool changed =
-        !valid ||
-        player0Lives != last.Player0Lives ||
-        player1Lives != last.Player1Lives ||
-        player0Deaths != last.Player0Deaths ||
-        player1Deaths != last.Player1Deaths ||
-        player0Dead != last.Player0Dead ||
-        player1Dead != last.Player1Dead ||
-        transition0 != last.PlayerTransitionStatus0 ||
-        transition1 != last.PlayerTransitionStatus1;
+  Diagnostics::PlayerLifeState current;
+  current.Lives[0] = nds->ARM9Read32(kGamePlayerLivesAddr);
+  current.Lives[1] =
+      nds->ARM9Read32(kGamePlayerLivesAddr + sizeof(melonDS::u32));
+  current.Deaths[0] = nds->ARM9Read32(kGamePlayerDeathsAddr);
+  current.Deaths[1] =
+      nds->ARM9Read32(kGamePlayerDeathsAddr + sizeof(melonDS::u32));
+  current.Dead[0] = nds->ARM9Read8(kGamePlayerDeadAddr);
+  current.Dead[1] = nds->ARM9Read8(kGamePlayerDeadAddr + 1);
+  current.Transition[0] = nds->ARM9Read32(kGamePlayerTransitionStatusAddr);
+  current.Transition[1] =
+      nds->ARM9Read32(kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32));
+  const Diagnostics::PlayerLifeObservation observation =
+      G.DiagnosticsRuntime.ObservePlayerLifeState(instanceID, current);
+  if (!observation.Accepted || !observation.Changed)
+    return;
 
-    last.Player0Lives = player0Lives;
-    last.Player1Lives = player1Lives;
-    last.Player0Deaths = player0Deaths;
-    last.Player1Deaths = player1Deaths;
-    last.Player0Dead = player0Dead;
-    last.Player1Dead = player1Dead;
-    last.PlayerTransitionStatus0 = transition0;
-    last.PlayerTransitionStatus1 = transition1;
+  const bool valid = observation.HadPrevious;
+  const Diagnostics::PlayerLifeState &last = observation.Previous;
+  const melonDS::u32 player0Lives = current.Lives[0];
+  const melonDS::u32 player1Lives = current.Lives[1];
+  const melonDS::u32 player0Deaths = current.Deaths[0];
+  const melonDS::u32 player1Deaths = current.Deaths[1];
+  const melonDS::u32 player0Dead = current.Dead[0];
+  const melonDS::u32 player1Dead = current.Dead[1];
+  const melonDS::u32 transition0 = current.Transition[0];
+  const melonDS::u32 transition1 = current.Transition[1];
 
-    if (changed)
-    {
-        if (!IsMarioVsLuigiGameplay(nds) && frame < 800)
-        {
-            G.LastPlayerLifeSampleValid[instanceID] = true;
-            return;
-        }
+  if (!IsMarioVsLuigiGameplay(nds) && frame < 800)
+    return;
 
-        const GameStateSample sample = ReadGameStateSample(nds);
-        if (G.RuntimePatch.TracePlayerLifeChanges)
-        {
-            std::printf(
-                "NSMB LifeDelta: inst=%d frame=%u lives=%u/%u deaths=%u/%u dead=%u/%u trans=%u/%u "
-                "cam={x=%08X/%08X y=%08X/%08X w=%08X/%08X h=%08X/%08X} "
-                "p0={found=%u base=%08X pid11E=%u pid7B4=%u def=%u tring=%u updLock=%u vis=%u x=%08X y=%08X vel=%08X/%08X flags=%08X act=%08X sub=%08X phy=%08X transFlag=%08X coll=%08X env=%08X linked=%08X transitFunc=%08X transitArg=%08X} "
-                "p1={found=%u base=%08X pid11E=%u pid7B4=%u def=%u tring=%u updLock=%u vis=%u x=%08X y=%08X vel=%08X/%08X flags=%08X act=%08X sub=%08X phy=%08X transFlag=%08X coll=%08X env=%08X linked=%08X transitFunc=%08X transitArg=%08X}\n",
-                instanceID,
-                frame,
-                sample.Player0Lives,
-                sample.Player1Lives,
-                sample.Player0Deaths,
-                sample.Player1Deaths,
-                sample.Player0Dead,
-                sample.Player1Dead,
-                sample.PlayerTransitionStatus0,
-                sample.PlayerTransitionStatus1,
-                sample.StageCameraGlobalX0,
-                sample.StageCameraGlobalX1,
-                sample.StageCameraGlobalY0,
-                sample.StageCameraGlobalY1,
-                sample.StageCameraGlobalWidth0,
-                sample.StageCameraGlobalWidth1,
-                sample.StageCameraGlobalHeight0,
-                sample.StageCameraGlobalHeight1,
-                sample.PlayerActor0Found,
-                sample.PlayerActor0Base,
-                sample.PlayerActor0PlayerID,
-                sample.PlayerActor0PlayerBaseID,
-                sample.PlayerActor0DefeatedFlag,
-                sample.PlayerActor0TransitioningFlag,
-                sample.PlayerActor0UpdateLocked,
-                sample.PlayerActor0VisibleFlag,
-                sample.PlayerActor0PosX,
-                sample.PlayerActor0PosY,
-                sample.PlayerActor0VelX,
-                sample.PlayerActor0VelY,
-                sample.PlayerActor0Flags,
-                sample.PlayerActor0ActionFlag,
-                sample.PlayerActor0SubActionFlag,
-                sample.PlayerActor0PhysicsFlag,
-                sample.PlayerActor0TransitionFlag,
-                sample.PlayerActor0CollisionFlag,
-                sample.PlayerActor0EnvironmentFlag,
-                sample.PlayerActor0LinkedActor,
-                sample.PlayerActor0TransitFunc,
-                sample.PlayerActor0TransitArg,
-                sample.PlayerActor1Found,
-                sample.PlayerActor1Base,
-                sample.PlayerActor1PlayerID,
-                sample.PlayerActor1PlayerBaseID,
-                sample.PlayerActor1DefeatedFlag,
-                sample.PlayerActor1TransitioningFlag,
-                sample.PlayerActor1UpdateLocked,
-                sample.PlayerActor1VisibleFlag,
-                sample.PlayerActor1PosX,
-                sample.PlayerActor1PosY,
-                sample.PlayerActor1VelX,
-                sample.PlayerActor1VelY,
-                sample.PlayerActor1Flags,
-                sample.PlayerActor1ActionFlag,
-                sample.PlayerActor1SubActionFlag,
-                sample.PlayerActor1PhysicsFlag,
-                sample.PlayerActor1TransitionFlag,
-                sample.PlayerActor1CollisionFlag,
-                sample.PlayerActor1EnvironmentFlag,
-                sample.PlayerActor1LinkedActor,
-                sample.PlayerActor1TransitFunc,
-                sample.PlayerActor1TransitArg);
-        }
+  const GameStateSample sample = ReadGameStateSample(nds);
+  if (G.RuntimePatch.TracePlayerLifeChanges) {
+    std::printf(
+        "NSMB LifeDelta: inst=%d frame=%u lives=%u/%u deaths=%u/%u dead=%u/%u "
+        "trans=%u/%u "
+        "cam={x=%08X/%08X y=%08X/%08X w=%08X/%08X h=%08X/%08X} "
+        "p0={found=%u base=%08X pid11E=%u pid7B4=%u def=%u tring=%u updLock=%u "
+        "vis=%u x=%08X y=%08X vel=%08X/%08X flags=%08X act=%08X sub=%08X "
+        "phy=%08X transFlag=%08X coll=%08X env=%08X linked=%08X "
+        "transitFunc=%08X transitArg=%08X} "
+        "p1={found=%u base=%08X pid11E=%u pid7B4=%u def=%u tring=%u updLock=%u "
+        "vis=%u x=%08X y=%08X vel=%08X/%08X flags=%08X act=%08X sub=%08X "
+        "phy=%08X transFlag=%08X coll=%08X env=%08X linked=%08X "
+        "transitFunc=%08X transitArg=%08X}\n",
+        instanceID, frame, sample.Player0Lives, sample.Player1Lives,
+        sample.Player0Deaths, sample.Player1Deaths, sample.Player0Dead,
+        sample.Player1Dead, sample.PlayerTransitionStatus0,
+        sample.PlayerTransitionStatus1, sample.StageCameraGlobalX0,
+        sample.StageCameraGlobalX1, sample.StageCameraGlobalY0,
+        sample.StageCameraGlobalY1, sample.StageCameraGlobalWidth0,
+        sample.StageCameraGlobalWidth1, sample.StageCameraGlobalHeight0,
+        sample.StageCameraGlobalHeight1, sample.PlayerActor0Found,
+        sample.PlayerActor0Base, sample.PlayerActor0PlayerID,
+        sample.PlayerActor0PlayerBaseID, sample.PlayerActor0DefeatedFlag,
+        sample.PlayerActor0TransitioningFlag, sample.PlayerActor0UpdateLocked,
+        sample.PlayerActor0VisibleFlag, sample.PlayerActor0PosX,
+        sample.PlayerActor0PosY, sample.PlayerActor0VelX,
+        sample.PlayerActor0VelY, sample.PlayerActor0Flags,
+        sample.PlayerActor0ActionFlag, sample.PlayerActor0SubActionFlag,
+        sample.PlayerActor0PhysicsFlag, sample.PlayerActor0TransitionFlag,
+        sample.PlayerActor0CollisionFlag, sample.PlayerActor0EnvironmentFlag,
+        sample.PlayerActor0LinkedActor, sample.PlayerActor0TransitFunc,
+        sample.PlayerActor0TransitArg, sample.PlayerActor1Found,
+        sample.PlayerActor1Base, sample.PlayerActor1PlayerID,
+        sample.PlayerActor1PlayerBaseID, sample.PlayerActor1DefeatedFlag,
+        sample.PlayerActor1TransitioningFlag, sample.PlayerActor1UpdateLocked,
+        sample.PlayerActor1VisibleFlag, sample.PlayerActor1PosX,
+        sample.PlayerActor1PosY, sample.PlayerActor1VelX,
+        sample.PlayerActor1VelY, sample.PlayerActor1Flags,
+        sample.PlayerActor1ActionFlag, sample.PlayerActor1SubActionFlag,
+        sample.PlayerActor1PhysicsFlag, sample.PlayerActor1TransitionFlag,
+        sample.PlayerActor1CollisionFlag, sample.PlayerActor1EnvironmentFlag,
+        sample.PlayerActor1LinkedActor, sample.PlayerActor1TransitFunc,
+        sample.PlayerActor1TransitArg);
+  }
 
-        if (valid)
-        {
-            const bool player0DeathEvent =
-                (sample.PlayerActor0Found != 0 || player0Deaths != 0 || player0Dead != 0) &&
-                (player0Deaths > oldPlayer0Deaths ||
-                    player0Lives < oldPlayer0Lives ||
-                    (player0Dead != oldPlayer0Dead && player0Dead != 0));
-            const bool player1DeathEvent =
-                (sample.PlayerActor1Found != 0 || player1Deaths != 0 || player1Dead != 0) &&
-                (player1Deaths > oldPlayer1Deaths ||
-                    player1Lives < oldPlayer1Lives ||
-                    (player1Dead != oldPlayer1Dead && player1Dead != 0));
-            const bool player0TransitionEvent =
-                !player0DeathEvent && transition0 != oldTransition0 &&
-                (sample.PlayerActor0DefeatedFlag != 0 || sample.PlayerActor0TransitioningFlag != 0);
-            const bool player1TransitionEvent =
-                !player1DeathEvent && transition1 != oldTransition1 &&
-                (sample.PlayerActor1DefeatedFlag != 0 || sample.PlayerActor1TransitioningFlag != 0);
-            if (player0DeathEvent)
-                EmitPlayerLifeEvent(instanceID, frame, 0, "death", sample, nds);
-            else if (player0TransitionEvent)
-                EmitPlayerLifeEvent(instanceID, frame, 0, "death-transition", sample, nds);
-            if (player1DeathEvent)
-                EmitPlayerLifeEvent(instanceID, frame, 1, "death", sample, nds);
-            else if (player1TransitionEvent)
-                EmitPlayerLifeEvent(instanceID, frame, 1, "death-transition", sample, nds);
-        }
-    }
-    G.LastPlayerLifeSampleValid[instanceID] = true;
+  if (valid) {
+    const bool player0DeathEvent =
+        (sample.PlayerActor0Found != 0 || player0Deaths != 0 ||
+         player0Dead != 0) &&
+        (player0Deaths > last.Deaths[0] || player0Lives < last.Lives[0] ||
+         (player0Dead != last.Dead[0] && player0Dead != 0));
+    const bool player1DeathEvent =
+        (sample.PlayerActor1Found != 0 || player1Deaths != 0 ||
+         player1Dead != 0) &&
+        (player1Deaths > last.Deaths[1] || player1Lives < last.Lives[1] ||
+         (player1Dead != last.Dead[1] && player1Dead != 0));
+    const bool player0TransitionEvent =
+        !player0DeathEvent && transition0 != last.Transition[0] &&
+        (sample.PlayerActor0DefeatedFlag != 0 ||
+         sample.PlayerActor0TransitioningFlag != 0);
+    const bool player1TransitionEvent =
+        !player1DeathEvent && transition1 != last.Transition[1] &&
+        (sample.PlayerActor1DefeatedFlag != 0 ||
+         sample.PlayerActor1TransitioningFlag != 0);
+    if (player0DeathEvent)
+      EmitPlayerLifeEvent(instanceID, frame, 0, "death", sample, nds);
+    else if (player0TransitionEvent)
+      EmitPlayerLifeEvent(instanceID, frame, 0, "death-transition", sample,
+                          nds);
+    if (player1DeathEvent)
+      EmitPlayerLifeEvent(instanceID, frame, 1, "death", sample, nds);
+    else if (player1TransitionEvent)
+      EmitPlayerLifeEvent(instanceID, frame, 1, "death-transition", sample,
+                          nds);
+  }
 }
 
 void TraceGameplayHeartbeatIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)

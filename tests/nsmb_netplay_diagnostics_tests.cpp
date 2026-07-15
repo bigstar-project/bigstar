@@ -293,6 +293,56 @@ void TestDiagnosticEventThrottleContract() {
   CHECK(runtime.ShouldEmitDiagnosticPositionAnomaly(1, 0, 100, 120));
 }
 
+void TestPlayerLifeObservationContract() {
+  using NsmbNetplayPoC::Diagnostics::PlayerLifeState;
+  using NsmbNetplayPoC::Diagnostics::Runtime;
+
+  Runtime runtime;
+  PlayerLifeState initial;
+  CHECK(sizeof(PlayerLifeState) == 8 * sizeof(melonDS::u32));
+  initial.Lives[0] = 5;
+  initial.Lives[1] = 4;
+  initial.Deaths[0] = 1;
+  initial.Deaths[1] = 2;
+  initial.Dead[0] = 0;
+  initial.Dead[1] = 1;
+  initial.Transition[0] = 3;
+  initial.Transition[1] = 4;
+
+  auto observation = runtime.ObservePlayerLifeState(-1, initial);
+  CHECK(!observation.Accepted);
+  observation = runtime.ObservePlayerLifeState(0, initial);
+  CHECK(observation.Accepted);
+  CHECK(observation.Changed);
+  CHECK(!observation.HadPrevious);
+
+  observation = runtime.ObservePlayerLifeState(0, initial);
+  CHECK(observation.Accepted);
+  CHECK(!observation.Changed);
+  CHECK(observation.HadPrevious);
+  CHECK(observation.Previous.Lives[0] == 5);
+  CHECK(observation.Previous.Deaths[1] == 2);
+  CHECK(observation.Previous.Dead[1] == 1);
+  CHECK(observation.Previous.Transition[0] == 3);
+
+  PlayerLifeState changed = initial;
+  changed.Lives[0] = 4;
+  changed.Deaths[1] = 3;
+  changed.Dead[0] = 1;
+  changed.Transition[1] = 5;
+  observation = runtime.ObservePlayerLifeState(0, changed);
+  CHECK(observation.Changed);
+  CHECK(observation.HadPrevious);
+  CHECK(observation.Previous.Lives[0] == 5);
+  CHECK(observation.Previous.Deaths[1] == 2);
+  CHECK(observation.Previous.Dead[0] == 0);
+  CHECK(observation.Previous.Transition[1] == 4);
+
+  observation = runtime.ObservePlayerLifeState(1, changed);
+  CHECK(observation.Changed);
+  CHECK(!observation.HadPrevious);
+}
+
 } // namespace
 
 int main() {
@@ -303,6 +353,7 @@ int main() {
   TestPerformanceRuntimeContract();
   TestDiagnosticSnapshotRuntimeContract();
   TestDiagnosticEventThrottleContract();
+  TestPlayerLifeObservationContract();
   if (Failures != 0) {
     std::printf("nsmb_netplay_diagnostics_tests: %d failure(s)\n", Failures);
     return 1;

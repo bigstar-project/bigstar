@@ -98,6 +98,20 @@ struct DiagnosticFrameSnapshot {
   DiagnosticPlayerSnapshot Player[2];
 };
 
+struct PlayerLifeState {
+  melonDS::u32 Lives[2]{};
+  melonDS::u32 Deaths[2]{};
+  melonDS::u32 Dead[2]{};
+  melonDS::u32 Transition[2]{};
+};
+
+struct PlayerLifeObservation {
+  bool Accepted = false;
+  bool Changed = false;
+  bool HadPrevious = false;
+  PlayerLifeState Previous;
+};
+
 class Runtime {
 public:
   using TimePoint = std::chrono::steady_clock::time_point;
@@ -172,6 +186,8 @@ public:
   bool ShouldEmitDiagnosticPositionAnomaly(int instanceID, int player,
                                            melonDS::u32 frame,
                                            melonDS::u32 cooldownFrames);
+  PlayerLifeObservation ObservePlayerLifeState(int instanceID,
+                                               const PlayerLifeState &current);
   void StartHangDiagnostics(const Config::DiagnosticsConfig &config, bool host);
   void Stop();
 
