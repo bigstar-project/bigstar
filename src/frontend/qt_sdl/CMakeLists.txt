@@ -17,6 +17,8 @@ set(SOURCES_QT_SDL
     NsmbNetplayConfig.h
     NsmbPacketBridgeRuntime.cpp
     NsmbPacketBridgeRuntime.h
+    NsmbPacketBridgeIntegration.cpp
+    NsmbPacketBridgeIntegration.h
     NsmbMvlRuntime.cpp
     NsmbMvlRuntime.h
     NsmbMvlGameHooks.cpp

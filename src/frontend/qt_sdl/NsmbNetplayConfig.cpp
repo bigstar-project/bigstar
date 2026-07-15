@@ -433,8 +433,6 @@ PacketBridgeConfig LoadPacketBridgeConfig(const Environment &environment) {
       ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME");
   config.TraceEnabled =
       ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_TRACE");
-  config.SendLocalPlayerOnly =
-      !ReadFlag(environment, "MELONDS_NSML_PACKET_BRIDGE_SEND_ALL");
   if (const char *localPlayer =
           environment.Get("MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER")) {
     config.LocalPlayerOverride = std::clamp(std::atoi(localPlayer), 0, 1);

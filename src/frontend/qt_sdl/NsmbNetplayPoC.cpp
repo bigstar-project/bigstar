@@ -13,6 +13,7 @@
 
 #include "NsmbNetplayPoC.h"
 #include "NsmbNetplayConfig.h"
+#include "NsmbPacketBridgeIntegration.h"
 #include "NsmbPacketBridgeRuntime.h"
 #include "NsmbMvlRuntime.h"
 #include "NsmbMvlGameHooks.h"
@@ -69,8 +70,6 @@ namespace NsmbNetplayPoC
 namespace
 {
 
-constexpr melonDS::u32 kMagic = 0x4C4D534E; // "NSML", little endian
-constexpr melonDS::u32 kVersion = 1;
 constexpr int kPacketBridgePumpEventLimit = 64;
 constexpr std::size_t kTrackedWorldMovingHazardCount = 4;
 using WireProtocol::WireGameState;
@@ -137,7 +136,6 @@ constexpr melonDS::u32 kNoFrameLimit = 0;
 constexpr melonDS::u32 kMainRAMBase = 0x02000000;
 constexpr melonDS::u32 kGameStageIDAddr = 0x02085A14;
 constexpr melonDS::u32 kGameStageGroupAddr = 0x02085A18;
-constexpr melonDS::u32 kGameLocalPlayerIDAddr = 0x02085A7C;
 constexpr melonDS::u32 kGameVsModeAddr = 0x02085A84;
 constexpr melonDS::u32 kNetStateBaseAddr = 0x020887E8;
 constexpr melonDS::u32 kNetLocalAidAddr = 0x020887F0;
@@ -148,13 +146,6 @@ unsigned long long NowUnixMs()
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count());
 }
-constexpr melonDS::u32 kNetPacketTickAddr = 0x020888E0;
-constexpr melonDS::u32 kNetPacketActionAddr = 0x020888E4;
-constexpr melonDS::u32 kPacketBridgeJitScratchBaseAddr = 0x023C1200;
-constexpr melonDS::u32 kPacketBridgeJitScratchTickAddr = kPacketBridgeJitScratchBaseAddr + 0x00;
-constexpr melonDS::u32 kPacketBridgeJitScratchActionAddr = kPacketBridgeJitScratchBaseAddr + 0x04;
-constexpr melonDS::u32 kPacketBridgeJitScratchKeysAddr = kPacketBridgeJitScratchBaseAddr + 0x08;
-constexpr melonDS::u32 kPacketBridgeJitScratchPacketsAddr = kPacketBridgeJitScratchBaseAddr + 0x40;
 constexpr melonDS::u32 kNetRandomValueAddr = 0x02088A68;
 constexpr melonDS::u32 kInputKeyXMask = 1u << 10;
 constexpr melonDS::u16 kMvlStockItemTouchX = 217;
@@ -295,6 +286,7 @@ void EmitPlayerLifeEvent(
 void EmitStartReadyEventLocked(const char* direction, melonDS::u32 localFrame, melonDS::u32 remoteFrame);
 
 int CurrentPacketBridgeLocalPlayer();
+const PacketBridge::IntegrationHooks& PacketBridgeHooks();
 
 struct State
 {
@@ -366,6 +358,19 @@ RollbackRuntime::Context RollbackContext()
         G.RollbackStats,
         G.Mutex,
         G.Connection.StartFrame,
+    };
+}
+
+PacketBridge::IntegrationContext PacketBridgeContext()
+{
+    return {
+        G.PacketBridge,
+        G.RuntimePatch,
+        G.Input,
+        G.Connection,
+        G.PacketBridgeRuntime,
+        G.Transport,
+        G.Mutex,
     };
 }
 
@@ -1000,47 +1005,6 @@ enum class ReceiveDisposition
     SkipPacketCleanup,
 };
 
-void HandleReceivedNSMLPacketLocked(
-    const void* data,
-    std::size_t size,
-    melonDS::NDS* nds,
-    melonDS::u32 localFrame)
-{
-    WireNSMLPacket packet;
-    std::memcpy(&packet, data, size);
-    if (packet.Magic != kMagic || packet.Version != kVersion
-        || packet.Kind != kWireKindPacket || packet.Player > 1)
-    {
-        return;
-    }
-
-    const melonDS::u32 restartCutoff = MvlRestartPacketCutoffFrame();
-    if (restartCutoff != 0 && packet.Frame <= restartCutoff)
-        return;
-    if (G.PacketBridge.Enabled && nds)
-        melonDS::NSML_PushMarioVsLuigiRemotePacket(nds, packet.Player, packet.Packet);
-    else
-        G.PacketBridgeRuntime.QueuePendingPacket(packet);
-    const bool newTick = G.PacketBridgeRuntime.RecordReceivedPacket(
-        packet.Player, packet.Tick, packet.Frame);
-    if (G.PacketBridge.TraceEnabled && newTick)
-    {
-        const melonDS::u32 keys = packet.Packet[2] | (packet.Packet[3] << 8);
-        std::printf("NSMB PacketBridge: recv player=%u tick=0x%04X keys=0x%04X action=0x%02X b5=0x%02X b6=0x%02X b7=0x%02X bit=0x%02X remoteFrame=%u localFrame=%u pending=%zu\n",
-            packet.Player,
-            packet.Tick,
-            keys,
-            packet.Packet[4],
-            packet.Packet[5],
-            packet.Packet[6],
-            packet.Packet[7],
-            packet.Packet[0x29],
-            packet.Frame,
-            localFrame,
-            G.PacketBridgeRuntime.PendingPacketCount());
-    }
-}
-
 void HandleReceivedGameStateLocked(const void* data, std::size_t size)
 {
     WireGameState packet;
@@ -1118,11 +1082,13 @@ void PumpNetworkLocked(melonDS::NDS* nds = nullptr, melonDS::u32 localFrame = kN
             }
             else if (packetClass == PacketClassifier::PacketClass::NSMLPacket)
             {
-                HandleReceivedNSMLPacketLocked(
+                PacketBridge::ReceivePacketLocked(
+                    PacketBridgeContext(),
                     event.packet->data,
                     event.packet->dataLength,
                     nds,
-                    localFrame);
+                    localFrame,
+                    MvlRestartPacketCutoffFrame());
             }
             else if (packetClass == PacketClassifier::PacketClass::GameState)
             {
@@ -1483,251 +1449,6 @@ void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
         rollbackStats.ResimRunFrameMaxUs,
         rollbackStats.ResimCheckpointSaveMaxUs,
         rollbackStats.ResimCorrectionMaxUs);
-}
-
-melonDS::u32 LocalPlayerID(melonDS::NDS* nds)
-{
-    if (!nds)
-        return 0;
-
-    if (G.PacketBridge.Enabled)
-    {
-        if (G.PacketBridge.LocalPlayerOverride >= 0
-            && G.PacketBridge.LocalPlayerOverride <= 1)
-            return static_cast<melonDS::u32>(G.PacketBridge.LocalPlayerOverride);
-    }
-
-    const bool inGameplay = IsMarioVsLuigiGameplay(nds);
-    if (G.PacketBridge.Enabled && G.PacketBridge.AllowPreGame && !inGameplay)
-        return static_cast<melonDS::u32>(G.Connection.LocalInstance & 1);
-
-    return nds->ARM9Read32(kGameLocalPlayerIDAddr) & 1;
-}
-
-void ApplyPendingNSMLPacketsLocked(melonDS::NDS* nds)
-{
-    if (!G.PacketBridge.Enabled || !nds || G.PacketBridgeRuntime.PendingPacketCount() == 0)
-        return;
-
-    for (const WireNSMLPacket& packet : G.PacketBridgeRuntime.TakePendingPackets())
-        melonDS::NSML_PushMarioVsLuigiRemotePacket(nds, packet.Player, packet.Packet);
-}
-
-void SendNSMLWirePacketNowLocked(const WireNSMLPacket& packet)
-{
-    G.Transport.Send(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE, true);
-}
-
-void FlushDelayedNSMLPacketsLocked(melonDS::u32 frame)
-{
-    if (!G.PacketBridge.Enabled || !G.Transport.IsConnected()
-        || G.PacketBridgeRuntime.DelayedPacketCount() == 0)
-        return;
-
-    for (const WireNSMLPacket& packet :
-        G.PacketBridgeRuntime.TakeDueOutgoingPackets(
-            frame, std::chrono::steady_clock::now()))
-        SendNSMLWirePacketNowLocked(packet);
-}
-
-void SendNSMLPacketLocked(melonDS::u32 frame, melonDS::u32 player, melonDS::u32 tick, const melonDS::u8 packetBytes[52])
-{
-    if (!G.PacketBridge.Enabled || !G.Transport.IsConnected() || !packetBytes || player > 1)
-        return;
-
-    SendMatchSeedLocked();
-
-    const std::optional<WireNSMLPacket> immediate =
-        G.PacketBridgeRuntime.PrepareOutgoingPacket(
-            frame, player, tick, packetBytes, G.PacketBridge,
-            std::chrono::steady_clock::now());
-    if (immediate)
-        SendNSMLWirePacketNowLocked(*immediate);
-
-    if (G.PacketBridge.TraceEnabled
-        && G.PacketBridgeRuntime.ShouldTraceSentTick(tick))
-    {
-        const melonDS::u32 keys = packetBytes[2] | (packetBytes[3] << 8);
-        std::printf("NSMB PacketBridge: send player=%u tick=0x%04X keys=0x%04X action=0x%02X b5=0x%02X b6=0x%02X b7=0x%02X bit=0x%02X frame=%u\n",
-            player,
-            tick,
-            keys,
-            packetBytes[4],
-            packetBytes[5],
-            packetBytes[6],
-            packetBytes[7],
-            packetBytes[0x29],
-            frame);
-    }
-}
-
-melonDS::u32 PacketBridgeCanonicalTick(melonDS::NDS* nds, melonDS::u32 frame);
-
-void CaptureAndSendNSMLPacketLocked(melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.PacketBridge.Enabled || !nds)
-        return;
-
-    melonDS::u8 packet[52] {};
-    melonDS::u32 tick = 0;
-    melonDS::u32 keys = 0;
-    bool captured = melonDS::NSML_TakeMarioVsLuigiLocalPacket(nds, packet, &tick, &keys);
-    if (!captured && G.PacketBridge.DirectCaptureEnabled)
-        captured = melonDS::NSML_BuildMarioVsLuigiLocalPacket(nds, packet, &tick, &keys);
-    if (!captured)
-        return;
-
-    const std::optional<InputState> overrideInput =
-        G.PacketBridgeRuntime.PacketInput(frame);
-    if (overrideInput)
-    {
-        keys = (~overrideInput->KeyMask) & 0x0FFF;
-        packet[2] = static_cast<melonDS::u8>(keys & 0xFF);
-        packet[3] = static_cast<melonDS::u8>((keys >> 8) & 0xFF);
-    }
-
-    if (G.PacketBridge.ForceTickEnabled
-        && frame >= G.PacketBridge.ForceTickStartFrame
-        && G.PacketBridge.ForceTickBase >= 0)
-    {
-        tick = PacketBridgeCanonicalTick(nds, frame);
-        packet[0] = static_cast<melonDS::u8>(tick & 0xFF);
-        packet[1] = static_cast<melonDS::u8>((tick >> 8) & 0xFF);
-    }
-
-    (void)keys;
-    const melonDS::u32 localPlayer = LocalPlayerID(nds);
-    melonDS::NSML_PushMarioVsLuigiRemotePacket(nds, localPlayer, packet);
-    SendNSMLPacketLocked(frame, localPlayer, tick, packet);
-
-    G.PacketBridgeRuntime.PrunePacketInputs(frame, 240);
-}
-
-melonDS::u32 PacketBridgeCanonicalTick(melonDS::NDS* nds, melonDS::u32 frame)
-{
-    if (G.PacketBridge.ForceTickEnabled
-        && frame >= G.PacketBridge.ForceTickStartFrame
-        && G.PacketBridge.ForceTickBase >= 0)
-    {
-        return (static_cast<melonDS::u32>(G.PacketBridge.ForceTickBase)
-            + (frame - G.PacketBridge.ForceTickStartFrame)) & 0xFFFF;
-    }
-
-    return nds ? nds->ARM9Read16(0x020888E0) : 0;
-}
-
-void ForceNSMLPacketBridgeTickIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.PacketBridge.ForceTickEnabled || !nds || instanceID < 0 || instanceID >= 16)
-        return;
-    if (frame < G.PacketBridge.ForceTickStartFrame)
-        return;
-    if (!G.PacketBridgeRuntime.MarkForcedTickFrame(instanceID, frame))
-        return;
-
-    const melonDS::u32 tick = PacketBridgeCanonicalTick(nds, frame);
-    nds->ARM9Write16(0x020888E0, static_cast<melonDS::u16>(tick));
-
-    if (G.PacketBridge.TraceEnabled && (frame % 60) == 0)
-    {
-        std::printf("NSMB PacketBridge: force tick=0x%04X frame=%u\n", tick, frame);
-        std::fflush(stdout);
-    }
-}
-
-void ForceNSMLGameLocalPlayerIDIfNeeded(melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!nds || G.PacketBridge.ForceGameLocalPlayerID < 0)
-        return;
-    if (frame < G.PacketBridge.ForceGameLocalPlayerIDStartFrame)
-        return;
-    if (!G.PacketBridge.ForceGameLocalPlayerIDEarly
-        && (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1))
-        return;
-
-    nds->ARM9Write32(kGameLocalPlayerIDAddr, static_cast<melonDS::u32>(G.PacketBridge.ForceGameLocalPlayerID & 1));
-}
-
-void PumpNSMLPacketBridgeLocked(melonDS::NDS* nds, melonDS::u32 frame)
-{
-    FlushDelayedNSMLPacketsLocked(frame);
-    PumpNetworkLocked(nds, frame);
-    ApplyPendingNSMLPacketsLocked(nds);
-    SendMatchSeedLocked();
-}
-
-void ThrottleNSMLPacketBridgeFrameLead(melonDS::NDS* nds, melonDS::u32 frame)
-{
-    if (G.PacketBridge.MaxFrameLead < 0 || !nds)
-        return;
-    if (frame < G.PacketBridge.ThrottleStartFrame)
-        return;
-    if (G.PacketBridge.ForceTickEnabled && frame < G.PacketBridge.ForceTickStartFrame)
-        return;
-
-    const melonDS::u32 remotePlayer = LocalPlayerID(nds) ^ 1;
-    const auto start = std::chrono::steady_clock::now();
-
-    for (;;)
-    {
-        melonDS::u32 remoteTick = 0xFFFFFFFF;
-        melonDS::u32 remoteFrame = 0xFFFFFFFF;
-        {
-            std::lock_guard<std::mutex> lock(G.Mutex);
-            const PacketBridge::ReceivedProgress progress =
-                G.PacketBridgeRuntime.ReceivedPacketProgress(remotePlayer);
-            remoteTick = progress.Tick;
-            remoteFrame = progress.Frame;
-        }
-
-        if (remoteFrame == 0xFFFFFFFF)
-            return;
-        if (G.PacketBridge.ForceTickEnabled && remoteFrame < G.PacketBridge.ForceTickStartFrame)
-            return;
-
-        const int lead = static_cast<int>(frame) - static_cast<int>(remoteFrame);
-        if (lead <= G.PacketBridge.MaxFrameLead)
-            return;
-
-        if (G.PacketBridge.TraceEnabled
-            && G.PacketBridgeRuntime.ShouldTraceFrameThrottle(frame))
-        {
-            std::printf("NSMB PacketBridge: frame throttle frame=%u remotePlayer=%u remoteFrame=%u lead=%d maxLead=%d remoteTick=0x%04X\n",
-                frame,
-                remotePlayer,
-                remoteFrame,
-                lead,
-                G.PacketBridge.MaxFrameLead,
-                remoteTick & 0xFFFF);
-            std::fflush(stdout);
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(G.Mutex);
-            PumpNSMLPacketBridgeLocked(nds, frame);
-        }
-
-        if (G.PacketBridge.ThrottleTimeoutMs > 0)
-        {
-            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start).count();
-            if (elapsed >= G.PacketBridge.ThrottleTimeoutMs)
-            {
-                if (G.PacketBridge.TraceEnabled)
-                {
-                    std::printf("NSMB PacketBridge: frame throttle timeout frame=%u remoteFrame=%u lead=%d waitedMs=%d\n",
-                        frame,
-                        remoteFrame,
-                        lead,
-                        G.PacketBridge.ThrottleTimeoutMs);
-                    std::fflush(stdout);
-                }
-                return;
-            }
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
 }
 
 void PrintInputHealthLineLocked(
@@ -3163,100 +2884,32 @@ InputState ApplyImitationAIInput(
     int player,
     const InputState& fallback);
 
-InputState PacketBridgeInputForPlayer(
-    int player,
-    int localPlayer,
-    int instanceID,
-    melonDS::u32 frame,
-    const InputState& localInput,
-    const InputState& remoteInput,
-    bool hasRemoteInput)
+const PacketBridge::IntegrationHooks& PacketBridgeHooks()
 {
-    if (player == localPlayer)
-        return ConvertStockXToTouch(localInput);
-    if (hasRemoteInput)
-        return ConvertStockXToTouch(remoteInput);
-    return ConvertStockXToTouch(NeutralInput());
-}
-
-void WritePacketBridgeJitScratchInputs(
-    int instanceID,
-    melonDS::u32 frame,
-    melonDS::NDS* nds,
-    int localPlayer,
-    const InputState& localInput,
-    const InputState& remoteInput,
-    bool hasRemoteInput,
-    bool predictedRemoteInput)
-{
-    if (!nds || !nds->MainRAM)
-        return;
-
-    melonDS::u32 tick = nds->ARM9Read16(kNetPacketTickAddr);
-    if (G.Input.NetplayOnly && G.Connection.StartFrame != 0 && frame >= G.Connection.StartFrame)
-    {
-        tick = (frame - G.Connection.StartFrame) & 0xFFFF;
-        nds->ARM9Write16(kNetPacketTickAddr, static_cast<melonDS::u16>(tick));
-    }
-    const melonDS::u8 action = nds->ARM9Read8(kNetPacketActionAddr);
-    nds->ARM9Write16(kPacketBridgeJitScratchTickAddr, static_cast<melonDS::u16>(tick));
-    nds->ARM9Write8(kPacketBridgeJitScratchActionAddr, action);
-
-    for (int player = 0; player < 2; player++)
-    {
-        const InputState input = PacketBridgeInputForPlayer(
-            player,
-            localPlayer,
-            instanceID,
-            frame,
-            localInput,
-            remoteInput,
-            hasRemoteInput);
-        InputState effectiveInput = ApplyRuleBasedAIInput(instanceID, frame, nds, player, input);
-        effectiveInput = ApplyImitationAIInput(instanceID, frame, nds, player, effectiveInput);
-        RecordAIPlayLogAppliedInput(instanceID, frame, player, effectiveInput);
-        const melonDS::u32 keys = (~effectiveInput.KeyMask) & 0x0FFF;
-        nds->ARM9Write16(kPacketBridgeJitScratchKeysAddr + static_cast<melonDS::u32>(player * 2),
-            static_cast<melonDS::u16>(keys));
-
-        melonDS::u8 packet[52] {};
-        packet[0] = static_cast<melonDS::u8>(tick & 0xFF);
-        packet[1] = static_cast<melonDS::u8>((tick >> 8) & 0xFF);
-        packet[2] = static_cast<melonDS::u8>(keys & 0xFF);
-        packet[3] = static_cast<melonDS::u8>((keys >> 8) & 0xFF);
-        packet[4] = action;
-        packet[5] = effectiveInput.Touching ? 1 : 0;
-        packet[6] = static_cast<melonDS::u8>(std::min<int>(effectiveInput.TouchX, 255));
-        packet[7] = static_cast<melonDS::u8>(std::min<int>(effectiveInput.TouchY, 191));
-        for (melonDS::u32 i = 0; i < 44; i++)
-            packet[8 + i] = nds->ARM9Read8(0x020888E8 + i);
-        packet[0x29] = nds->ARM9Read8(0x02088A4C);
-
-        const melonDS::u32 packetAddr = kPacketBridgeJitScratchPacketsAddr + static_cast<melonDS::u32>(player * 0x40);
-        for (melonDS::u32 i = 0; i < sizeof(packet); i++)
-            nds->ARM9Write8(packetAddr + i, packet[i]);
-
-        // The JIT helper path only replaces Net::getConsoleKeys()/TouchPad.
-        // Feeding these synthetic packets back into NSMB's lower packet queue can
-        // corrupt the game's stage state, so keep the packet copy as trace data.
-    }
-
-    if (G.Input.NetplayTrace && (frame % 60) == 0)
-    {
-        const melonDS::u16 scratchKeys0 = nds->ARM9Read16(kPacketBridgeJitScratchKeysAddr);
-        const melonDS::u16 scratchKeys1 = nds->ARM9Read16(kPacketBridgeJitScratchKeysAddr + 2);
-        std::printf(
-            "NSMB InputNetplay: inst=%d frame=%u localPlayer=%d hasRemote=%d predictedRemote=%d tick=0x%04X action=0x%02X keys0=0x%03X keys1=0x%03X\n",
-            instanceID,
-            frame,
-            localPlayer,
-            hasRemoteInput ? 1 : 0,
-            predictedRemoteInput ? 1 : 0,
-            static_cast<unsigned>(tick),
-            static_cast<unsigned>(action),
-            static_cast<unsigned>(scratchKeys0),
-            static_cast<unsigned>(scratchKeys1));
-    }
+    static const PacketBridge::IntegrationHooks hooks {
+        [] { SendMatchSeedLocked(); },
+        [](melonDS::NDS* nds, melonDS::u32 frame) {
+            PumpNetworkLocked(nds, frame);
+        },
+        [](const InputState& input) { return ConvertStockXToTouch(input); },
+        [](int instanceID,
+            melonDS::u32 frame,
+            melonDS::NDS* nds,
+            int player,
+            const InputState& input) {
+            const InputState ruleInput =
+                ApplyRuleBasedAIInput(instanceID, frame, nds, player, input);
+            return ApplyImitationAIInput(
+                instanceID, frame, nds, player, ruleInput);
+        },
+        [](int instanceID,
+            melonDS::u32 frame,
+            int player,
+            const InputState& input) {
+            RecordAIPlayLogAppliedInput(instanceID, frame, player, input);
+        },
+    };
+    return hooks;
 }
 
 void ApplyRollbackResimFramePatches(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -3265,7 +2918,8 @@ void ApplyRollbackResimFramePatches(int instanceID, melonDS::u32 frame, melonDS:
         return;
 
     MvlGameHooks::ApplyRuntimeConfig(MvlHooksContext(), nds);
-    ForceNSMLGameLocalPlayerIDIfNeeded(frame, nds);
+    PacketBridge::ForceGameLocalPlayerIDIfNeeded(
+        PacketBridgeContext(), frame, nds);
     MvlGameHooks::ClearCameraInitHold(MvlHooksContext(), instanceID, frame, nds);
     MvlGameHooks::ForcePlayerDeathCounters(MvlHooksContext(), instanceID, frame, nds);
     MvlGameHooks::ForcePlayerInventoryPowerups(MvlHooksContext(), instanceID, frame, nds);
@@ -3277,9 +2931,11 @@ void ApplyRollbackResimPostFramePatches(melonDS::u32 frame, melonDS::NDS* nds)
     if (!nds)
         return;
 
-    ForceNSMLGameLocalPlayerIDIfNeeded(frame, nds);
+    PacketBridge::ForceGameLocalPlayerIDIfNeeded(
+        PacketBridgeContext(), frame, nds);
     melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);
-    ForceNSMLGameLocalPlayerIDIfNeeded(frame, nds);
+    PacketBridge::ForceGameLocalPlayerIDIfNeeded(
+        PacketBridgeContext(), frame, nds);
 }
 
 bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -3297,7 +2953,9 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
             const InputState& remoteInput,
             bool hasRemoteInput,
             bool predictedRemoteInput) {
-            WritePacketBridgeJitScratchInputs(
+            PacketBridge::WriteJitScratchInputs(
+                PacketBridgeContext(),
+                PacketBridgeHooks(),
                 hookInstanceID,
                 hookFrame,
                 hookNds,
@@ -3564,7 +3222,9 @@ void WritePacketBridgeJitScratchIfNeeded(
     if (!beforeStart)
     {
         const auto writeStart = std::chrono::steady_clock::now();
-        WritePacketBridgeJitScratchInputs(
+        PacketBridge::WriteJitScratchInputs(
+            PacketBridgeContext(),
+            PacketBridgeHooks(),
             instanceID,
             logicalFrame,
             nds,
@@ -3623,57 +3283,6 @@ void WritePacketBridgeJitScratchIfNeeded(
     }
     if (beforeStart)
         return;
-}
-
-void ApplyPacketBridgeJitHelperPatchIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.RuntimePatch.PacketBridgeJitHelperPatchEnabled || !nds || !nds->MainRAM)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    if (!G.PacketBridgeRuntime.ShouldApplyJitHook(
-            instanceID, frame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame))
-        return;
-
-    auto invalidateMainRAM = [&](melonDS::u32 start, melonDS::u32 end)
-    {
-        for (melonDS::u32 addr = start; addr <= end; addr += sizeof(melonDS::u32))
-        {
-            nds->JIT.CheckAndInvalidate<0, melonDS::ARMJIT_Memory::memregion_MainRAM>(addr);
-            nds->JIT.CheckAndInvalidate<1, melonDS::ARMJIT_Memory::memregion_MainRAM>(addr);
-        }
-    };
-
-    // Net::getConsoleKeys(u16): return scratchKeys[player].
-    WriteARM9U32(nds, 0x0200E854, 0xE59F1008); // ldr r1, [pc, #8]
-    WriteARM9U32(nds, 0x0200E858, 0xE0811080); // add r1, r1, r0, lsl #1
-    WriteARM9U32(nds, 0x0200E85C, 0xE1D100B0); // ldrh r0, [r1]
-    WriteARM9U32(nds, 0x0200E860, 0xE12FFF1E); // bx lr
-    WriteARM9U32(nds, 0x0200E864, kPacketBridgeJitScratchKeysAddr);
-
-    // Net::getConsoleTouchPad(u16): write TPData{x,y,touch,0} from scratch packet[player].
-    WriteARM9U32(nds, 0x0200E7D0, 0xE59F2024); // ldr r2, [pc, #36]
-    WriteARM9U32(nds, 0x0200E7D4, 0xE0822301); // add r2, r2, r1, lsl #6
-    WriteARM9U32(nds, 0x0200E7D8, 0xE5D23006); // ldrb r3, [r2, #6]
-    WriteARM9U32(nds, 0x0200E7DC, 0xE1C030B0); // strh r3, [r0]
-    WriteARM9U32(nds, 0x0200E7E0, 0xE5D23007); // ldrb r3, [r2, #7]
-    WriteARM9U32(nds, 0x0200E7E4, 0xE1C030B2); // strh r3, [r0, #2]
-    WriteARM9U32(nds, 0x0200E7E8, 0xE5D23005); // ldrb r3, [r2, #5]
-    WriteARM9U32(nds, 0x0200E7EC, 0xE1C030B4); // strh r3, [r0, #4]
-    WriteARM9U32(nds, 0x0200E7F0, 0xE3A03000); // mov r3, #0
-    WriteARM9U32(nds, 0x0200E7F4, 0xE1C030B6); // strh r3, [r0, #6]
-    WriteARM9U32(nds, 0x0200E7F8, 0xE12FFF1E); // bx lr
-    WriteARM9U32(nds, 0x0200E7FC, kPacketBridgeJitScratchPacketsAddr);
-
-    invalidateMainRAM(0x0200E854, 0x0200E864);
-    invalidateMainRAM(0x0200E7D0, 0x0200E7FC);
-
-    G.PacketBridgeRuntime.MarkJitHookApplied(instanceID);
-    std::printf(
-        "NSMB Test: packet bridge JIT keys/touch helper patch inst=%d frame=%u scratch=0x%08X\n",
-        instanceID,
-        frame,
-        kPacketBridgeJitScratchBaseAddr);
 }
 
 void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -4151,7 +3760,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::ProbeRestore);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        ApplyPacketBridgeJitHelperPatchIfNeeded(instanceID, inputFrame, nds);
+        PacketBridge::ApplyJitHelperPatchIfNeeded(
+            PacketBridgeContext(), instanceID, inputFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::JitPatch);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
@@ -4166,7 +3776,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
     {
-        ForceNSMLGameLocalPlayerIDIfNeeded(inputFrame, nds);
+        PacketBridge::ForceGameLocalPlayerIDIfNeeded(
+            PacketBridgeContext(), inputFrame, nds);
     }
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::PacketBridgeSetup);
 
@@ -4273,12 +3884,16 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         {
             {
                 std::lock_guard<std::mutex> lock(G.Mutex);
-                PumpNSMLPacketBridgeLocked(nds, syncFrame);
-                ForceNSMLPacketBridgeTickIfNeeded(instanceID, syncFrame, nds);
+                PacketBridge::PumpLocked(
+                    PacketBridgeContext(), PacketBridgeHooks(), nds, syncFrame);
+                PacketBridge::ForceTickIfNeeded(
+                    PacketBridgeContext(), instanceID, syncFrame, nds);
             }
-            ForceNSMLGameLocalPlayerIDIfNeeded(syncFrame, nds);
+            PacketBridge::ForceGameLocalPlayerIDIfNeeded(
+                PacketBridgeContext(), syncFrame, nds);
             melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);
-            ForceNSMLGameLocalPlayerIDIfNeeded(syncFrame, nds);
+            PacketBridge::ForceGameLocalPlayerIDIfNeeded(
+                PacketBridgeContext(), syncFrame, nds);
         }
         return ConvertStockXToTouch(packetBridgeInput);
     }
@@ -4300,7 +3915,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
         std::lock_guard<std::mutex> lock(G.Mutex);
         PumpNetworkLocked(nds, syncFrame);
-        ApplyPendingNSMLPacketsLocked(nds);
+        PacketBridge::ApplyPendingPacketsLocked(PacketBridgeContext(), nds);
         SendMatchSeedLocked();
         if (netplaySendActive)
         {
@@ -4334,7 +3949,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         {
             std::lock_guard<std::mutex> lock(G.Mutex);
             PumpNetworkLocked(nds, targetFrame);
-            ApplyPendingNSMLPacketsLocked(nds);
+            PacketBridge::ApplyPendingPacketsLocked(PacketBridgeContext(), nds);
             needsInitialRemoteInput = G.Coordinator.NeedsInitialRemoteInput(
                 G.InputRuntime.RemoteInputs.find(targetFrame) != G.InputRuntime.RemoteInputs.end());
         }
@@ -4603,18 +4218,24 @@ void RunAfterFramePacketBridgePhase(melonDS::u32 logFrame, melonDS::NDS* nds)
     if (G.Enabled && G.PacketBridge.Enabled && bridgeNetworkActive)
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
-        PumpNSMLPacketBridgeLocked(nds, logFrame);
-        ForceNSMLGameLocalPlayerIDIfNeeded(logFrame, nds);
-        CaptureAndSendNSMLPacketLocked(logFrame, nds);
+        PacketBridge::PumpLocked(
+            PacketBridgeContext(), PacketBridgeHooks(), nds, logFrame);
+        PacketBridge::ForceGameLocalPlayerIDIfNeeded(
+            PacketBridgeContext(), logFrame, nds);
+        PacketBridge::CaptureAndSendPacketLocked(
+            PacketBridgeContext(), PacketBridgeHooks(), logFrame, nds);
     }
     if (G.Enabled && G.PacketBridge.Enabled && bridgeNetworkActive)
     {
-        ForceNSMLGameLocalPlayerIDIfNeeded(logFrame, nds);
+        PacketBridge::ForceGameLocalPlayerIDIfNeeded(
+            PacketBridgeContext(), logFrame, nds);
         melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);
-        ForceNSMLGameLocalPlayerIDIfNeeded(logFrame, nds);
+        PacketBridge::ForceGameLocalPlayerIDIfNeeded(
+            PacketBridgeContext(), logFrame, nds);
     }
     if (G.Enabled && G.PacketBridge.Enabled && bridgeNetworkActive)
-        ThrottleNSMLPacketBridgeFrameLead(nds, logFrame);
+        PacketBridge::ThrottleFrameLead(
+            PacketBridgeContext(), PacketBridgeHooks(), nds, logFrame);
 }
 
 void RunAfterFrameRuntimePatchPhase(int instanceID, melonDS::u32 logFrame, melonDS::NDS* nds)

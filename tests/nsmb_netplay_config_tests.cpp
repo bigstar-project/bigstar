@@ -440,7 +440,6 @@ void TestPacketBridgeConfigDefaults() {
   CHECK(!config.Only);
   CHECK(!config.AllowPreGame);
   CHECK(!config.TraceEnabled);
-  CHECK(config.SendLocalPlayerOnly);
   CHECK(config.LocalPlayerOverride == -1);
   CHECK(!config.DirectCaptureEnabled);
   CHECK(!config.ForceTickEnabled);
@@ -466,7 +465,6 @@ void TestPacketBridgeConfigReadsAndClampsEnvironment() {
       {"MELONDS_NSML_PACKET_BRIDGE_ONLY", "1"},
       {"MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME", "1"},
       {"MELONDS_NSML_PACKET_BRIDGE_TRACE", "1"},
-      {"MELONDS_NSML_PACKET_BRIDGE_SEND_ALL", "1"},
       {"MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER", "9"},
       {"MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE", "1"},
       {"MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK", "1"},
@@ -491,7 +489,6 @@ void TestPacketBridgeConfigReadsAndClampsEnvironment() {
   CHECK(config.Only);
   CHECK(config.AllowPreGame);
   CHECK(config.TraceEnabled);
-  CHECK(!config.SendLocalPlayerOnly);
   CHECK(config.LocalPlayerOverride == 1);
   CHECK(config.DirectCaptureEnabled);
   CHECK(config.ForceTickEnabled);

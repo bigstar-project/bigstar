@@ -7,7 +7,9 @@ namespace NsmbNetplayPoC::PacketBridge {
 
 namespace {
 
-bool ValidInstance(int instanceID) { return instanceID >= 0 && instanceID < 16; }
+bool ValidInstance(int instanceID) {
+  return instanceID >= 0 && instanceID < 16;
+}
 
 bool UpdateTraceMarker(melonDS::u32 value, melonDS::u32 &lastValue) {
   if (lastValue == value)
@@ -17,6 +19,36 @@ bool UpdateTraceMarker(melonDS::u32 value, melonDS::u32 &lastValue) {
 }
 
 } // namespace
+
+InputState SelectPlayerInput(int player, int localPlayer,
+                             const InputState &localInput,
+                             const InputState &remoteInput,
+                             bool hasRemoteInput) {
+  if (player == localPlayer)
+    return localInput;
+  if (hasRemoteInput)
+    return remoteInput;
+  return {};
+}
+
+melonDS::u32 CanonicalTick(const Config::PacketBridgeConfig &config,
+                           melonDS::u32 frame, melonDS::u32 observedTick) {
+  if (!config.ForceTickEnabled || frame < config.ForceTickStartFrame ||
+      config.ForceTickBase < 0)
+    return observedTick;
+  return (static_cast<melonDS::u32>(config.ForceTickBase) +
+          (frame - config.ForceTickStartFrame)) &
+         0xFFFF;
+}
+
+bool IsAcceptedIncomingPacket(const WireProtocol::WireNSMLPacket &packet,
+                              melonDS::u32 restartCutoffFrame) {
+  if (packet.Magic != WireProtocol::kMagic ||
+      packet.Version != WireProtocol::kVersion ||
+      packet.Kind != WireProtocol::kWireKindPacket || packet.Player > 1)
+    return false;
+  return restartCutoffFrame == 0 || packet.Frame > restartCutoffFrame;
+}
 
 void Runtime::ResetQueuesForRestart() {
   PacketInputs_.clear();
@@ -47,7 +79,8 @@ std::optional<InputState> Runtime::PacketInput(melonDS::u32 frame) const {
 
 void Runtime::PrunePacketInputs(melonDS::u32 frame,
                                 melonDS::u32 historyFrames) {
-  const melonDS::u32 keepFrom = frame > historyFrames ? frame - historyFrames : 0;
+  const melonDS::u32 keepFrom =
+      frame > historyFrames ? frame - historyFrames : 0;
   for (auto input = PacketInputs_.begin(); input != PacketInputs_.end();) {
     if (input->first < keepFrom)
       input = PacketInputs_.erase(input);
@@ -68,12 +101,14 @@ std::vector<WireProtocol::WireNSMLPacket> Runtime::TakePendingPackets() {
   return packets;
 }
 
-std::size_t Runtime::PendingPacketCount() const { return PendingPackets_.size(); }
+std::size_t Runtime::PendingPacketCount() const {
+  return PendingPackets_.size();
+}
 
 std::optional<WireProtocol::WireNSMLPacket> Runtime::PrepareOutgoingPacket(
     melonDS::u32 frame, melonDS::u32 player, melonDS::u32 tick,
-    const melonDS::u8 packetBytes[52],
-    const Config::PacketBridgeConfig &config, Clock::time_point now) {
+    const melonDS::u8 packetBytes[52], const Config::PacketBridgeConfig &config,
+    Clock::time_point now) {
   if (!packetBytes || player > 1)
     return std::nullopt;
 
@@ -86,11 +121,11 @@ std::optional<WireProtocol::WireNSMLPacket> Runtime::PrepareOutgoingPacket(
   packet.Tick = tick;
   std::memcpy(packet.Packet, packetBytes, sizeof(packet.Packet));
 
-  const int jitterFrames = config.SendJitterFrames > 0
-                               ? static_cast<int>(
-                                     frame % static_cast<melonDS::u32>(
-                                                 config.SendJitterFrames + 1))
-                               : 0;
+  const int jitterFrames =
+      config.SendJitterFrames > 0
+          ? static_cast<int>(
+                frame % static_cast<melonDS::u32>(config.SendJitterFrames + 1))
+          : 0;
   const int sendDelayFrames = config.SendDelayFrames + jitterFrames;
   if (sendDelayFrames <= 0)
     return packet;
@@ -105,7 +140,8 @@ std::optional<WireProtocol::WireNSMLPacket> Runtime::PrepareOutgoingPacket(
 std::vector<WireProtocol::WireNSMLPacket>
 Runtime::TakeDueOutgoingPackets(melonDS::u32 frame, Clock::time_point now) {
   std::vector<WireProtocol::WireNSMLPacket> packets;
-  for (auto delayed = DelayedPackets_.begin(); delayed != DelayedPackets_.end();) {
+  for (auto delayed = DelayedPackets_.begin();
+       delayed != DelayedPackets_.end();) {
     if (delayed->ReleaseFrame <= frame || now >= delayed->ReleaseTime) {
       packets.push_back(delayed->Packet);
       delayed = DelayedPackets_.erase(delayed);
@@ -152,9 +188,10 @@ bool Runtime::MarkForcedTickFrame(int instanceID, melonDS::u32 frame) {
   return true;
 }
 
-JitHookRestoreResult Runtime::ScheduleJitHookAfterRestore(
-    int instanceID, melonDS::u32 restoreFrame, melonDS::u32 checkpointFrame,
-    const Config::RuntimePatchConfig &config) {
+JitHookRestoreResult
+Runtime::ScheduleJitHookAfterRestore(int instanceID, melonDS::u32 restoreFrame,
+                                     melonDS::u32 checkpointFrame,
+                                     const Config::RuntimePatchConfig &config) {
   if (!ValidInstance(instanceID))
     return {};
 

@@ -126,7 +126,6 @@ struct PacketBridgeConfig {
   bool Only = false;
   bool AllowPreGame = false;
   bool TraceEnabled = false;
-  bool SendLocalPlayerOnly = true;
   int LocalPlayerOverride = -1;
   bool DirectCaptureEnabled = false;
   bool ForceTickEnabled = false;

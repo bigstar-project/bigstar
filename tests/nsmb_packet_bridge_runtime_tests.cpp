@@ -6,12 +6,15 @@
 
 namespace {
 
+using NsmbNetplayPoC::InputState;
 using NsmbNetplayPoC::Config::PacketBridgeConfig;
 using NsmbNetplayPoC::Config::RuntimePatchConfig;
-using NsmbNetplayPoC::InputState;
+using NsmbNetplayPoC::PacketBridge::CanonicalTick;
+using NsmbNetplayPoC::PacketBridge::IsAcceptedIncomingPacket;
 using NsmbNetplayPoC::PacketBridge::JitHookRestoreAction;
-using NsmbNetplayPoC::PacketBridge::Runtime;
 using NsmbNetplayPoC::PacketBridge::kUnsetProgress;
+using NsmbNetplayPoC::PacketBridge::Runtime;
+using NsmbNetplayPoC::PacketBridge::SelectPlayerInput;
 using NsmbNetplayPoC::WireProtocol::WireNSMLPacket;
 
 void Require(bool condition, const std::string &message) {
@@ -52,6 +55,51 @@ void TestPacketInputHistory() {
           "input pruning keeps the configured history boundary");
 }
 
+void TestInputSelectionAndCanonicalTick() {
+  InputState local;
+  local.KeyMask = 0x111;
+  InputState remote;
+  remote.KeyMask = 0x222;
+  Require(SelectPlayerInput(0, 0, local, remote, true).KeyMask == 0x111 &&
+              SelectPlayerInput(1, 0, local, remote, true).KeyMask == 0x222,
+          "player input selection maps local and available remote input");
+  Require(SelectPlayerInput(1, 0, local, remote, false).KeyMask == 0xFFF,
+          "missing remote input falls back to neutral active-low keys");
+
+  PacketBridgeConfig config;
+  Require(CanonicalTick(config, 100, 0x1234) == 0x1234,
+          "disabled forced tick preserves the observed game tick");
+  config.ForceTickEnabled = true;
+  config.ForceTickStartFrame = 100;
+  config.ForceTickBase = 0xFFF0;
+  Require(CanonicalTick(config, 99, 0x1234) == 0x1234 &&
+              CanonicalTick(config, 100, 0x1234) == 0xFFF0 &&
+              CanonicalTick(config, 132, 0x1234) == 0x0010,
+          "forced tick starts on its configured frame and wraps to 16 bits");
+}
+
+void TestIncomingPacketPolicy() {
+  WireNSMLPacket packet{};
+  packet.Magic = NsmbNetplayPoC::WireProtocol::kMagic;
+  packet.Version = NsmbNetplayPoC::WireProtocol::kVersion;
+  packet.Kind = NsmbNetplayPoC::WireProtocol::kWireKindPacket;
+  packet.Frame = 100;
+  packet.Player = 1;
+  Require(IsAcceptedIncomingPacket(packet, 0) &&
+              IsAcceptedIncomingPacket(packet, 99),
+          "valid packet newer than restart cutoff is accepted");
+  Require(!IsAcceptedIncomingPacket(packet, 100) &&
+              !IsAcceptedIncomingPacket(packet, 101),
+          "packet at or before restart cutoff is rejected");
+  packet.Player = 2;
+  Require(!IsAcceptedIncomingPacket(packet, 0),
+          "out-of-range player packet is rejected");
+  packet.Player = 1;
+  packet.Version++;
+  Require(!IsAcceptedIncomingPacket(packet, 0),
+          "wire contract mismatch is rejected");
+}
+
 void TestPacketQueuesAndDelay() {
   Runtime runtime;
   runtime.QueuePendingPacket(MakePacket(10, 0, 1));
@@ -79,12 +127,11 @@ void TestPacketQueuesAndDelay() {
   Require(!runtime.PrepareOutgoingPacket(5, 0, 10, bytes, config, now) &&
               runtime.DelayedPacketCount() == 1,
           "configured delay plus deterministic jitter queues the packet");
-  Require(runtime.TakeDueOutgoingPackets(
-                     7, now + std::chrono::milliseconds(49))
+  Require(runtime.TakeDueOutgoingPackets(7, now + std::chrono::milliseconds(49))
               .empty(),
           "delayed packet remains queued before both deadlines");
-  const auto dueByTime = runtime.TakeDueOutgoingPackets(
-      7, now + std::chrono::milliseconds(50));
+  const auto dueByTime =
+      runtime.TakeDueOutgoingPackets(7, now + std::chrono::milliseconds(50));
   Require(dueByTime.size() == 1 && dueByTime[0].Tick == 10,
           "wall-clock deadline releases delayed packet");
 
@@ -108,8 +155,7 @@ void TestProgressAndTraceMarkers() {
               runtime.RecordReceivedPacket(1, 20, 200),
           "frame still advances and player progress is independent");
 
-  Require(runtime.ShouldTraceSentTick(30) &&
-              !runtime.ShouldTraceSentTick(30) &&
+  Require(runtime.ShouldTraceSentTick(30) && !runtime.ShouldTraceSentTick(30) &&
               runtime.ShouldTraceSentTick(31),
           "sent tick trace is emitted once per value");
   Require(runtime.ShouldTraceFrameThrottle(60) &&
@@ -150,8 +196,7 @@ void TestJitHookRestorePolicy() {
               runtime.ShouldApplyJitHook(0, 4134, 840),
           "pre-patch checkpoint preserves the six-frame restore lead policy");
   runtime.MarkJitHookApplied(0);
-  Require(runtime.IsJitHookApplied(0) &&
-              runtime.JitHookResumeFrame(0) == 0,
+  Require(runtime.IsJitHookApplied(0) && runtime.JitHookResumeFrame(0) == 0,
           "applying the hook clears its resume schedule");
 
   result = runtime.ScheduleJitHookAfterRestore(1, 4000, 839, config);
@@ -185,6 +230,8 @@ void TestRestartQueueReset() {
 
 int main() {
   TestPacketInputHistory();
+  TestInputSelectionAndCanonicalTick();
+  TestIncomingPacketPolicy();
   TestPacketQueuesAndDelay();
   TestProgressAndTraceMarkers();
   TestJitHookRestorePolicy();

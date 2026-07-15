@@ -2,8 +2,8 @@
 #define NSMBPACKETBRIDGERUNTIME_H
 
 #include "NsmbNetplayConfig.h"
-#include "NsmbNetplayProtocol.h"
 #include "NsmbNetplayPoC.h"
+#include "NsmbNetplayProtocol.h"
 
 #include <array>
 #include <chrono>
@@ -32,6 +32,15 @@ struct JitHookRestoreResult {
   melonDS::u32 ResumeFrame = 0;
 };
 
+InputState SelectPlayerInput(int player, int localPlayer,
+                             const InputState &localInput,
+                             const InputState &remoteInput,
+                             bool hasRemoteInput);
+melonDS::u32 CanonicalTick(const Config::PacketBridgeConfig &config,
+                           melonDS::u32 frame, melonDS::u32 observedTick);
+bool IsAcceptedIncomingPacket(const WireProtocol::WireNSMLPacket &packet,
+                              melonDS::u32 restartCutoffFrame);
+
 class Runtime {
 public:
   using Clock = std::chrono::steady_clock;
@@ -48,10 +57,11 @@ public:
   std::vector<WireProtocol::WireNSMLPacket> TakePendingPackets();
   std::size_t PendingPacketCount() const;
 
-  std::optional<WireProtocol::WireNSMLPacket> PrepareOutgoingPacket(
-      melonDS::u32 frame, melonDS::u32 player, melonDS::u32 tick,
-      const melonDS::u8 packetBytes[52],
-      const Config::PacketBridgeConfig &config, Clock::time_point now);
+  std::optional<WireProtocol::WireNSMLPacket>
+  PrepareOutgoingPacket(melonDS::u32 frame, melonDS::u32 player,
+                        melonDS::u32 tick, const melonDS::u8 packetBytes[52],
+                        const Config::PacketBridgeConfig &config,
+                        Clock::time_point now);
   std::vector<WireProtocol::WireNSMLPacket>
   TakeDueOutgoingPackets(melonDS::u32 frame, Clock::time_point now);
   std::size_t DelayedPacketCount() const;
@@ -63,10 +73,10 @@ public:
   bool ShouldTraceFrameThrottle(melonDS::u32 frame);
   bool MarkForcedTickFrame(int instanceID, melonDS::u32 frame);
 
-  JitHookRestoreResult ScheduleJitHookAfterRestore(
-      int instanceID, melonDS::u32 restoreFrame,
-      melonDS::u32 checkpointFrame,
-      const Config::RuntimePatchConfig &config);
+  JitHookRestoreResult
+  ScheduleJitHookAfterRestore(int instanceID, melonDS::u32 restoreFrame,
+                              melonDS::u32 checkpointFrame,
+                              const Config::RuntimePatchConfig &config);
   bool ShouldApplyJitHook(int instanceID, melonDS::u32 frame,
                           melonDS::u32 configuredPatchFrame) const;
   void MarkJitHookApplied(int instanceID);
