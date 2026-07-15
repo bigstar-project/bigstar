@@ -18,7 +18,9 @@ constexpr melonDS::u32 kMainRAMBase = 0x02000000;
 constexpr melonDS::u32 kNetRandomBranchAddressAddr = 0x0208885C;
 constexpr melonDS::u32 kNetRandomCallCountAddr = 0x02088A48;
 constexpr melonDS::u32 kNetRandomValueAddr = 0x02088A68;
+constexpr melonDS::u32 kGamePlayerPowerupAddr = 0x0208B324;
 constexpr melonDS::u32 kGamePlayerDeadAddr = 0x0208B328;
+constexpr melonDS::u32 kGamePlayerInventoryPowerupAddr = 0x0208B32C;
 constexpr melonDS::u32 kGamePlayerTransitionStatusAddr = 0x0208B354;
 constexpr melonDS::u32 kGamePlayerCountAddr = 0x0208B348;
 constexpr melonDS::u32 kGamePlayerLivesAddr = 0x0208B364;
@@ -44,6 +46,10 @@ constexpr melonDS::u32 kPlayerBaseDefeatedFlagOffset = 0x7B3;
 constexpr melonDS::u32 kPlayerBasePlayerIDOffset = 0x7B4;
 constexpr melonDS::u32 kPlayerBaseVisibleFlagOffset = 0x7B5;
 constexpr melonDS::u32 kPlayerBaseTransitionStepOffset = 0xBAD;
+constexpr melonDS::u32 kPlayerActorPlayerIDOffset = 0x11E;
+constexpr melonDS::u32 kPlayerBasePowerupStateOffset = 0x7AB;
+constexpr melonDS::u32 kPlayerBasePowerupFormStateOffset = 0x7AC;
+constexpr melonDS::u32 kPlayerBasePowerupSubStateOffset = 0x7AD;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
 constexpr melonDS::u16 kVsWorldItemObjectID = 0x001F;
@@ -54,6 +60,10 @@ constexpr melonDS::u32 kWorldEffectWordStart = 0x04;
 constexpr melonDS::u32 kWorldEffectWordEnd = 0xAC;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
 constexpr melonDS::u16 kStageCameraObjectID = 0x013C;
+
+bool IsARM9MainRAMAddress(melonDS::u32 address) {
+  return (address & 0xFF000000u) == 0x02000000u;
+}
 
 bool ReadMainRAMU32(melonDS::NDS *nds, melonDS::u32 offset,
                     melonDS::u32 &value) {
@@ -352,6 +362,127 @@ bool WriteObjectTransformByBase(melonDS::NDS *nds, melonDS::u32 base,
   WriteMainRAMU32(nds, offset + 0xD0, velX);
   WriteMainRAMU32(nds, offset + 0xD4, velY);
   WriteMainRAMU32(nds, offset + 0xD8, velZ);
+  return true;
+}
+
+bool WriteObjectTransformAndClearMotionByBase(
+    melonDS::NDS *nds, melonDS::u32 base, melonDS::u32 posX,
+    melonDS::u32 posY, melonDS::u32 posZ) {
+  if (!nds || !nds->MainRAM || base < kMainRAMBase)
+    return false;
+  const melonDS::u32 offset = base - kMainRAMBase;
+  bool ok = true;
+  ok = WriteMainRAMU32(nds, offset + 0x60, posX) && ok;
+  ok = WriteMainRAMU32(nds, offset + 0x64, posY) && ok;
+  ok = WriteMainRAMU32(nds, offset + 0x68, posZ) && ok;
+  ok = WriteMainRAMU32(nds, offset + 0x70, posX) && ok;
+  ok = WriteMainRAMU32(nds, offset + 0x74, posY) && ok;
+  ok = WriteMainRAMU32(nds, offset + 0x78, posZ) && ok;
+  ok = WriteMainRAMU32(nds, offset + 0x80, 0) && ok;
+  ok = WriteMainRAMU32(nds, offset + 0x84, 0) && ok;
+  ok = WriteMainRAMU32(nds, offset + 0x88, 0) && ok;
+  ok = WriteMainRAMU32(nds, offset + 0xD0, 0) && ok;
+  ok = WriteMainRAMU32(nds, offset + 0xD4, 0) && ok;
+  ok = WriteMainRAMU32(nds, offset + 0xD8, 0) && ok;
+  return ok;
+}
+
+bool WritePlayerDeathCounterPatch(
+    melonDS::NDS *nds, const melonDS::u32 deaths[2], bool writeLives,
+    const melonDS::u32 lives[2], PlayerDeathCounterPatchResult &result) {
+  result = {};
+  if (!nds || !nds->MainRAM)
+    return false;
+  result.OldDeaths[0] = nds->ARM9Read32(kGamePlayerDeathsAddr);
+  result.OldDeaths[1] =
+      nds->ARM9Read32(kGamePlayerDeathsAddr + sizeof(melonDS::u32));
+  result.OldLives[0] = nds->ARM9Read32(kGamePlayerLivesAddr);
+  result.OldLives[1] =
+      nds->ARM9Read32(kGamePlayerLivesAddr + sizeof(melonDS::u32));
+  nds->ARM9Write32(kGamePlayerDeathsAddr, deaths[0]);
+  nds->ARM9Write32(kGamePlayerDeathsAddr + sizeof(melonDS::u32), deaths[1]);
+  if (writeLives) {
+    nds->ARM9Write32(kGamePlayerLivesAddr, lives[0]);
+    nds->ARM9Write32(kGamePlayerLivesAddr + sizeof(melonDS::u32), lives[1]);
+  }
+  return true;
+}
+
+bool WritePlayerInventoryPowerupPatch(
+    melonDS::NDS *nds, const melonDS::u8 values[2],
+    PlayerBytePairPatchResult &result) {
+  result = {};
+  if (!nds || !nds->MainRAM)
+    return false;
+  result.OldValues[0] = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr);
+  result.OldValues[1] = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr + 1);
+  nds->ARM9Write8(kGamePlayerInventoryPowerupAddr, values[0]);
+  nds->ARM9Write8(kGamePlayerInventoryPowerupAddr + 1, values[1]);
+  return true;
+}
+
+bool WritePlayerPowerupPatch(melonDS::NDS *nds,
+                             const melonDS::u8 values[2],
+                             PlayerPowerupPatchResult &result) {
+  result = {};
+  if (!nds || !nds->MainRAM)
+    return false;
+  result.OldGlobalValues[0] = nds->ARM9Read8(kGamePlayerPowerupAddr);
+  result.OldGlobalValues[1] = nds->ARM9Read8(kGamePlayerPowerupAddr + 1);
+  nds->ARM9Write8(kGamePlayerPowerupAddr, values[0]);
+  nds->ARM9Write8(kGamePlayerPowerupAddr + 1, values[1]);
+
+  const GameStateReader::PlayerActorScanSample players =
+      GameStateReader::FindPlayerActors(nds);
+  const GameStateReader::ObjectScanSample actors[2]{players.Actor0,
+                                                    players.Actor1};
+  for (const GameStateReader::ObjectScanSample &actor : actors) {
+    if (!actor.Found || !IsARM9MainRAMAddress(actor.Base))
+      continue;
+    const melonDS::u32 player =
+        nds->ARM9Read8(actor.Base + kPlayerActorPlayerIDOffset) & 1u;
+    result.ActorBases[player] = actor.Base;
+    result.OldActorStates[player] =
+        nds->ARM9Read8(actor.Base + kPlayerBasePowerupStateOffset);
+    result.OldActorForms[player] =
+        nds->ARM9Read8(actor.Base + kPlayerBasePowerupFormStateOffset);
+    nds->ARM9Write8(actor.Base + kPlayerBasePowerupStateOffset,
+                    values[player]);
+    nds->ARM9Write8(actor.Base + kPlayerBasePowerupFormStateOffset,
+                    values[player]);
+    nds->ARM9Write8(actor.Base + kPlayerBasePowerupSubStateOffset, 0);
+  }
+  return true;
+}
+
+bool WritePlayerStarCounterPatch(
+    melonDS::NDS *nds, const melonDS::u32 battleStars[2],
+    const melonDS::u32 displayedStars[2],
+    const melonDS::u32 collectedStars[2],
+    PlayerStarCounterPatchResult &result) {
+  result = {};
+  if (!nds || !nds->MainRAM)
+    return false;
+  result.OldBattleStars[0] = nds->ARM9Read32(kGamePlayerBattleStarsAddr);
+  result.OldBattleStars[1] =
+      nds->ARM9Read32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32));
+  result.OldDisplayedStars[0] =
+      nds->ARM9Read32(kGamePlayerDisplayedStarsAddr);
+  result.OldDisplayedStars[1] =
+      nds->ARM9Read32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32));
+  result.OldCollectedStars[0] =
+      nds->ARM9Read32(kGamePlayerCollectedStarsAddr);
+  result.OldCollectedStars[1] =
+      nds->ARM9Read32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32));
+  nds->ARM9Write32(kGamePlayerBattleStarsAddr, battleStars[0]);
+  nds->ARM9Write32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32),
+                   battleStars[1]);
+  nds->ARM9Write32(kGamePlayerDisplayedStarsAddr, displayedStars[0]);
+  nds->ARM9Write32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32),
+                   displayedStars[1]);
+  nds->ARM9Write32(kGamePlayerCollectedStarsAddr, collectedStars[0]);
+  nds->ARM9Write32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32),
+                   collectedStars[1]);
   return true;
 }
 

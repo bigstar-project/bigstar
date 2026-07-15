@@ -191,7 +191,6 @@ constexpr melonDS::u32 kInputKeyXMask = 1u << 10;
 constexpr melonDS::u16 kMvlStockItemTouchX = 217;
 constexpr melonDS::u16 kMvlStockItemTouchY = 153;
 constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208B324;
-constexpr melonDS::u32 kGamePlayerPowerupAddr = 0x0208B324;
 constexpr melonDS::u32 kGamePlayerDeadAddr = 0x0208B328;
 constexpr melonDS::u32 kGamePlayerInventoryPowerupAddr = 0x0208B32C;
 constexpr melonDS::u32 kGamePlayerTransitionStatusAddr = 0x0208B354; // Game::playerVSPipeState
@@ -203,10 +202,6 @@ constexpr melonDS::u32 kGamePlayerCollectedStarsAddr = 0x0208B39C;
 constexpr melonDS::u32 kGameCandidateWifiBlockAddr = 0x0208B7A0;
 constexpr melonDS::u32 kGameCandidateRenderBlockAddr = 0x023F8300;
 constexpr melonDS::u16 kPlayerObjectID = 0x0015;
-constexpr melonDS::u32 kPlayerActorPlayerIDOffset = 0x11E;
-constexpr melonDS::u32 kPlayerBasePowerupStateOffset = 0x7AB;
-constexpr melonDS::u32 kPlayerBasePowerupFormStateOffset = 0x7AC;
-constexpr melonDS::u32 kPlayerBasePowerupSubStateOffset = 0x7AD;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
 constexpr melonDS::u16 kVsBattleStarRelatedObjectID = 0x0021;
@@ -363,11 +358,6 @@ void EmitPlayerLifeEvent(
     const GameStateSample& sample,
     melonDS::NDS* nds);
 void EmitStartReadyEventLocked(const char* direction, melonDS::u32 localFrame, melonDS::u32 remoteFrame);
-
-bool IsARM9MainRAMAddress(melonDS::u32 addr)
-{
-    return (addr & 0xFF000000u) == 0x02000000u;
-}
 
 int CurrentPacketBridgeLocalPlayer();
 
@@ -3178,17 +3168,6 @@ bool IsMainRAMAddress(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 size = 
     return offset < ramLen && size <= ramLen - offset;
 }
 
-bool WriteMainRAMU32(melonDS::NDS* nds, melonDS::u32 offset, melonDS::u32 value)
-{
-    if (!nds || !nds->MainRAM)
-        return false;
-    if (offset + sizeof(value) > nds->MainRAMMask + 1)
-        return false;
-
-    std::memcpy(&nds->MainRAM[offset], &value, sizeof(value));
-    return true;
-}
-
 bool WriteARM9U32(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 value)
 {
     if (!nds || (addr & 3) != 0)
@@ -4255,8 +4234,6 @@ void TraceWorldObjectLifecyclesIfNeeded(int instanceID, melonDS::u32 frame, melo
     std::printf("\n");
 }
 
-void WriteObjectTransform(melonDS::NDS* nds, const ObjectScanSample& actor, melonDS::u32 posX, melonDS::u32 posY, melonDS::u32 posZ, bool clearVelocity);
-
 void NormalizeMvlEntranceSpawnStateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (!G.Mvl.NormalizeEntranceSpawnWrites)
@@ -4306,29 +4283,6 @@ void NormalizeMvlEntranceSpawnStateIfNeeded(int instanceID, melonDS::u32 frame, 
     }
 }
 
-void WriteObjectTransform(melonDS::NDS* nds, const ObjectScanSample& actor, melonDS::u32 posX, melonDS::u32 posY, melonDS::u32 posZ, bool clearVelocity)
-{
-    if (!nds || !nds->MainRAM || !actor.Found || actor.Base < kMainRAMBase)
-        return;
-
-    const melonDS::u32 off = actor.Base - kMainRAMBase;
-    WriteMainRAMU32(nds, off + 0x60, posX);
-    WriteMainRAMU32(nds, off + 0x64, posY);
-    WriteMainRAMU32(nds, off + 0x68, posZ);
-    WriteMainRAMU32(nds, off + 0x70, posX);
-    WriteMainRAMU32(nds, off + 0x74, posY);
-    WriteMainRAMU32(nds, off + 0x78, posZ);
-    if (clearVelocity)
-    {
-        WriteMainRAMU32(nds, off + 0x80, 0);
-        WriteMainRAMU32(nds, off + 0x84, 0);
-        WriteMainRAMU32(nds, off + 0x88, 0);
-        WriteMainRAMU32(nds, off + 0xD0, 0);
-        WriteMainRAMU32(nds, off + 0xD4, 0);
-        WriteMainRAMU32(nds, off + 0xD8, 0);
-    }
-}
-
 void ApplyPlayerStickToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 {
     if (G.RuntimePatch.PlayerStickToStarStartFrame == 0 && G.RuntimePatch.PlayerStickToStarEndFrame == 0) return;
@@ -4354,7 +4308,8 @@ void ApplyPlayerStickToStar(int instanceID, melonDS::u32 frame, melonDS::NDS* nd
         return;
     }
 
-    WriteObjectTransform(nds, player, star.PosX, star.PosY, star.PosZ, true);
+    GameStateWriter::WriteObjectTransformAndClearMotionByBase(
+        nds, player.Base, star.PosX, star.PosY, star.PosZ);
     if (frame == G.RuntimePatch.PlayerStickToStarStartFrame)
     {
         std::printf("NSMB Test: started player stick to VS star inst=%d frame=%u-%u slot=%d playerGuid=0x%X starGuid=0x%X pos=0x%08X,0x%08X,0x%08X\n",
@@ -4387,17 +4342,18 @@ void ForcePlayerDeathCountersIfNeeded(int instanceID, melonDS::u32 frame, melonD
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
 
-    const melonDS::u32 old0 = nds->ARM9Read32(kGamePlayerDeathsAddr);
-    const melonDS::u32 old1 = nds->ARM9Read32(kGamePlayerDeathsAddr + sizeof(melonDS::u32));
-    const melonDS::u32 oldLife0 = nds->ARM9Read32(kGamePlayerLivesAddr);
-    const melonDS::u32 oldLife1 = nds->ARM9Read32(kGamePlayerLivesAddr + sizeof(melonDS::u32));
-    nds->ARM9Write32(kGamePlayerDeathsAddr, G.RuntimePatch.ForcePlayerDeathCounter0);
-    nds->ARM9Write32(kGamePlayerDeathsAddr + sizeof(melonDS::u32), G.RuntimePatch.ForcePlayerDeathCounter1);
-    if (G.RuntimePatch.ForcePlayerLivesEnabled)
-    {
-        nds->ARM9Write32(kGamePlayerLivesAddr, G.RuntimePatch.ForcePlayerLife0);
-        nds->ARM9Write32(kGamePlayerLivesAddr + sizeof(melonDS::u32), G.RuntimePatch.ForcePlayerLife1);
-    }
+    const melonDS::u32 deaths[2] {
+        G.RuntimePatch.ForcePlayerDeathCounter0,
+        G.RuntimePatch.ForcePlayerDeathCounter1,
+    };
+    const melonDS::u32 lives[2] {
+        G.RuntimePatch.ForcePlayerLife0,
+        G.RuntimePatch.ForcePlayerLife1,
+    };
+    GameStateWriter::PlayerDeathCounterPatchResult result;
+    if (!GameStateWriter::WritePlayerDeathCounterPatch(
+            nds, deaths, G.RuntimePatch.ForcePlayerLivesEnabled, lives, result))
+        return;
 
     if (G.DiagnosticsRuntime.TakeRuntimePatchLog(
             instanceID, Diagnostics::RuntimePatchLogKind::ForceDeathCounters))
@@ -4408,12 +4364,12 @@ void ForcePlayerDeathCountersIfNeeded(int instanceID, melonDS::u32 frame, melonD
             frame,
             G.RuntimePatch.ForcePlayerDeathCountersStartFrame,
             G.RuntimePatch.ForcePlayerDeathCountersEndFrame,
-            old0,
-            old1,
+            result.OldDeaths[0],
+            result.OldDeaths[1],
             G.RuntimePatch.ForcePlayerDeathCounter0,
             G.RuntimePatch.ForcePlayerDeathCounter1,
-            oldLife0,
-            oldLife1,
+            result.OldLives[0],
+            result.OldLives[1],
             G.RuntimePatch.ForcePlayerLife0,
             G.RuntimePatch.ForcePlayerLife1,
             G.RuntimePatch.ForcePlayerLivesEnabled ? 1 : 0);
@@ -4433,10 +4389,13 @@ void ForcePlayerInventoryPowerupsIfNeeded(int instanceID, melonDS::u32 frame, me
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
 
-    const melonDS::u8 old0 = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr);
-    const melonDS::u8 old1 = nds->ARM9Read8(kGamePlayerInventoryPowerupAddr + 1);
-    nds->ARM9Write8(kGamePlayerInventoryPowerupAddr, static_cast<melonDS::u8>(G.RuntimePatch.ForcePlayerInventoryPowerup0 & 0xFF));
-    nds->ARM9Write8(kGamePlayerInventoryPowerupAddr + 1, static_cast<melonDS::u8>(G.RuntimePatch.ForcePlayerInventoryPowerup1 & 0xFF));
+    const melonDS::u8 values[2] {
+        static_cast<melonDS::u8>(G.RuntimePatch.ForcePlayerInventoryPowerup0 & 0xFF),
+        static_cast<melonDS::u8>(G.RuntimePatch.ForcePlayerInventoryPowerup1 & 0xFF),
+    };
+    GameStateWriter::PlayerBytePairPatchResult result;
+    if (!GameStateWriter::WritePlayerInventoryPowerupPatch(nds, values, result))
+        return;
 
     if (G.DiagnosticsRuntime.TakeRuntimePatchLog(
             instanceID, Diagnostics::RuntimePatchLogKind::ForceInventoryPowerups))
@@ -4447,8 +4406,8 @@ void ForcePlayerInventoryPowerupsIfNeeded(int instanceID, melonDS::u32 frame, me
             frame,
             G.RuntimePatch.ForcePlayerInventoryPowerupsStartFrame,
             G.RuntimePatch.ForcePlayerInventoryPowerupsEndFrame,
-            old0,
-            old1,
+            result.OldValues[0],
+            result.OldValues[1],
             G.RuntimePatch.ForcePlayerInventoryPowerup0 & 0xFF,
             G.RuntimePatch.ForcePlayerInventoryPowerup1 & 0xFF);
     }
@@ -4467,31 +4426,13 @@ void ForcePlayerPowerupsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::ND
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
 
-    const melonDS::u8 value0 = static_cast<melonDS::u8>(G.RuntimePatch.ForcePlayerPowerup0 & 0xFF);
-    const melonDS::u8 value1 = static_cast<melonDS::u8>(G.RuntimePatch.ForcePlayerPowerup1 & 0xFF);
-    const melonDS::u8 old0 = nds->ARM9Read8(kGamePlayerPowerupAddr);
-    const melonDS::u8 old1 = nds->ARM9Read8(kGamePlayerPowerupAddr + 1);
-    nds->ARM9Write8(kGamePlayerPowerupAddr, value0);
-    nds->ARM9Write8(kGamePlayerPowerupAddr + 1, value1);
-
-    melonDS::u8 actorOldState[2] { 0xFF, 0xFF };
-    melonDS::u8 actorOldForm[2] { 0xFF, 0xFF };
-    melonDS::u32 actorBase[2] {};
-    const PlayerActorScanSample players = FindPlayerActors(nds);
-    const ObjectScanSample actors[2] { players.Actor0, players.Actor1 };
-    for (const ObjectScanSample& actor : actors)
-    {
-        if (!actor.Found || !IsARM9MainRAMAddress(actor.Base))
-            continue;
-        const melonDS::u32 player = nds->ARM9Read8(actor.Base + kPlayerActorPlayerIDOffset) & 1u;
-        const melonDS::u8 value = player == 0 ? value0 : value1;
-        actorBase[player] = actor.Base;
-        actorOldState[player] = nds->ARM9Read8(actor.Base + kPlayerBasePowerupStateOffset);
-        actorOldForm[player] = nds->ARM9Read8(actor.Base + kPlayerBasePowerupFormStateOffset);
-        nds->ARM9Write8(actor.Base + kPlayerBasePowerupStateOffset, value);
-        nds->ARM9Write8(actor.Base + kPlayerBasePowerupFormStateOffset, value);
-        nds->ARM9Write8(actor.Base + kPlayerBasePowerupSubStateOffset, 0);
-    }
+    const melonDS::u8 values[2] {
+        static_cast<melonDS::u8>(G.RuntimePatch.ForcePlayerPowerup0 & 0xFF),
+        static_cast<melonDS::u8>(G.RuntimePatch.ForcePlayerPowerup1 & 0xFF),
+    };
+    GameStateWriter::PlayerPowerupPatchResult result;
+    if (!GameStateWriter::WritePlayerPowerupPatch(nds, values, result))
+        return;
 
     if (G.DiagnosticsRuntime.TakeRuntimePatchLog(
             instanceID, Diagnostics::RuntimePatchLogKind::ForcePowerups))
@@ -4503,16 +4444,16 @@ void ForcePlayerPowerupsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::ND
             frame,
             G.RuntimePatch.ForcePlayerPowerupsStartFrame,
             G.RuntimePatch.ForcePlayerPowerupsEndFrame,
-            old0,
-            old1,
-            value0,
-            value1,
-            actorBase[0],
-            actorBase[1],
-            actorOldState[0],
-            actorOldState[1],
-            actorOldForm[0],
-            actorOldForm[1]);
+            result.OldGlobalValues[0],
+            result.OldGlobalValues[1],
+            values[0],
+            values[1],
+            result.ActorBases[0],
+            result.ActorBases[1],
+            result.OldActorStates[0],
+            result.OldActorStates[1],
+            result.OldActorForms[0],
+            result.OldActorForms[1]);
     }
 }
 
@@ -4529,19 +4470,22 @@ void ForcePlayerStarCountersIfNeeded(int instanceID, melonDS::u32 frame, melonDS
     if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
         return;
 
-    const melonDS::u32 oldBattle0 = nds->ARM9Read32(kGamePlayerBattleStarsAddr);
-    const melonDS::u32 oldBattle1 = nds->ARM9Read32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32));
-    const melonDS::u32 oldDisplayed0 = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr);
-    const melonDS::u32 oldDisplayed1 = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32));
-    const melonDS::u32 oldCollected0 = nds->ARM9Read32(kGamePlayerCollectedStarsAddr);
-    const melonDS::u32 oldCollected1 = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32));
-
-    nds->ARM9Write32(kGamePlayerBattleStarsAddr, G.RuntimePatch.ForcePlayerBattleStars0);
-    nds->ARM9Write32(kGamePlayerBattleStarsAddr + sizeof(melonDS::u32), G.RuntimePatch.ForcePlayerBattleStars1);
-    nds->ARM9Write32(kGamePlayerDisplayedStarsAddr, G.RuntimePatch.ForcePlayerDisplayedStars0);
-    nds->ARM9Write32(kGamePlayerDisplayedStarsAddr + sizeof(melonDS::u32), G.RuntimePatch.ForcePlayerDisplayedStars1);
-    nds->ARM9Write32(kGamePlayerCollectedStarsAddr, G.RuntimePatch.ForcePlayerCollectedStars0);
-    nds->ARM9Write32(kGamePlayerCollectedStarsAddr + sizeof(melonDS::u32), G.RuntimePatch.ForcePlayerCollectedStars1);
+    const melonDS::u32 battleStars[2] {
+        G.RuntimePatch.ForcePlayerBattleStars0,
+        G.RuntimePatch.ForcePlayerBattleStars1,
+    };
+    const melonDS::u32 displayedStars[2] {
+        G.RuntimePatch.ForcePlayerDisplayedStars0,
+        G.RuntimePatch.ForcePlayerDisplayedStars1,
+    };
+    const melonDS::u32 collectedStars[2] {
+        G.RuntimePatch.ForcePlayerCollectedStars0,
+        G.RuntimePatch.ForcePlayerCollectedStars1,
+    };
+    GameStateWriter::PlayerStarCounterPatchResult result;
+    if (!GameStateWriter::WritePlayerStarCounterPatch(
+            nds, battleStars, displayedStars, collectedStars, result))
+        return;
 
     if (G.DiagnosticsRuntime.TakeRuntimePatchLog(
             instanceID, Diagnostics::RuntimePatchLogKind::ForceStarCounters))
@@ -4553,16 +4497,16 @@ void ForcePlayerStarCountersIfNeeded(int instanceID, melonDS::u32 frame, melonDS
             frame,
             G.RuntimePatch.ForcePlayerStarCountersStartFrame,
             G.RuntimePatch.ForcePlayerStarCountersEndFrame,
-            oldBattle0,
-            oldBattle1,
+            result.OldBattleStars[0],
+            result.OldBattleStars[1],
             G.RuntimePatch.ForcePlayerBattleStars0,
             G.RuntimePatch.ForcePlayerBattleStars1,
-            oldDisplayed0,
-            oldDisplayed1,
+            result.OldDisplayedStars[0],
+            result.OldDisplayedStars[1],
             G.RuntimePatch.ForcePlayerDisplayedStars0,
             G.RuntimePatch.ForcePlayerDisplayedStars1,
-            oldCollected0,
-            oldCollected1,
+            result.OldCollectedStars[0],
+            result.OldCollectedStars[1],
             G.RuntimePatch.ForcePlayerCollectedStars0,
             G.RuntimePatch.ForcePlayerCollectedStars1);
     }

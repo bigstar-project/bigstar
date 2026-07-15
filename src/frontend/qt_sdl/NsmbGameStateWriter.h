@@ -22,6 +22,28 @@ struct ObjectTransform {
   melonDS::u32 VelZ = 0;
 };
 
+struct PlayerDeathCounterPatchResult {
+  melonDS::u32 OldDeaths[2]{};
+  melonDS::u32 OldLives[2]{};
+};
+
+struct PlayerBytePairPatchResult {
+  melonDS::u8 OldValues[2]{};
+};
+
+struct PlayerPowerupPatchResult {
+  melonDS::u8 OldGlobalValues[2]{};
+  melonDS::u32 ActorBases[2]{};
+  melonDS::u8 OldActorStates[2]{0xFF, 0xFF};
+  melonDS::u8 OldActorForms[2]{0xFF, 0xFF};
+};
+
+struct PlayerStarCounterPatchResult {
+  melonDS::u32 OldBattleStars[2]{};
+  melonDS::u32 OldDisplayedStars[2]{};
+  melonDS::u32 OldCollectedStars[2]{};
+};
+
 inline ObjectTransform PredictWorldActorTransform(
     const WireProtocol::WireWorldActorState &state,
     melonDS::u32 predictFrames) {
@@ -108,8 +130,25 @@ bool WriteObjectTransformByBase(melonDS::NDS *nds, melonDS::u32 base,
                                 melonDS::u32 posX, melonDS::u32 posY,
                                 melonDS::u32 posZ, melonDS::u32 prevX,
                                 melonDS::u32 prevY, melonDS::u32 prevZ,
-                                melonDS::u32 velX, melonDS::u32 velY,
-                                melonDS::u32 velZ);
+                                 melonDS::u32 velX, melonDS::u32 velY,
+                                 melonDS::u32 velZ);
+bool WriteObjectTransformAndClearMotionByBase(
+    melonDS::NDS *nds, melonDS::u32 base, melonDS::u32 posX,
+    melonDS::u32 posY, melonDS::u32 posZ);
+bool WritePlayerDeathCounterPatch(
+    melonDS::NDS *nds, const melonDS::u32 deaths[2], bool writeLives,
+    const melonDS::u32 lives[2], PlayerDeathCounterPatchResult &result);
+bool WritePlayerInventoryPowerupPatch(
+    melonDS::NDS *nds, const melonDS::u8 values[2],
+    PlayerBytePairPatchResult &result);
+bool WritePlayerPowerupPatch(melonDS::NDS *nds,
+                             const melonDS::u8 values[2],
+                             PlayerPowerupPatchResult &result);
+bool WritePlayerStarCounterPatch(
+    melonDS::NDS *nds, const melonDS::u32 battleStars[2],
+    const melonDS::u32 displayedStars[2],
+    const melonDS::u32 collectedStars[2],
+    PlayerStarCounterPatchResult &result);
 bool ApplyWireWorldActorState(
     melonDS::NDS *nds, const WireProtocol::WireWorldActorState &state,
     melonDS::u32 predictFrames, melonDS::u32 localBase);
