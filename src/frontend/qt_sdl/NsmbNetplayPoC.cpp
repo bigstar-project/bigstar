@@ -17,6 +17,7 @@
 #include "NsmbPacketBridgeRuntime.h"
 #include "NsmbMvlRuntime.h"
 #include "NsmbMvlGameHooks.h"
+#include "NsmbMvlLifecycle.h"
 #include "NsmbNetplayCoordinator.h"
 #include "NsmbInputDelivery.h"
 #include "NsmbInputProtocol.h"
@@ -26,6 +27,7 @@
 #include "NsmbNetplaySession.h"
 #include "NsmbTestStateHarness.h"
 #include "NsmbGameState.h"
+#include "NsmbGameStateSync.h"
 #include "NsmbGameStateReader.h"
 #include "NsmbGameStateWriter.h"
 #include "NsmbRollbackStore.h"
@@ -72,7 +74,6 @@ namespace
 constexpr std::size_t kTrackedWorldMovingHazardCount = 4;
 using WireProtocol::WireGameState;
 using WireProtocol::kWireKindState;
-using GameStateReader::WorldEffectSlotSample;
 using GameStateModel::AITerrainDerivedSummary;
 using GameStateModel::AITileGridSample;
 using GameStateModel::AITileProbeSample;
@@ -129,12 +130,8 @@ using GameStateReader::ReadPlayerCollisionMgrSample;
 using GameStateReader::ReadPlayerHitboxSample;
 using GameStateReader::SummarizeObjectLifecycle;
 constexpr melonDS::u32 kNoFrameLimit = 0;
-constexpr melonDS::u32 kMainRAMBase = 0x02000000;
-constexpr melonDS::u32 kGameStageIDAddr = 0x02085A14;
 constexpr melonDS::u32 kGameStageGroupAddr = 0x02085A18;
 constexpr melonDS::u32 kGameVsModeAddr = 0x02085A84;
-constexpr melonDS::u32 kNetStateBaseAddr = 0x020887E8;
-constexpr melonDS::u32 kNetLocalAidAddr = 0x020887F0;
 
 unsigned long long NowUnixMs()
 {
@@ -142,20 +139,13 @@ unsigned long long NowUnixMs()
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count());
 }
-constexpr melonDS::u32 kNetRandomValueAddr = 0x02088A68;
 constexpr melonDS::u32 kInputKeyXMask = 1u << 10;
 constexpr melonDS::u16 kMvlStockItemTouchX = 217;
 constexpr melonDS::u16 kMvlStockItemTouchY = 153;
-constexpr melonDS::u32 kGamePlayerGlobalBlockAddr = 0x0208B324;
 constexpr melonDS::u32 kGamePlayerDeadAddr = 0x0208B328;
 constexpr melonDS::u32 kGamePlayerTransitionStatusAddr = 0x0208B354; // Game::playerVSPipeState
 constexpr melonDS::u32 kGamePlayerLivesAddr = 0x0208B364;
-constexpr melonDS::u32 kGamePlayerBattleStarsAddr = 0x0208B36C;
-constexpr melonDS::u32 kGamePlayerDisplayedStarsAddr = 0x0208B38C;
 constexpr melonDS::u32 kGamePlayerDeathsAddr = 0x0208B394;
-constexpr melonDS::u32 kGamePlayerCollectedStarsAddr = 0x0208B39C;
-constexpr melonDS::u32 kGameCandidateWifiBlockAddr = 0x0208B7A0;
-constexpr melonDS::u32 kGameCandidateRenderBlockAddr = 0x023F8300;
 constexpr melonDS::u16 kPlayerObjectID = 0x0015;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
@@ -168,11 +158,6 @@ constexpr melonDS::u16 kVsWorldItemObjectID = 0x001F;
 constexpr melonDS::u32 kVsNeutralWorldItemSettings = 0x00080000;
 constexpr melonDS::u32 kVsWorldItemSettings = 0x00080002;
 constexpr melonDS::u32 kVsDroppedStarItemSettings = 0x00090002;
-constexpr melonDS::u32 kEffectVTableStart = 0x02126A24;
-constexpr melonDS::u32 kEffectVTablePtr = 0x02126A2C;
-constexpr melonDS::u32 kWorldEffectSlotBase = 0x021C3268;
-constexpr melonDS::u32 kWorldEffectSlotStride = 0x1D4;
-constexpr melonDS::u32 kWorldEffectSlotCount = 32;
 constexpr melonDS::u32 kFireballsHandlerAddr = 0x02129484;
 constexpr melonDS::u32 kProjectilesHandlerAddr = 0x0212A680;
 
@@ -217,11 +202,6 @@ constexpr melonDS::u16 kThwompAltObjectID = 0x0026;
 constexpr melonDS::u16 kFirebarObjectID = 0x0041;
 constexpr melonDS::u16 kBobOmbObjectID = 0x0023;
 constexpr melonDS::u16 kItemSpawnEffectObjectID = 0x00F0;
-constexpr melonDS::u32 kSceneIsSceneActiveAddr = 0x0203BD28;
-constexpr melonDS::u32 kScenePreviousSceneIDAddr = 0x0203BD2C;
-constexpr melonDS::u32 kSceneNextSceneIDAddr = 0x0203BD30;
-constexpr melonDS::u32 kSceneCurrentSceneIDAddr = 0x0203BD34;
-constexpr melonDS::u32 kSceneNextSceneSettingsAddr = 0x02088F38;
 bool IsMarioVsLuigiGameplay(melonDS::NDS* nds)
 {
     if (!nds) return false;
@@ -266,7 +246,6 @@ using Diagnostics::JsonEscape;
 void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 
 
-bool WriteARM9U32(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 value);
 void EmitGameStateMismatchEventLocked(
     int instanceID,
     melonDS::u32 frame,
@@ -284,6 +263,8 @@ void EmitStartReadyEventLocked(const char* direction, melonDS::u32 localFrame, m
 int CurrentPacketBridgeLocalPlayer();
 const PacketBridge::IntegrationHooks& PacketBridgeHooks();
 const NetplaySession::Hooks& NetplaySessionHooks();
+const GameStateSync::Hooks& GameStateSyncHooks();
+const MvlLifecycle::Hooks& MvlLifecycleHooks();
 
 struct State
 {
@@ -390,9 +371,52 @@ NetplaySession::Context NetplaySessionContext()
     };
 }
 
+GameStateSync::Context GameStateSyncContext()
+{
+    return {
+        G.Bootstrap,
+        G.Diagnostics,
+        G.StateSync,
+        G.Input,
+        G.Connection,
+        G.DiagnosticsRuntime,
+        G.GameSync,
+        G.GameStateTrace,
+        G.Transport,
+        G.Mutex,
+        G.MvlCurrentStageSceneSettings,
+        G.Enabled,
+        G.NetRole == Role::Client,
+    };
+}
+
+MvlLifecycle::Context MvlLifecycleContext()
+{
+    return {
+        G.Mvl,
+        G.Connection,
+        G.PacketBridge,
+        G.Input,
+        G.RuntimePatch,
+        G.Rollback,
+        G.MvlSeries,
+        G.PacketBridgeRuntime,
+        G.NetplaySession,
+        G.InputRuntime,
+        G.Coordinator,
+        G.DiagnosticsRuntime,
+        G.GameSync,
+        G.GameStateTrace,
+        G.Mutex,
+        G.MvlCurrentStage,
+        G.MvlCurrentStageSceneSettings,
+        G.NetRole == Role::Host,
+        G.NetRole == Role::Client,
+    };
+}
+
 void TraceHangPhase(const char* event, const char* phase, int instanceID = -1,
     melonDS::u32 frame = 0, melonDS::u32 logicalFrame = 0, melonDS::u32 sendFrame = 0);
-void UpdateHangGameSnapshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
 void StartHangWatchdogIfNeeded();
 void StopDiagnostics();
 
@@ -416,128 +440,6 @@ void StartHangWatchdogIfNeeded()
 void StopDiagnostics()
 {
     G.DiagnosticsRuntime.Stop();
-}
-
-melonDS::u32 ComposeMvlSceneSettingsForStage(int stage)
-{
-    const melonDS::u32 clampedStage = static_cast<melonDS::u32>(std::clamp(stage, 0, 4));
-    return ((0xB4u + clampedStage) << 16) | 0xFF00u;
-}
-
-int MvlStageForGame(int instanceID)
-{
-    return G.MvlSeries.StageForGame(instanceID, G.Mvl, G.MvlCurrentStage);
-}
-
-void RefreshMvlGameSelectionForInstance(int instanceID)
-{
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    const int stage = std::clamp(MvlStageForGame(instanceID), 0, 4);
-    G.MvlCurrentStage = stage;
-    G.MvlCurrentStageSceneSettings = ComposeMvlSceneSettingsForStage(stage);
-}
-
-melonDS::u32 MatchSeedForGame(int instanceID)
-{
-    return G.MvlSeries.MatchSeedForGame(instanceID, G.Mvl);
-}
-
-melonDS::u32 MvlRestartPacketCutoffFrame()
-{
-    return G.MvlSeries.RestartPacketCutoffFrame();
-}
-
-void ResetMvlRuntimeSyncStateForRestart(int instanceID, melonDS::u32 frame)
-{
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-
-    std::lock_guard<std::mutex> lock(G.Mutex);
-
-    G.GameSync.ResetForRestart(instanceID);
-    G.PacketBridgeRuntime.ResetQueuesForRestart();
-    G.NetplaySession.Delivery.Clear();
-    G.InputRuntime.ResetForRestart(kNoFrameLimit);
-    G.DiagnosticsRuntime.ResetNetplaySnapshot(kNoFrameLimit);
-    G.NetplaySession.Handshake.ResetStartHandshake();
-
-    G.GameStateTrace.ResetForRestart(instanceID);
-
-    std::printf("NSMB MvL auto restart: reset sync caches inst=%d frame=%u cutoff=%u\n",
-        instanceID,
-        frame,
-        MvlRestartPacketCutoffFrame());
-    std::fflush(stdout);
-}
-
-void RebaseMvlAutoRestartStartupFrames(int instanceID, melonDS::u32 restartFrame)
-{
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-
-    G.MvlSeries.RebaseStartupFrame(restartFrame, G.Connection.StartFrame);
-    G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ForceTickStartFrame);
-    G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ForceGameLocalPlayerIDStartFrame);
-    G.MvlSeries.RebaseStartupFrame(restartFrame, G.PacketBridge.ThrottleStartFrame);
-    G.MvlSeries.RebaseStartupFrame(restartFrame, G.Input.SendDelayStartFrame);
-    G.MvlSeries.RebaseStartupFrame(restartFrame, G.Input.SendDelayEndFrame);
-    G.MvlSeries.RebaseStartupFrame(restartFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
-    G.MvlSeries.RebaseStartupFrame(restartFrame, G.Mvl.CameraInitHold.StartFrame);
-    G.MvlSeries.RebaseStartupFrame(restartFrame, G.Mvl.CameraInitHold.EndFrame);
-
-    G.MvlSeries.SetStartupFrameBase(restartFrame);
-    std::printf(
-        "NSMB MvL auto restart: rebased startup frames inst=%d restartFrame=%u netplayStart=%u packetJit=%u\n",
-        instanceID,
-        restartFrame,
-        G.Connection.StartFrame,
-        G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
-    std::fflush(stdout);
-}
-
-void RebaseMvlAutoRestartStartupFramesFromCheckpoint(
-    int instanceID,
-    melonDS::u32 restoreFrame,
-    melonDS::u32 checkpointFrame)
-{
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-
-    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Connection.StartFrame);
-    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ForceTickStartFrame);
-    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ForceGameLocalPlayerIDStartFrame);
-    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.PacketBridge.ThrottleStartFrame);
-    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Input.SendDelayStartFrame);
-    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Input.SendDelayEndFrame);
-    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
-    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.CameraInitHold.StartFrame);
-    G.MvlSeries.RebaseStartupFrameFromCheckpoint(restoreFrame, checkpointFrame, G.Mvl.CameraInitHold.EndFrame);
-
-    G.MvlSeries.SetStartupFrameBase(
-        restoreFrame > checkpointFrame ? restoreFrame - checkpointFrame : restoreFrame);
-    std::printf(
-        "NSMB MvL auto restart: rebased startup frames from checkpoint inst=%d restoreFrame=%u checkpointFrame=%u netplayStart=%u packetJit=%u\n",
-        instanceID,
-        restoreFrame,
-        checkpointFrame,
-        G.Connection.StartFrame,
-        G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
-    std::fflush(stdout);
-}
-
-void ResetMvlAutoRestartStartupHookState(int instanceID)
-{
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-
-    G.MvlSeries.ResetStartupHookState(instanceID);
-    G.PacketBridgeRuntime.ResetStartupHookState(instanceID);
-    G.Coordinator.ResetNetplayStartWait();
-    G.NetplaySession.Handshake.ResetStartHandshake();
-    G.InputRuntime.LastInputFrameLeadResendAt = {};
-    G.InputRuntime.InputFrameLeadResendCount = 0;
-    G.Coordinator.ResetNetplayLockstep(instanceID);
 }
 
 melonDS::u32 GenerateMatchSeed()
@@ -840,18 +742,6 @@ InputState ApplyRuleBasedAIInput(
         fallback);
 }
 
-void HandleReceivedGameStateLocked(const void* data, std::size_t size)
-{
-    WireGameState packet;
-    std::memcpy(&packet, data, size);
-    DecodedGameState decoded;
-    if (!DecodeWireGameState(packet, decoded))
-        return;
-
-    const auto mismatch = G.GameSync.RecordRemoteGameState(decoded);
-    if (mismatch)
-        ReportGameStateMismatchLocked(*mismatch);
-}
 unsigned long long ElapsedUs(std::chrono::steady_clock::time_point start)
 {
     return static_cast<unsigned long long>(
@@ -930,10 +820,11 @@ const NetplaySession::Hooks& NetplaySessionHooks()
                 size,
                 nds,
                 localFrame,
-                MvlRestartPacketCutoffFrame());
+                MvlLifecycle::RestartPacketCutoffFrame(MvlLifecycleContext()));
         },
         [](const void* data, std::size_t size) {
-            HandleReceivedGameStateLocked(data, size);
+            GameStateSync::HandleReceivedPacketLocked(
+                GameStateSyncContext(), GameStateSyncHooks(), data, size);
         },
         [](melonDS::NDS* nds) {
             return IsInputNetplayGameplayStartReady(nds);
@@ -941,6 +832,30 @@ const NetplaySession::Hooks& NetplaySessionHooks()
     };
     return hooks;
 }
+
+const GameStateSync::Hooks& GameStateSyncHooks()
+{
+    static const GameStateSync::Hooks hooks {
+        [] {
+            NetplaySession::PumpLocked(
+                NetplaySessionContext(), NetplaySessionHooks());
+        },
+        [] { return CurrentPacketBridgeLocalPlayer(); },
+        [](const GameStateHashMismatch& mismatch) {
+            ReportGameStateMismatchLocked(mismatch);
+        },
+    };
+    return hooks;
+}
+
+const MvlLifecycle::Hooks& MvlLifecycleHooks()
+{
+    static const MvlLifecycle::Hooks hooks {
+        [](melonDS::NDS* nds) { return ReadGameStateSample(nds); },
+    };
+    return hooks;
+}
+
 bool WaitAtFrameBarrier(
     Coordination::FrameBarrierKind kind,
     int instanceID,
@@ -983,444 +898,6 @@ void AdvanceSerialRunTurn(int instanceID, melonDS::u32 frame)
         return;
 
     G.Coordinator.AdvanceSerialTurn(instanceID, frame, G.Bootstrap.TestInstanceCount);
-}
-
-bool WriteARM9U32(melonDS::NDS* nds, melonDS::u32 addr, melonDS::u32 value)
-{
-    if (!nds || (addr & 3) != 0)
-        return false;
-
-    nds->ARM9Write32(addr, value);
-    return true;
-}
-
-void SaveMvlAutoRestartBootstrapCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.Mvl.AutoRestartAfterResult || G.Mvl.TargetWins <= 1 || !nds)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    MvlRuntime::InstanceState& restart = G.MvlSeries.Instances[instanceID];
-    if (!restart.BootstrapCheckpoint.Buffer.empty())
-        return;
-    if (restart.RestartCount != 0 || restart.InResult)
-        return;
-    const melonDS::u32 generatedBootstrapFrame = G.Mvl.AutoRestartBootstrapFrame;
-    const melonDS::u32 stageGroup = nds->ARM9Read32(kGameStageGroupAddr);
-    const melonDS::u16 currentScene = nds->ARM9Read16(kSceneCurrentSceneIDAddr);
-    const melonDS::u16 nextScene = nds->ARM9Read16(kSceneNextSceneIDAddr);
-    const bool generatedRomReady = frame >= generatedBootstrapFrame
-        && stageGroup != 9
-        && currentScene == 0x0004
-        && nextScene == 0x0006
-        && nds->ARM9Read16(kSceneIsSceneActiveAddr) != 0;
-    if (!generatedRomReady)
-        return;
-
-    melonDS::Savestate state;
-    if (state.Error || !nds->DoSavestate(&state) || state.Error)
-    {
-        if (!restart.BootstrapCheckpoint.Logged)
-        {
-            std::printf("NSMB MvL auto restart: failed to save bootstrap checkpoint inst=%d frame=%u\n",
-                instanceID,
-                frame);
-            std::fflush(stdout);
-            restart.BootstrapCheckpoint.Logged = true;
-        }
-        return;
-    }
-
-    restart.BootstrapCheckpoint.Buffer.assign(
-        reinterpret_cast<const char*>(state.Buffer()),
-        reinterpret_cast<const char*>(state.Buffer()) + state.Length());
-    restart.BootstrapCheckpoint.Frame = frame;
-    restart.BootstrapCheckpoint.Logged = true;
-    std::printf("NSMB MvL auto restart: saved bootstrap checkpoint inst=%d frame=%u bytes=%u scene=%04X stageGroup=%u\n",
-        instanceID,
-        frame,
-        state.Length(),
-        currentScene,
-        stageGroup);
-    std::fflush(stdout);
-}
-
-void SchedulePacketBridgeJitHelperPatchAfterRestore(
-    int instanceID,
-    melonDS::u32 restoreFrame,
-    melonDS::u32 checkpointFrame)
-{
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-
-    const PacketBridge::JitHookRestoreResult result =
-        G.PacketBridgeRuntime.ScheduleJitHookAfterRestore(
-            instanceID, restoreFrame, checkpointFrame, G.RuntimePatch);
-    if (result.Action == PacketBridge::JitHookRestoreAction::Disabled)
-        return;
-
-    if (result.Action == PacketBridge::JitHookRestoreAction::KeepApplied)
-    {
-        std::printf(
-            "NSMB MvL auto restart: keeping packet bridge JIT helper patch inst=%d restoreFrame=%u checkpointFrame=%u patchFrame=%u\n",
-            instanceID,
-            restoreFrame,
-            checkpointFrame,
-            G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
-        std::fflush(stdout);
-        return;
-    }
-
-    std::printf(
-        "NSMB MvL auto restart: scheduled packet bridge JIT helper patch inst=%d restoreFrame=%u checkpointFrame=%u patchFrame=%u resumeFrame=%u\n",
-        instanceID,
-        restoreFrame,
-        checkpointFrame,
-        G.RuntimePatch.PacketBridgeJitHelperPatchFrame,
-        result.ResumeFrame);
-    std::fflush(stdout);
-}
-
-bool RestoreMvlAutoRestartBootstrapCheckpoint(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, melonDS::u32 requestedSeed)
-{
-    if (!nds || instanceID < 0 || instanceID >= 16)
-        return false;
-    MvlRuntime::InstanceState& restart = G.MvlSeries.Instances[instanceID];
-    if (restart.BootstrapCheckpoint.Buffer.empty())
-        return false;
-
-    ResetMvlAutoRestartStartupHookState(instanceID);
-    RebaseMvlAutoRestartStartupFramesFromCheckpoint(
-        instanceID,
-        frame,
-        restart.BootstrapCheckpoint.Frame);
-    melonDS::Savestate state(
-        restart.BootstrapCheckpoint.Buffer.data(),
-        static_cast<melonDS::u32>(restart.BootstrapCheckpoint.Buffer.size()),
-        false);
-    if (state.Error || !nds->DoSavestate(&state) || state.Error)
-    {
-        std::printf("NSMB MvL auto restart: failed to restore bootstrap checkpoint inst=%d frame=%u bytes=%zu\n",
-            instanceID,
-            frame,
-            restart.BootstrapCheckpoint.Buffer.size());
-        std::fflush(stdout);
-        return false;
-    }
-
-    RollbackRuntime::InvalidateMainRAMJIT(G.Rollback, nds, nds->MainRAMMask + 1);
-    melonDS::Platform::MP_Begin(nds->UserData);
-    G.MvlSeries.Instances[instanceID].NetRandomPatchApplied = false;
-    G.Mvl.NetRandom.Value = requestedSeed;
-    G.Mvl.NetRandom.Enabled = true;
-    G.Mvl.NetRandom.Auto = true;
-    if (G.NetRole == Role::Host)
-        WriteARM9U32(nds, kNetLocalAidAddr, 0);
-    else if (G.NetRole == Role::Client)
-        WriteARM9U32(nds, kNetLocalAidAddr, 1);
-    MvlGameHooks::WriteRandomSeed(nds, requestedSeed);
-    MvlGameHooks::ApplyRuntimeConfig(MvlHooksContext(), nds);
-    std::printf("NSMB MvL auto restart: restored bootstrap checkpoint inst=%d frame=%u seed=0x%08X bytes=%zu\n",
-        instanceID,
-        frame,
-        requestedSeed,
-        restart.BootstrapCheckpoint.Buffer.size());
-    std::fflush(stdout);
-    return true;
-}
-
-bool ResetMvlAutoRestartConsoleForNextMatch(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, melonDS::u32 requestedSeed)
-{
-    if (!nds || instanceID < 0 || instanceID >= 16 || !nds->GetNDSCart())
-        return false;
-
-    ResetMvlAutoRestartStartupHookState(instanceID);
-    RebaseMvlAutoRestartStartupFrames(instanceID, frame);
-    nds->Reset();
-    MvlGameHooks::ApplyRuntimeConfig(MvlHooksContext(), nds);
-    MvlGameHooks::WriteRandomSeed(nds, requestedSeed);
-    nds->SetupDirectBoot(std::string {});
-    nds->Start();
-    melonDS::Platform::MP_Begin(nds->UserData);
-    MvlGameHooks::ApplyRuntimeConfig(MvlHooksContext(), nds);
-    MvlGameHooks::WriteRandomSeed(nds, requestedSeed);
-    G.Mvl.NetRandom.Enabled = true;
-    G.Mvl.NetRandom.Auto = true;
-    G.MvlSeries.Instances[instanceID].NetRandomPatchApplied = false;
-    G.Mvl.NetRandom.Value = requestedSeed;
-    std::printf(
-        "NSMB MvL auto restart: hard reset console for next match inst=%d frame=%u seed=0x%08X\n",
-        instanceID,
-        frame,
-        requestedSeed);
-    std::fflush(stdout);
-    return true;
-}
-
-MvlRuntime::ResultSnapshot ReadMvlResultSnapshot(melonDS::NDS* nds)
-{
-    MvlRuntime::ResultSnapshot result {};
-    if (!nds)
-        return result;
-
-    for (melonDS::u32 player = 0; player < 2; player++)
-    {
-        const melonDS::u32 wordOffset = sizeof(melonDS::u32) * player;
-        result.BattleStars[player] = nds->ARM9Read32(kGamePlayerBattleStarsAddr + wordOffset);
-        result.DisplayedStars[player] = nds->ARM9Read32(kGamePlayerDisplayedStarsAddr + wordOffset);
-        result.CollectedStars[player] = nds->ARM9Read32(kGamePlayerCollectedStarsAddr + wordOffset);
-        result.Lives[player] = nds->ARM9Read32(kGamePlayerLivesAddr + wordOffset);
-        result.Deaths[player] = nds->ARM9Read32(kGamePlayerDeathsAddr + wordOffset);
-        result.Dead[player] = nds->ARM9Read8(kGamePlayerDeadAddr + player);
-        if (G.Mvl.LifeModeSelector != 2 && result.Dead[player] != 0)
-        {
-            result.Lives[player] = 0;
-            result.Deaths[player] = std::max(result.Deaths[player], G.Mvl.InitialLives);
-        }
-    }
-    return result;
-}
-
-bool RestartMvlAfterResultIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.Mvl.AutoRestartAfterResult || G.Mvl.TargetWins < 1 || !nds || instanceID < 0 || instanceID >= 16)
-        return false;
-    MvlRuntime::InstanceState& restart = G.MvlSeries.Instances[instanceID];
-
-    constexpr melonDS::u16 kResultsScene = 0x000A;
-    const melonDS::u16 currentScene = nds->ARM9Read16(kSceneCurrentSceneIDAddr);
-    if (currentScene != kResultsScene)
-    {
-        if (restart.RestartCount > 0
-            && currentScene == 0x0003
-            && nds->ARM9Read16(kScenePreviousSceneIDAddr) == kResultsScene
-            && nds->ARM9Read16(kSceneNextSceneIDAddr) == 0x0003
-            && frame - restart.LastRestartFrame >= 30)
-        {
-            nds->ARM9Write16(kSceneNextSceneIDAddr, 0x0181);
-        }
-        restart.InResult = false;
-        restart.ResultScored = false;
-        restart.ResultUnresolvedLogged = false;
-        return false;
-    }
-
-    if (!restart.InResult)
-    {
-        restart.InResult = true;
-        restart.ResultUnresolvedLogged = false;
-        restart.ResultFrame = frame;
-        return false;
-    }
-
-    if (!restart.ResultScored)
-    {
-        const MvlRuntime::ResultSnapshot result = ReadMvlResultSnapshot(nds);
-        const int winner = MvlRuntime::ResolveResultWinner(result);
-        if (winner < 0)
-        {
-            if (!restart.ResultUnresolvedLogged
-                && frame - restart.ResultFrame >= G.Mvl.AutoRestartDelayFrames)
-            {
-                std::printf(
-                    "NSMB MvL auto restart: result unresolved inst=%d frame=%u stars=%u/%u displayed=%u/%u collected=%u/%u lives=%u/%u deaths=%u/%u dead=%u/%u matchWins=%d/%d target=%d\n",
-                    instanceID,
-                    frame,
-                    result.BattleStars[0],
-                    result.BattleStars[1],
-                    result.DisplayedStars[0],
-                    result.DisplayedStars[1],
-                    result.CollectedStars[0],
-                    result.CollectedStars[1],
-                    result.Lives[0],
-                    result.Lives[1],
-                    result.Deaths[0],
-                    result.Deaths[1],
-                    result.Dead[0],
-                    result.Dead[1],
-                    restart.Wins[0],
-                    restart.Wins[1],
-                    G.Mvl.TargetWins);
-                std::fflush(stdout);
-                restart.ResultUnresolvedLogged = true;
-            }
-            return false;
-        }
-        restart.Wins[winner]++;
-        restart.ResultScored = true;
-        std::printf(
-            "NSMB MvL auto restart: result inst=%d frame=%u winner=%d stars=%u/%u displayed=%u/%u collected=%u/%u lives=%u/%u deaths=%u/%u dead=%u/%u matchWins=%d/%d target=%d\n",
-            instanceID,
-            frame,
-            winner,
-            result.BattleStars[0],
-            result.BattleStars[1],
-            result.DisplayedStars[0],
-            result.DisplayedStars[1],
-            result.CollectedStars[0],
-            result.CollectedStars[1],
-            result.Lives[0],
-            result.Lives[1],
-            result.Deaths[0],
-            result.Deaths[1],
-            result.Dead[0],
-            result.Dead[1],
-            restart.Wins[0],
-            restart.Wins[1],
-            G.Mvl.TargetWins);
-        std::fflush(stdout);
-    }
-
-    const int leadingWins = std::max(restart.Wins[0], restart.Wins[1]);
-    if (leadingWins >= G.Mvl.TargetWins)
-        return false;
-    if (frame - restart.ResultFrame < G.Mvl.AutoRestartDelayFrames)
-        return false;
-
-    const int nextRestartCount = restart.RestartCount + 1;
-    restart.RestartCount = nextRestartCount;
-    const int requestedStage = std::clamp(MvlStageForGame(instanceID), 0, 4);
-    const melonDS::u32 requestedSeed = MatchSeedForGame(instanceID);
-    G.MvlCurrentStage = requestedStage;
-    G.MvlCurrentStageSceneSettings = ComposeMvlSceneSettingsForStage(requestedStage);
-    MvlGameHooks::WriteRandomSeed(nds, requestedSeed);
-    int restartPath = 0;
-    if (RestoreMvlAutoRestartBootstrapCheckpoint(instanceID, frame, nds, requestedSeed))
-    {
-        restartPath = 3;
-    }
-    else if (!restart.GameplayCheckpoint.Buffer.empty()
-        && restart.GameplayCheckpoint.Stage == requestedStage)
-    {
-        melonDS::Savestate state(
-            restart.GameplayCheckpoint.Buffer.data(),
-            static_cast<melonDS::u32>(restart.GameplayCheckpoint.Buffer.size()),
-            false);
-        if (!state.Error && nds->DoSavestate(&state) && !state.Error)
-        {
-            restartPath = 1;
-            RollbackRuntime::InvalidateMainRAMJIT(G.Rollback, nds, nds->MainRAMMask + 1);
-            melonDS::Platform::MP_Begin(nds->UserData);
-            SchedulePacketBridgeJitHelperPatchAfterRestore(
-                instanceID,
-                frame,
-                restart.GameplayCheckpoint.Frame);
-            WriteARM9U32(nds, kGameStageGroupAddr, 0x00000009);
-            WriteARM9U32(nds, kGameVsModeAddr, 0x00000001);
-            WriteARM9U32(nds, kSceneNextSceneSettingsAddr, G.MvlCurrentStageSceneSettings);
-            MvlGameHooks::ApplyRuntimeConfig(MvlHooksContext(), nds);
-            MvlGameHooks::WriteRandomSeed(nds, requestedSeed);
-        }
-    }
-    else if (ResetMvlAutoRestartConsoleForNextMatch(instanceID, frame, nds, requestedSeed))
-    {
-        restartPath = 4;
-    }
-
-    if (restartPath == 0)
-    {
-        restart.RestartCount = nextRestartCount - 1;
-        std::printf(
-            "NSMB MvL auto restart: failed inst=%d frame=%u nextGame=%d requestedStage=%d seed=0x%08X reason=no-compatible-checkpoint\n",
-            instanceID,
-            frame,
-            nextRestartCount + 1,
-            requestedStage,
-            requestedSeed);
-        std::fflush(stdout);
-        return false;
-    }
-    restart.LastRestartFrame = frame;
-    ResetMvlRuntimeSyncStateForRestart(instanceID, frame);
-    restart.InResult = false;
-    restart.ResultScored = false;
-    restart.ResultUnresolvedLogged = false;
-    const int actualStage = static_cast<int>(nds->ARM9Read32(kGameStageIDAddr));
-    std::printf(
-        "NSMB MvL auto restart: inst=%d frame=%u nextGame=%d stage=%d requestedStage=%d seed=0x%08X matchWins=%d/%d target=%d checkpoint=%d\n",
-        instanceID,
-        frame,
-        restart.RestartCount + 1,
-        actualStage,
-        requestedStage,
-        requestedSeed,
-        restart.Wins[0],
-        restart.Wins[1],
-        G.Mvl.TargetWins,
-        restartPath);
-    std::fflush(stdout);
-    return true;
-}
-
-bool ShouldPauseInputNetplayForMvlAutoRestart(int instanceID, melonDS::NDS* nds)
-{
-    if (!G.Input.NetplayOnly || !G.Mvl.AutoRestartAfterResult || G.Mvl.TargetWins <= 1
-        || !nds || instanceID < 0 || instanceID >= 16)
-    {
-        return false;
-    }
-
-    constexpr melonDS::u16 kResultsScene = 0x000A;
-    if (nds->ARM9Read16(kSceneCurrentSceneIDAddr) != kResultsScene)
-        return false;
-    const MvlRuntime::InstanceState& restart = G.MvlSeries.Instances[instanceID];
-    if (!restart.InResult)
-        return false;
-
-    const int leadingWins = std::max(restart.Wins[0], restart.Wins[1]);
-    return leadingWins < G.Mvl.TargetWins;
-}
-
-void SaveMvlAutoRestartCheckpointIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.Mvl.AutoRestartAfterResult || G.Mvl.TargetWins <= 1 || !nds || !nds->MainRAM)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    MvlRuntime::InstanceState& restart = G.MvlSeries.Instances[instanceID];
-    if (!restart.GameplayCheckpoint.Buffer.empty())
-        return;
-    if (restart.InResult || restart.RestartCount != 0)
-        return;
-    if (nds->ARM9Read16(kSceneCurrentSceneIDAddr) != 0x0003)
-        return;
-    if (nds->ARM9Read16(kSceneIsSceneActiveAddr) == 0)
-        return;
-    if (nds->ARM9Read32(kGameStageGroupAddr) != 9 || nds->ARM9Read32(kGameVsModeAddr) != 1)
-        return;
-
-    const GameStateSample sample = ReadGameStateSample(nds);
-    if (!sample.PlayerActor0Found || !sample.PlayerActor1Found || !sample.VsStarActorFound || !sample.StageSceneFound)
-        return;
-    if (sample.StageSceneStateType != 1)
-        return;
-
-    melonDS::Savestate state;
-    if (state.Error || !nds->DoSavestate(&state) || state.Error)
-    {
-        if (!restart.GameplayCheckpoint.Logged)
-        {
-            std::printf("NSMB MvL auto restart: failed to save checkpoint inst=%d frame=%u\n", instanceID, frame);
-            std::fflush(stdout);
-            restart.GameplayCheckpoint.Logged = true;
-        }
-        return;
-    }
-
-    restart.GameplayCheckpoint.Buffer.assign(
-        reinterpret_cast<const char*>(state.Buffer()),
-        reinterpret_cast<const char*>(state.Buffer()) + state.Length());
-    restart.GameplayCheckpoint.Frame = frame;
-    restart.GameplayCheckpoint.Stage = static_cast<int>(sample.StageID);
-    restart.GameplayCheckpoint.Logged = true;
-    std::printf(
-        "NSMB MvL auto restart: saved checkpoint inst=%d frame=%u bytes=%u stage=%u settings=0x%08X\n",
-        instanceID,
-        frame,
-        state.Length(),
-        sample.StageID,
-        sample.StageSceneSettings);
-    std::fflush(stdout);
 }
 
 void WriteDiagnosticEventLocked(const std::string& json)
@@ -1654,214 +1131,6 @@ void EmitPlayerLifeEvent(
 
     std::lock_guard<std::mutex> lock(G.Mutex);
     WriteDiagnosticEventLocked(json);
-}
-
-void TraceWorldMovingHazardsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.StateSync.WorldTraceMovingHazards || instanceID < 0 || instanceID >= 16)
-        return;
-    if ((frame % 60) != 0 || G.GameSync.LastTracedWorldMovingHazardsFrame[instanceID] == frame)
-        return;
-    G.GameSync.LastTracedWorldMovingHazardsFrame[instanceID] = frame;
-
-    const std::vector<ObjectScanSample> actors =
-        FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
-    std::printf("NSMB WorldHazards: role=%s inst=%d frame=%u count=%zu",
-        G.NetRole == Role::Host ? "host" : "client",
-        instanceID,
-        frame,
-        actors.size());
-    for (std::size_t i = 0; i < actors.size(); i++)
-    {
-        std::printf(" slot%zu=%u/%08X/%08X",
-            i,
-            actors[i].GUID,
-            actors[i].PosX,
-            actors[i].PosY);
-    }
-    std::printf("\n");
-}
-
-bool ShouldTraceWorldActorInternals(melonDS::u16 objectID, melonDS::u32 vtable)
-{
-    return objectID == kVsMovingHazardObjectID ||
-        objectID == kVsKoopaTroopaObjectID ||
-        objectID == kVsBattleStarCandidateObjectID ||
-        vtable == kEffectVTablePtr ||
-        vtable == kEffectVTableStart;
-}
-
-void PrintWorldActorInternalWords(
-    const char* prefix,
-    int instanceID,
-    melonDS::u32 frame,
-    melonDS::NDS* nds,
-    melonDS::u32 base,
-    melonDS::u32 guid,
-    melonDS::u16 objectID,
-    melonDS::u32 settings,
-    melonDS::u32 vtable)
-{
-    std::printf(
-        "%s: role=%s inst=%d frame=%u guid=%u object=%03X settings=%08X vtable=%08X base=%08X words=",
-        prefix,
-        G.NetRole == Role::Host ? "host" : "client",
-        instanceID,
-        frame,
-        guid,
-        objectID,
-        settings,
-        vtable,
-        base);
-
-    for (melonDS::u32 relativeOffset = 0; relativeOffset <= 0x1FC; relativeOffset += sizeof(melonDS::u32))
-    {
-        melonDS::u32 value = 0;
-        RollbackRuntime::ReadMainRAMAddressU32(nds, base + relativeOffset, value);
-        std::printf("%s%02X:%08X", relativeOffset == 0 ? "" : "/", relativeOffset, value);
-    }
-    std::printf("\n");
-}
-
-void TraceWorldEffectsIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.StateSync.WorldTraceEffects || !nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
-        return;
-    if (frame < G.StateSync.WorldTraceObjectLifecyclesStartFrame ||
-        (G.StateSync.WorldTraceObjectLifecyclesEndFrame != kNoFrameLimit &&
-            frame > G.StateSync.WorldTraceObjectLifecyclesEndFrame))
-        return;
-    if ((frame % static_cast<melonDS::u32>(G.StateSync.WorldTraceObjectLifecyclesInterval)) != 0 ||
-        G.GameSync.LastTracedWorldEffectsFrame[instanceID] == frame)
-        return;
-    G.GameSync.LastTracedWorldEffectsFrame[instanceID] = frame;
-
-    melonDS::u32 count = 0;
-    for (melonDS::u32 slotIndex = 0; slotIndex < kWorldEffectSlotCount; slotIndex++)
-    {
-        const melonDS::u32 base = kWorldEffectSlotBase + slotIndex * kWorldEffectSlotStride;
-        WorldEffectSlotSample slot {};
-        if (!GameStateReader::ReadWorldEffectSlot(nds, base, slot))
-            continue;
-
-        const melonDS::u32 guid = 0;
-        PrintWorldActorInternalWords(
-            "NSMB WorldEffectInternals",
-            instanceID,
-            frame,
-            nds,
-            base,
-            guid,
-            0,
-            0,
-            slot.VTable);
-        count++;
-        if (count >= 16)
-            break;
-    }
-
-    if (count == 0)
-    {
-        std::printf(
-            "NSMB WorldEffectInternals: role=%s inst=%d frame=%u count=0\n",
-            G.NetRole == Role::Host ? "host" : "client",
-            instanceID,
-            frame);
-    }
-}
-
-void TraceWorldObjectLifecyclesIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.StateSync.WorldTraceObjectLifecycles || !nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
-        return;
-    if (frame < G.StateSync.WorldTraceObjectLifecyclesStartFrame ||
-        (G.StateSync.WorldTraceObjectLifecyclesEndFrame != kNoFrameLimit &&
-            frame > G.StateSync.WorldTraceObjectLifecyclesEndFrame))
-        return;
-    if ((frame % static_cast<melonDS::u32>(G.StateSync.WorldTraceObjectLifecyclesInterval)) != 0 ||
-        G.GameSync.LastTracedWorldObjectLifecyclesFrame[instanceID] == frame)
-        return;
-    G.GameSync.LastTracedWorldObjectLifecyclesFrame[instanceID] = frame;
-
-    struct LifecycleActor
-    {
-        melonDS::u32 VTable = 0;
-        melonDS::u32 Base = 0;
-        melonDS::u32 GUID = 0;
-        melonDS::u32 Settings = 0;
-        melonDS::u32 PosX = 0;
-        melonDS::u32 PosY = 0;
-        melonDS::u32 PosZ = 0;
-        melonDS::u16 ObjectID = 0;
-        melonDS::u8 State = 0;
-        melonDS::u8 Type = 0;
-        melonDS::u8 SkipFlags = 0;
-    };
-
-    std::vector<LifecycleActor> actors;
-    const GameStateObjectScanCache cache = BuildGameStateObjectScanCache(nds);
-    actors.reserve(cache.Entries.size());
-    for (const GameStateObjectScanEntry& entry : cache.Entries)
-    {
-        LifecycleActor actor;
-        actor.VTable = entry.VTable;
-        actor.Base = entry.Actor.Base;
-        actor.GUID = entry.Actor.GUID;
-        actor.Settings = entry.Actor.Settings;
-        actor.PosX = entry.Actor.PosX;
-        actor.PosY = entry.Actor.PosY;
-        actor.PosZ = entry.Actor.PosZ;
-        actor.ObjectID = entry.ObjectID;
-        actor.State = entry.LifecycleState;
-        actor.Type = entry.Type;
-        actor.SkipFlags = entry.SkipFlags;
-        if (G.StateSync.WorldTraceActorInternals &&
-            ShouldTraceWorldActorInternals(entry.ObjectID, entry.VTable))
-        {
-            PrintWorldActorInternalWords(
-                "NSMB WorldActorInternals",
-                instanceID,
-                frame,
-                nds,
-                actor.Base,
-                actor.GUID,
-                actor.ObjectID,
-                actor.Settings,
-                actor.VTable);
-        }
-        if (actor.State == 0 || actor.State > 2 || actor.Type > 2)
-            continue;
-        actors.push_back(actor);
-    }
-
-    std::sort(actors.begin(), actors.end(), [](const LifecycleActor& lhs, const LifecycleActor& rhs) {
-        if (lhs.State != rhs.State)
-            return lhs.State < rhs.State;
-        if (lhs.ObjectID != rhs.ObjectID)
-            return lhs.ObjectID < rhs.ObjectID;
-        return lhs.GUID < rhs.GUID;
-    });
-    std::printf("NSMB WorldObjects: role=%s inst=%d frame=%u count=%zu",
-        G.NetRole == Role::Host ? "host" : "client",
-        instanceID,
-        frame,
-        actors.size());
-    for (const LifecycleActor& actor : actors)
-    {
-        std::printf(" actor=%u/%03X/%08X/%u/%u/%02X/%08X/%08X/%08X/%08X/%08X",
-            actor.GUID,
-            actor.ObjectID,
-            actor.Settings,
-            actor.State,
-            actor.Type,
-            actor.SkipFlags,
-            actor.VTable,
-            actor.Base,
-            actor.PosX,
-            actor.PosY,
-            actor.PosZ);
-    }
-    std::printf("\n");
 }
 
 int CurrentPacketBridgeLocalPlayer()
@@ -2167,132 +1436,10 @@ void WritePacketBridgeJitScratchIfNeeded(
         return;
 }
 
-void ApplyRemoteGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.Enabled || !G.StateSync.GameApplyEnabled) return;
-    if (!G.StateSync.GameApplyRemotePlayerOnly && G.NetRole != Role::Client) return;
-    if (instanceID < 0 || instanceID >= 16 || !nds || !nds->MainRAM) return;
-    if (frame < G.Connection.StartFrame) return;
-
-    GameStateSample sample;
-    melonDS::u32 sampleFrame = 0;
-    {
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        NetplaySession::PumpLocked(NetplaySessionContext(), NetplaySessionHooks());
-        if (!G.GameSync.RemoteState.FindLatestGameState(instanceID, frame, sample, sampleFrame))
-            return;
-    }
-
-    GameStateWriter::GameStateApplyOptions options;
-    options.RemotePlayerOnly = G.StateSync.GameApplyRemotePlayerOnly;
-    if (options.RemotePlayerOnly)
-        options.RemotePlayer = CurrentPacketBridgeLocalPlayer() ^ 1;
-    options.CriticalGlobals = G.StateSync.GameApplyCriticalGlobals;
-    options.StageObjects = G.StateSync.GameApplyStageObjects;
-    options.StarObjects = G.StateSync.GameApplyStarObjects;
-    options.PlayerActors = G.StateSync.GameApplyPlayerActors;
-    options.StageSceneSettings = G.MvlCurrentStageSceneSettings;
-    const GameStateWriter::GameStateApplyResult result =
-        GameStateWriter::ApplyGameState(nds, sample, options);
-
-    if (options.RemotePlayerOnly)
-    {
-        if ((G.Bootstrap.InputTraceEnabled || G.Input.NetplayTrace) &&
-            (G.Bootstrap.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.Bootstrap.InputTraceInterval)) == 0))
-        {
-            std::printf("NSMB PoC: applied remote-player snapshot inst=%d frame=%u sampleFrame=%u remotePlayer=%d applied=%d\n",
-                instanceID,
-                frame,
-                sampleFrame,
-                options.RemotePlayer,
-                result.RemotePlayerApplied ? 1 : 0);
-        }
-        return;
-    }
-
-    if (G.Bootstrap.InputTraceEnabled &&
-        (G.Bootstrap.InputTraceInterval <= 1 || (frame % static_cast<melonDS::u32>(G.Bootstrap.InputTraceInterval)) == 0))
-    {
-        std::printf("NSMB PoC: applied remote game state inst=%d frame=%u sampleFrame=%u\n",
-            instanceID,
-            frame,
-            sampleFrame);
-    }
-}
 GameStateSample ReadGameStateSample(melonDS::NDS* nds)
 {
-    GameStateSample sample;
-    if (!nds || !nds->MainRAM)
-        return sample;
-    const GameStateObjectScanCache objectScanCache = BuildGameStateObjectScanCache(nds);
-    const ScopedGameStateObjectScanCache scopedObjectScanCache(objectScanCache);
-
-    GameStateReader::ReadCoreState(nds, sample);
-
-    GameStateReader::ReadBattleStarState(nds, sample);
-
-    const PlayerActorScanSample players = FindPlayerActors(nds);
-    GameStateReader::CopyPlayerActor(players.Actor0, sample, 0);
-    sample.PlayerActor0CollisionMgr = ReadPlayerCollisionMgrSample(nds, players.Actor0);
-    sample.PlayerActor0Hitbox = ReadPlayerHitboxSample(nds, players.Actor0);
-    sample.PlayerActor0TileProbe = ReadAIPlayerTileProbeSample(nds, players.Actor0);
-    GameStateReader::ReadPlayerTileDamage(nds, players.Actor0, sample, 0);
-    GameStateReader::CopyPlayerActor(players.Actor1, sample, 1);
-    sample.PlayerActor1CollisionMgr = ReadPlayerCollisionMgrSample(nds, players.Actor1);
-    sample.PlayerActor1Hitbox = ReadPlayerHitboxSample(nds, players.Actor1);
-    sample.PlayerActor1TileProbe = ReadAIPlayerTileProbeSample(nds, players.Actor1);
-    GameStateReader::ReadPlayerTileDamage(nds, players.Actor1, sample, 1);
-    GameStateReader::ReadPlayerTransitionState(nds, players.Actor0, sample, 0);
-    GameStateReader::ReadPlayerTransitionState(nds, players.Actor1, sample, 1);
-
-    GameStateReader::ReadPlayerBaseRuntimeState(nds, players.Actor0, sample, 0);
-    GameStateReader::ReadPlayerBaseRuntimeState(nds, players.Actor1, sample, 1);
-
-    GameStateReader::ReadPlayerAndCameraGlobals(nds, sample);
-
-    GameStateReader::ReadStageObjectState(nds, G.MvlCurrentStageSceneSettings, sample);
-
-    sample.Hash = ComputeBasicGameStateHash(sample);
-    return sample;
+    return GameStateSync::ReadSample(nds, G.MvlCurrentStageSceneSettings);
 }
-
-void UpdateHangGameSnapshot(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.Diagnostics.HangDiagnosticsEnabled || !nds || !nds->MainRAM || instanceID < 0 || instanceID >= 16)
-        return;
-
-    const GameStateSample sample = ReadGameStateSample(nds);
-    G.DiagnosticsRuntime.UpdateGameSnapshot(instanceID, frame, sample, NowUnixMs());
-}
-
-void TraceGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (G.Diagnostics.GameStateTracePath.empty()) return;
-    if (!nds || !nds->MainRAM) return;
-    if (instanceID < 0 || instanceID >= 16) return;
-    if (frame < G.Diagnostics.GameStateTraceStartFrame) return;
-    if (G.Diagnostics.GameStateTraceEndFrame != 0 && frame > G.Diagnostics.GameStateTraceEndFrame) return;
-    if ((frame % static_cast<melonDS::u32>(G.Diagnostics.GameStateTraceInterval)) != 0) return;
-    if ((kNetRandomValueAddr - kMainRAMBase) + sizeof(melonDS::u32) > nds->MainRAMMask + 1) return;
-
-    const GameStateSample sample = ReadGameStateSample(nds);
-
-    std::lock_guard<std::mutex> lock(G.Mutex);
-    if (!G.GameStateTrace.IsOpen()) return;
-
-    GameStateTraceHashes traceHashes;
-    const GameStateTraceHashes* extendedHashes = nullptr;
-    if (G.Diagnostics.GameStateTraceExtended)
-    {
-        traceHashes.PlayerGlobal = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0xC0);
-        traceHashes.WifiCandidate = HashMainRAMRange(nds, kGameCandidateWifiBlockAddr, 0x2200);
-        traceHashes.RenderCandidate = HashMainRAMRange(nds, kGameCandidateRenderBlockAddr, 0x240);
-        traceHashes.NetState = HashMainRAMRange(nds, kNetStateBaseAddr, 0x180);
-        extendedHashes = &traceHashes;
-    }
-    G.GameStateTrace.Write(instanceID, frame, sample, extendedHashes);
-}
-
 void WriteJsonHex(std::ostream& out, melonDS::u32 value, int width = 8)
 {
     const std::ios::fmtflags flags = out.flags();
@@ -2309,39 +1456,6 @@ std::int32_t SignedU32(melonDS::u32 value)
 
 #include "NsmbAiObservation.cpp"
 
-void SyncGameState(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.Enabled || !G.StateSync.GameEnabled || !nds) return;
-    if (instanceID < 0 || instanceID >= 16) return;
-    if (frame < G.Connection.StartFrame) return;
-    if ((frame % static_cast<melonDS::u32>(G.StateSync.GameInterval)) != 0) return;
-
-    const GameStateSample sample = ReadGameStateSample(nds);
-    GameStateSyncHashes hashes;
-    hashes.Basic = sample.Hash;
-    if (G.StateSync.GameExtended)
-    {
-        hashes.PlayerGlobal = HashMainRAMRange(nds, kGamePlayerGlobalBlockAddr, 0xC0);
-        hashes.WifiCandidate = HashMainRAMRange(nds, kGameCandidateWifiBlockAddr, 0x2200);
-        hashes.RenderCandidate = HashMainRAMRange(nds, kGameCandidateRenderBlockAddr, 0x240);
-    }
-
-    std::lock_guard<std::mutex> lock(G.Mutex);
-    if (!G.GameSync.BeginGameStateSync(instanceID, frame)) return;
-    const auto mismatch =
-        G.GameSync.RecordLocalGameStateHashes(instanceID, frame, hashes);
-    if (mismatch)
-        ReportGameStateMismatchLocked(*mismatch);
-
-    if (!G.Transport.IsConnected()) return;
-    const WireGameState packet = EncodeWireGameState(
-        frame,
-        static_cast<melonDS::u32>(instanceID),
-        sample,
-        hashes);
-
-    G.Transport.Send(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE, false);
-}
 
 }
 
@@ -2558,7 +1672,7 @@ void RunBeforeFrameRuntimeConfigPhase(int instanceID, melonDS::NDS* nds)
 {
     if (!CanRunFrameHooks(instanceID, nds))
         return;
-    RefreshMvlGameSelectionForInstance(instanceID);
+    MvlLifecycle::RefreshGameSelection(MvlLifecycleContext(), instanceID);
     MvlGameHooks::ApplyRuntimeConfig(MvlHooksContext(), nds);
 }
 
@@ -2566,8 +1680,10 @@ void RunBeforeFrameBootPhase(int instanceID, melonDS::u32 frame, melonDS::NDS* n
 {
     if (!CanRunFrameHooks(instanceID, nds))
         return;
-    SaveMvlAutoRestartBootstrapCheckpointIfNeeded(instanceID, frame, nds);
-    RestartMvlAfterResultIfNeeded(instanceID, frame, nds);
+    MvlLifecycle::SaveBootstrapCheckpointIfNeeded(
+        MvlLifecycleContext(), instanceID, frame, nds);
+    MvlLifecycle::RestartAfterResultIfNeeded(
+        MvlLifecycleContext(), instanceID, frame, nds);
 }
 
 void RunBeforeFramePatchPhase(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
@@ -2592,7 +1708,8 @@ void RunBeforeFrameActorStatePhase(int instanceID, melonDS::u32 frame, melonDS::
 {
     if (!G.Enabled || instanceID < 0 || instanceID >= 16 || !nds)
         return;
-    ApplyRemoteGameState(instanceID, frame, nds);
+    GameStateSync::ApplyRemote(
+        GameStateSyncContext(), GameStateSyncHooks(), instanceID, frame, nds);
 }
 
 InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, const InputState& polledInput)
@@ -2716,7 +1833,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Checkpoint);
 
     const bool pauseInputNetplayForRestart = G.Enabled
-        && ShouldPauseInputNetplayForMvlAutoRestart(instanceID, nds);
+        && MvlLifecycle::ShouldPauseInputForRestart(
+            MvlLifecycleContext(), instanceID, nds);
     if (!pauseInputNetplayForRestart
         && (G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         WritePacketBridgeJitScratchIfNeeded(instanceID, syncFrame, nds, testInput);
@@ -3143,7 +2261,8 @@ void RunAfterFrameRuntimePatchPhase(int instanceID, melonDS::u32 logFrame, melon
     MvlGameHooks::ForcePlayerPowerups(MvlHooksContext(), instanceID, logFrame, nds);
     MvlGameHooks::ForcePlayerInventoryPowerups(MvlHooksContext(), instanceID, logFrame, nds);
     MvlGameHooks::ForcePlayerStarCounters(MvlHooksContext(), instanceID, logFrame, nds);
-    SaveMvlAutoRestartCheckpointIfNeeded(instanceID, logFrame, nds);
+    MvlLifecycle::SaveGameplayCheckpointIfNeeded(
+        MvlLifecycleContext(), MvlLifecycleHooks(), instanceID, logFrame, nds);
 }
 
 void CaptureScreenshotIfNeeded(int instanceID, melonDS::u32 frame,
@@ -3202,7 +2321,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     const melonDS::u32 logFrame = PrepareAfterFrameLogFrame(instanceID, frame);
     const auto afterHeartbeat = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "after-frame", instanceID, logFrame, logFrame, logFrame);
-    UpdateHangGameSnapshot(instanceID, logFrame, nds);
+    GameStateSync::UpdateHangSnapshot(
+        GameStateSyncContext(), instanceID, logFrame, nds);
 
     TraceHangPhase("begin", "gameplay-heartbeat", instanceID, logFrame, logFrame, logFrame);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
@@ -3217,7 +2337,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     TraceHangPhase("begin", "apply-remote-game-state", instanceID, logFrame, logFrame, logFrame);
     if (G.Enabled)
-        ApplyRemoteGameState(instanceID, logFrame, nds);
+        GameStateSync::ApplyRemote(
+            GameStateSyncContext(), GameStateSyncHooks(), instanceID, logFrame, nds);
 
     TraceHangPhase("begin", "packet-bridge", instanceID, logFrame, logFrame, logFrame);
     RunAfterFramePacketBridgePhase(logFrame, nds);
@@ -3247,18 +2368,15 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     const auto afterPreSnapshot = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "world-trace", instanceID, logFrame, logFrame, logFrame);
     if (CanRunFrameHooks(instanceID, nds))
-    {
-        TraceWorldMovingHazardsIfNeeded(instanceID, logFrame, nds);
-        TraceWorldObjectLifecyclesIfNeeded(instanceID, logFrame, nds);
-        TraceWorldEffectsIfNeeded(instanceID, logFrame, nds);
-    }
+        GameStateSync::TraceWorld(GameStateSyncContext(), instanceID, logFrame, nds);
     const auto afterWorldTrace = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "game-state-trace", instanceID, logFrame, logFrame, logFrame);
-    TraceGameState(instanceID, logFrame, nds);
+    GameStateSync::Trace(GameStateSyncContext(), instanceID, logFrame, nds);
     TraceAIPlayLog(instanceID, logFrame, nds);
     const auto afterTrace = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "sync-game", instanceID, logFrame, logFrame, logFrame);
-    SyncGameState(instanceID, logFrame, nds);
+    GameStateSync::Sync(
+        GameStateSyncContext(), GameStateSyncHooks(), instanceID, logFrame, nds);
     const auto afterSyncGame = std::chrono::steady_clock::now();
     TraceHangPhase("end", "after-frame", instanceID, logFrame, logFrame, logFrame);
 

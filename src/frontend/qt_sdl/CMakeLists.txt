@@ -21,6 +21,8 @@ set(SOURCES_QT_SDL
     NsmbPacketBridgeIntegration.h
     NsmbMvlRuntime.cpp
     NsmbMvlRuntime.h
+    NsmbMvlLifecycle.cpp
+    NsmbMvlLifecycle.h
     NsmbMvlGameHooks.cpp
     NsmbMvlGameHooks.h
     NsmbInputTimeline.cpp
@@ -42,6 +44,8 @@ set(SOURCES_QT_SDL
     NsmbTestStateHarness.cpp
     NsmbTestStateHarness.h
     NsmbGameState.cpp
+    NsmbGameStateSync.cpp
+    NsmbGameStateSync.h
     NsmbGameStateReader.cpp
     NsmbGameStateWriter.cpp
     NsmbGameState.h
