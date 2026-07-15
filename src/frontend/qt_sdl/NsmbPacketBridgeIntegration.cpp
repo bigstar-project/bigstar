@@ -11,7 +11,7 @@
 #include <optional>
 #include <thread>
 
-namespace NsmbNetplayPoC::PacketBridge {
+namespace NsmbMvlNetplay::PacketBridge {
 namespace {
 
 constexpr melonDS::u32 kGameStageGroupAddr = 0x02085A18;
@@ -389,4 +389,4 @@ void ApplyJitHelperPatchIfNeeded(IntegrationContext context, int instanceID,
               instanceID, frame, kPacketBridgeJitScratchBaseAddr);
 }
 
-} // namespace NsmbNetplayPoC::PacketBridge
+} // namespace NsmbMvlNetplay::PacketBridge

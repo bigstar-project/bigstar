@@ -34,7 +34,7 @@ bool EndsWith(const std::string &value, const std::string &suffix) {
 }
 
 void TestEveryWireWordRoundTrips() {
-  using namespace NsmbNetplayPoC;
+  using namespace NsmbMvlNetplay;
   WireProtocol::WireGameState original{};
   auto *words = reinterpret_cast<melonDS::u32 *>(&original);
   for (std::size_t index = 0; index < sizeof(original) / sizeof(*words);
@@ -53,7 +53,7 @@ void TestEveryWireWordRoundTrips() {
 }
 
 void TestMalformedHeadersAreRejected() {
-  using namespace NsmbNetplayPoC;
+  using namespace NsmbMvlNetplay;
   const GameStateModel::GameStateSample sample;
   const GameStateModel::GameStateSyncHashes hashes;
   const auto valid = GameStateModel::EncodeWireGameState(7, 2, sample, hashes);
@@ -76,7 +76,7 @@ void TestMalformedHeadersAreRejected() {
 }
 
 void TestGameStateHashes() {
-  using namespace NsmbNetplayPoC::GameStateModel;
+  using namespace NsmbMvlNetplay::GameStateModel;
   GameStateSample sample;
   const melonDS::u64 emptyHash = ComputeBasicGameStateHash(sample);
   CHECK(emptyHash == 0xE8381D02137D9773ull);
@@ -99,7 +99,7 @@ void TestGameStateHashes() {
 }
 
 void TestRemoteStateStoreSelectionAndRestart() {
-  using namespace NsmbNetplayPoC;
+  using namespace NsmbMvlNetplay;
   GameStateModel::RemoteStateStore store;
 
   GameStateModel::DecodedGameState first;
@@ -134,7 +134,7 @@ void TestRemoteStateStoreSelectionAndRestart() {
 }
 
 void TestStateSyncHashComparisonContract() {
-  using namespace NsmbNetplayPoC;
+  using namespace NsmbMvlNetplay;
   GameStateModel::StateSyncRuntime runtime;
   GameStateModel::GameStateSyncHashes local;
   local.Basic = 1;
@@ -167,7 +167,7 @@ void TestStateSyncHashComparisonContract() {
 }
 
 void TestStateSyncRuntimeRestartContract() {
-  using namespace NsmbNetplayPoC;
+  using namespace NsmbMvlNetplay;
   GameStateModel::StateSyncRuntime runtime;
   GameStateModel::GameStateSyncHashes hashes;
   hashes.Basic = 1;
@@ -199,7 +199,7 @@ void TestStateSyncRuntimeRestartContract() {
 }
 
 void TestGameStateTraceRowFormatting() {
-  using namespace NsmbNetplayPoC::GameStateModel;
+  using namespace NsmbMvlNetplay::GameStateModel;
   GameStateSample sample;
   sample.StageID = 0xA1;
   sample.ObjectActiveBase[kObjectTraceSlots - 1] = 0xB2;
@@ -244,7 +244,7 @@ void TestGameStateTraceRowFormatting() {
 }
 
 void TestGameStateTraceWriterLifecycle() {
-  using namespace NsmbNetplayPoC::GameStateModel;
+  using namespace NsmbMvlNetplay::GameStateModel;
   const auto unique = std::chrono::high_resolution_clock::now()
                           .time_since_epoch()
                           .count();
@@ -284,11 +284,11 @@ void TestGameStateTraceWriterLifecycle() {
 }
 
 void TestAIObservationRuntime() {
-  using NsmbNetplayPoC::AIObservation::LogKind;
-  NsmbNetplayPoC::AIObservation::Runtime runtime;
+  using NsmbMvlNetplay::AIObservation::LogKind;
+  NsmbMvlNetplay::AIObservation::Runtime runtime;
   CHECK(runtime.AppliedInput(0, 0) == nullptr);
 
-  NsmbNetplayPoC::InputState input;
+  NsmbMvlNetplay::InputState input;
   input.KeyMask = 0x123;
   input.Touching = true;
   input.TouchX = 45;
@@ -386,8 +386,8 @@ void TestAIObservationRuntime() {
     CHECK(contents == "reopened\n");
   }
 
-  NsmbNetplayPoC::AIObservation::Runtime configuredRuntime;
-  NsmbNetplayPoC::Config::DiagnosticsConfig config;
+  NsmbMvlNetplay::AIObservation::Runtime configuredRuntime;
+  NsmbMvlNetplay::Config::DiagnosticsConfig config;
   config.AIPlayLogPath = (root / "configured" / "v1.jsonl").string();
   config.AIObservationV2Path = (root / "configured" / "v2.jsonl").string();
   config.AIObservationV3Path = (root / "configured" / "v3.jsonl").string();

@@ -56,7 +56,7 @@ void TestFrameHeartbeatFileContract() {
   std::error_code error;
   std::filesystem::remove(path, error);
 
-  NsmbNetplayPoC::Diagnostics::Runtime runtime;
+  NsmbMvlNetplay::Diagnostics::Runtime runtime;
   CHECK(runtime.ConfigureFrameHeartbeat(2, path.string()));
   CHECK(!runtime.PublishFrameHeartbeat(0, 2, false));
   CHECK(!runtime.PublishFrameHeartbeat(-1, 2, true));
@@ -85,7 +85,7 @@ void TestFrameHeartbeatFileContract() {
 }
 
 void TestConsoleOnlyHeartbeatContract() {
-  NsmbNetplayPoC::Diagnostics::Runtime runtime;
+  NsmbMvlNetplay::Diagnostics::Runtime runtime;
   CHECK(!runtime.ConfigureFrameHeartbeat(3, {}));
   CHECK(!runtime.PublishFrameHeartbeat(0, 2, true));
   CHECK(runtime.PublishFrameHeartbeat(0, 3, true));
@@ -93,7 +93,7 @@ void TestConsoleOnlyHeartbeatContract() {
 }
 
 void TestRamDumpFrameSelectionContract() {
-  using namespace NsmbNetplayPoC;
+  using namespace NsmbMvlNetplay;
   using Diagnostics::ShouldCaptureRamDumpFrame;
   const std::vector<std::pair<melonDS::u32, melonDS::u32>> ranges = {
       {10, 12}, {20, 20}};
@@ -118,7 +118,7 @@ void TestRamDumpFrameSelectionContract() {
 }
 
 void TestRamDumpArtifactContract() {
-  using namespace NsmbNetplayPoC;
+  using namespace NsmbMvlNetplay;
   const std::filesystem::path directory =
       std::filesystem::temp_directory_path() /
       "nsmb_netplay_diagnostics_ram_dump_test";
@@ -161,7 +161,7 @@ void TestHashLogContract() {
   std::filesystem::remove(screenPath, error);
 
   {
-    NsmbNetplayPoC::Diagnostics::Runtime runtime;
+    NsmbMvlNetplay::Diagnostics::Runtime runtime;
     CHECK(runtime.ConfigureHashLog(basicPath.string(), false));
     CHECK(!runtime.RecordFrameHash(-1, 60, 0x1, 0));
     CHECK(!runtime.RecordFrameHash(0, 0, 0x1, 0));
@@ -174,7 +174,7 @@ void TestHashLogContract() {
         "instance,frame,hash\n0,60,1234\n1,60,abcd\n");
 
   {
-    NsmbNetplayPoC::Diagnostics::Runtime runtime;
+    NsmbMvlNetplay::Diagnostics::Runtime runtime;
     CHECK(runtime.ConfigureHashLog(screenPath.string(), true));
     CHECK(runtime.RecordFrameHash(0, 1, 0x1a, 0x2b));
     runtime.Stop();
@@ -195,7 +195,7 @@ void TestDiagnosticEventLogContract() {
   std::error_code error;
   std::filesystem::remove_all(root, error);
 
-  NsmbNetplayPoC::Diagnostics::Runtime runtime;
+  NsmbMvlNetplay::Diagnostics::Runtime runtime;
   CHECK(!runtime.WriteDiagnosticEvent({}, "{}"));
   CHECK(runtime.WriteDiagnosticEvent(firstPath.string(),
                                      "{\"event\":\"started\"}"));
@@ -213,7 +213,7 @@ void TestDiagnosticEventLogContract() {
 }
 
 void TestPerformanceRuntimeContract() {
-  using Runtime = NsmbNetplayPoC::Diagnostics::Runtime;
+  using Runtime = NsmbMvlNetplay::Diagnostics::Runtime;
   const Runtime::TimePoint start = Runtime::TimePoint{} + std::chrono::seconds(1);
 
   Runtime runtime;
@@ -277,9 +277,9 @@ void TestPerformanceRuntimeContract() {
 }
 
 void TestDiagnosticSnapshotRuntimeContract() {
-  using NsmbNetplayPoC::Diagnostics::DiagnosticFrameSnapshot;
-  using NsmbNetplayPoC::Diagnostics::Runtime;
-  using NsmbNetplayPoC::Diagnostics::kDiagnosticRingCapacity;
+  using NsmbMvlNetplay::Diagnostics::DiagnosticFrameSnapshot;
+  using NsmbMvlNetplay::Diagnostics::Runtime;
+  using NsmbMvlNetplay::Diagnostics::kDiagnosticRingCapacity;
 
   Runtime runtime;
   CHECK(!runtime.LatestDiagnosticSnapshot(-1));
@@ -333,7 +333,7 @@ void TestDiagnosticSnapshotRuntimeContract() {
 }
 
 void TestDiagnosticEventThrottleContract() {
-  using NsmbNetplayPoC::Diagnostics::Runtime;
+  using NsmbMvlNetplay::Diagnostics::Runtime;
   Runtime runtime;
 
   CHECK(!runtime.ShouldEmitDiagnosticMismatch(-1, 100, 300));
@@ -364,8 +364,8 @@ void TestDiagnosticEventThrottleContract() {
 }
 
 void TestPlayerLifeObservationContract() {
-  using NsmbNetplayPoC::Diagnostics::PlayerLifeState;
-  using NsmbNetplayPoC::Diagnostics::Runtime;
+  using NsmbMvlNetplay::Diagnostics::PlayerLifeState;
+  using NsmbMvlNetplay::Diagnostics::Runtime;
 
   Runtime runtime;
   PlayerLifeState initial;
@@ -414,8 +414,8 @@ void TestPlayerLifeObservationContract() {
 }
 
 void TestRuntimePatchLogContract() {
-  using NsmbNetplayPoC::Diagnostics::Runtime;
-  using NsmbNetplayPoC::Diagnostics::RuntimePatchLogKind;
+  using NsmbMvlNetplay::Diagnostics::Runtime;
+  using NsmbMvlNetplay::Diagnostics::RuntimePatchLogKind;
 
   Runtime runtime;
   CHECK(!runtime.TakeRuntimePatchLog(
@@ -441,7 +441,7 @@ void TestRuntimePatchLogContract() {
 }
 
 void TestDiagnosticJsonAndPositionContract() {
-  using namespace NsmbNetplayPoC;
+  using namespace NsmbMvlNetplay;
   using Diagnostics::DiagnosticFrameSnapshot;
   using Diagnostics::DiagnosticPlayerSnapshot;
 
@@ -555,7 +555,7 @@ void TestDiagnosticJsonAndPositionContract() {
 }
 
 void TestDiagnosticEventFormattingContract() {
-  using namespace NsmbNetplayPoC;
+  using namespace NsmbMvlNetplay;
   using Diagnostics::DiagnosticFrameSnapshot;
 
   CHECK(Diagnostics::JsonEscape("a\\b\"c\n\x01") ==
@@ -690,7 +690,7 @@ void TestDiagnosticEventFormattingContract() {
 }
 
 void TestStartupReportFormattingContract() {
-  using namespace NsmbNetplayPoC;
+  using namespace NsmbMvlNetplay;
   Config::BootstrapConfig bootstrap;
   bootstrap.TestFrames = 123;
   bootstrap.TestInstanceCount = 2;
@@ -743,7 +743,7 @@ void TestStartupReportFormattingContract() {
   const std::string netplayReport = Diagnostics::FormatNetplayStartupReport(
       987654321, "client", connection, harness, packetBridge, input, rollback,
       "corepreimage", mvl, 3, 0x11223344);
-  CHECK(netplayReport.rfind("NSMB PoC: enabled tUnixMs=987654321 role=client ",
+  CHECK(netplayReport.rfind("NSMB MvL Netplay: enabled tUnixMs=987654321 role=client ",
                             0) == 0);
   CHECK(netplayReport.find("port=9001 peer=peer.example delay=8") !=
         std::string::npos);
@@ -754,11 +754,11 @@ void TestStartupReportFormattingContract() {
   CHECK(!netplayReport.empty() && netplayReport.back() == '\n');
 
   CHECK(Fnv1a64(testReport) == 16774390328572156944ull);
-  CHECK(Fnv1a64(netplayReport) == 6470114001370961897ull);
+  CHECK(Fnv1a64(netplayReport) == 4159459785209690147ull);
 }
 
 void TestAIStartupReportFormattingContract() {
-  using namespace NsmbNetplayPoC;
+  using namespace NsmbMvlNetplay;
   NsmbImitationAI::ModelInitializationResult disabled;
   CHECK(Diagnostics::FormatImitationModelInitializationReport(
             "ignored.json", disabled)

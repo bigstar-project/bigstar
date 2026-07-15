@@ -8,7 +8,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace NsmbNetplayPoC::MvlRuntime {
+namespace NsmbMvlNetplay::MvlRuntime {
 
 constexpr std::size_t kInstanceCount = 16;
 constexpr melonDS::u32 kNoFrame = static_cast<melonDS::u32>(-1);
@@ -73,6 +73,6 @@ private:
   melonDS::u32 StartupFrameBase_ = 0;
 };
 
-} // namespace NsmbNetplayPoC::MvlRuntime
+} // namespace NsmbMvlNetplay::MvlRuntime
 
 #endif

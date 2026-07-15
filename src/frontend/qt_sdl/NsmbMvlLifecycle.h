@@ -17,7 +17,7 @@ namespace melonDS {
 class NDS;
 }
 
-namespace NsmbNetplayPoC::MvlLifecycle {
+namespace NsmbMvlNetplay::MvlLifecycle {
 
 struct Context {
   Config::MvlConfig &Mvl;
@@ -62,6 +62,6 @@ void SaveGameplayCheckpointIfNeeded(Context context, const Hooks &hooks,
                                     int instanceID, melonDS::u32 frame,
                                     melonDS::NDS *nds);
 
-} // namespace NsmbNetplayPoC::MvlLifecycle
+} // namespace NsmbMvlNetplay::MvlLifecycle
 
 #endif

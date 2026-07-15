@@ -1,4 +1,4 @@
-# Fast deterministic gameplay fixture for NsmbNetplayPoC refactoring.
+# Fast deterministic gameplay fixture for NsmbMvlNetplayRuntime refactoring.
 # The direct-entry ROM has both player actors ready near frame 860. Start
 # asymmetric movement shortly afterward so the loopback test exercises real
 # NSMB input application, actor updates, and host/client state synchronization.

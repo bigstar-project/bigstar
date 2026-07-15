@@ -15,12 +15,12 @@ void Check(bool condition, const char *expression, int line) {
 
 #define CHECK(expression) Check((expression), #expression, __LINE__)
 
-NsmbNetplayPoC::PacketClassifier::KnownPacketSizes Sizes() {
+NsmbMvlNetplay::PacketClassifier::KnownPacketSizes Sizes() {
   return {24, 16, 80, 176};
 }
 
 void TestEveryKnownClass() {
-  using namespace NsmbNetplayPoC::PacketClassifier;
+  using namespace NsmbMvlNetplay::PacketClassifier;
   const KnownPacketSizes sizes = Sizes();
   CHECK(Classify(24, sizes) == PacketClass::Input);
   CHECK(Classify(16, sizes) == PacketClass::Session);
@@ -29,7 +29,7 @@ void TestEveryKnownClass() {
 }
 
 void TestBundleCandidateAndUnknownSizes() {
-  using namespace NsmbNetplayPoC::PacketClassifier;
+  using namespace NsmbMvlNetplay::PacketClassifier;
   const KnownPacketSizes sizes = Sizes();
   CHECK(Classify(17, sizes) == PacketClass::InputBundleCandidate);
   CHECK(Classify(64, sizes) == PacketClass::InputBundleCandidate);
@@ -43,7 +43,7 @@ void TestBundleCandidateAndUnknownSizes() {
 }
 
 void TestHistoricalPrecedenceIsPreserved() {
-  using namespace NsmbNetplayPoC::PacketClassifier;
+  using namespace NsmbMvlNetplay::PacketClassifier;
   KnownPacketSizes sizes = Sizes();
   sizes.NSMLPacket = sizes.Input;
   CHECK(Classify(sizes.Input, sizes) == PacketClass::Input);

@@ -6,7 +6,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace NsmbNetplayPoC::InputTimeline
+namespace NsmbMvlNetplay::InputTimeline
 {
 
 namespace

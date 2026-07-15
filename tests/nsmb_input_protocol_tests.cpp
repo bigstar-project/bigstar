@@ -27,14 +27,14 @@ std::vector<std::uint8_t> Bytes(const std::vector<char>& payload)
 
 void TestInputGoldenBytesAndRoundTrip()
 {
-    NsmbNetplayPoC::InputProtocol::FramedInput input;
+    NsmbMvlNetplay::InputProtocol::FramedInput input;
     input.Frame = 0x11223344;
     input.Input.KeyMask = 0xA5B;
     input.Input.Touching = true;
     input.Input.TouchX = 0x123;
     input.Input.TouchY = 0x45;
 
-    const auto payload = NsmbNetplayPoC::InputProtocol::EncodeInput(input);
+    const auto payload = NsmbMvlNetplay::InputProtocol::EncodeInput(input);
     const std::vector<std::uint8_t> expected {
         0x4E, 0x53, 0x4D, 0x4C, 0x01, 0x00, 0x00, 0x00,
         0x44, 0x33, 0x22, 0x11, 0x5B, 0x0A, 0x00, 0x00,
@@ -42,8 +42,8 @@ void TestInputGoldenBytesAndRoundTrip()
     };
     CHECK(Bytes(payload) == expected);
 
-    NsmbNetplayPoC::InputProtocol::FramedInput decoded;
-    CHECK(NsmbNetplayPoC::InputProtocol::DecodeInput(payload.data(), payload.size(), decoded));
+    NsmbMvlNetplay::InputProtocol::FramedInput decoded;
+    CHECK(NsmbMvlNetplay::InputProtocol::DecodeInput(payload.data(), payload.size(), decoded));
     CHECK(decoded.Frame == input.Frame);
     CHECK(decoded.Input.KeyMask == input.Input.KeyMask);
     CHECK(decoded.Input.Touching);
@@ -53,7 +53,7 @@ void TestInputGoldenBytesAndRoundTrip()
 
 void TestBundleGoldenBytesAndRoundTrip()
 {
-    std::vector<NsmbNetplayPoC::InputProtocol::FramedInput> inputs(2);
+    std::vector<NsmbMvlNetplay::InputProtocol::FramedInput> inputs(2);
     inputs[0].Frame = 7;
     inputs[0].Input.KeyMask = 0xFFE;
     inputs[1].Frame = 8;
@@ -62,7 +62,7 @@ void TestBundleGoldenBytesAndRoundTrip()
     inputs[1].Input.TouchX = 10;
     inputs[1].Input.TouchY = 20;
 
-    const auto payload = NsmbNetplayPoC::InputProtocol::EncodeInputBundle(inputs);
+    const auto payload = NsmbMvlNetplay::InputProtocol::EncodeInputBundle(inputs);
     const std::vector<std::uint8_t> expected {
         0x4E, 0x53, 0x4D, 0x4C, 0x01, 0x00, 0x00, 0x00,
         0x49, 0x4E, 0x50, 0x42, 0x02, 0x00, 0x00, 0x00,
@@ -73,8 +73,8 @@ void TestBundleGoldenBytesAndRoundTrip()
     };
     CHECK(Bytes(payload) == expected);
 
-    std::vector<NsmbNetplayPoC::InputProtocol::FramedInput> decoded;
-    CHECK(NsmbNetplayPoC::InputProtocol::DecodeInputBundle(payload.data(), payload.size(), decoded));
+    std::vector<NsmbMvlNetplay::InputProtocol::FramedInput> decoded;
+    CHECK(NsmbMvlNetplay::InputProtocol::DecodeInputBundle(payload.data(), payload.size(), decoded));
     CHECK(decoded.size() == 2);
     CHECK(decoded[0].Frame == 7);
     CHECK(decoded[0].Input.KeyMask == 0xFFE);
@@ -86,46 +86,46 @@ void TestBundleGoldenBytesAndRoundTrip()
 
 void TestMalformedPacketsAreRejected()
 {
-    const auto validInput = NsmbNetplayPoC::InputProtocol::EncodeInput({ 1, {} });
-    NsmbNetplayPoC::InputProtocol::FramedInput decodedInput;
-    CHECK(!NsmbNetplayPoC::InputProtocol::DecodeInput(nullptr, validInput.size(), decodedInput));
-    CHECK(!NsmbNetplayPoC::InputProtocol::DecodeInput(validInput.data(), validInput.size() - 1, decodedInput));
+    const auto validInput = NsmbMvlNetplay::InputProtocol::EncodeInput({ 1, {} });
+    NsmbMvlNetplay::InputProtocol::FramedInput decodedInput;
+    CHECK(!NsmbMvlNetplay::InputProtocol::DecodeInput(nullptr, validInput.size(), decodedInput));
+    CHECK(!NsmbMvlNetplay::InputProtocol::DecodeInput(validInput.data(), validInput.size() - 1, decodedInput));
 
     auto badInput = validInput;
     badInput[0] = 0;
-    CHECK(!NsmbNetplayPoC::InputProtocol::DecodeInput(badInput.data(), badInput.size(), decodedInput));
+    CHECK(!NsmbMvlNetplay::InputProtocol::DecodeInput(badInput.data(), badInput.size(), decodedInput));
 
     badInput = validInput;
     badInput[4] = 2;
-    CHECK(!NsmbNetplayPoC::InputProtocol::DecodeInput(badInput.data(), badInput.size(), decodedInput));
+    CHECK(!NsmbMvlNetplay::InputProtocol::DecodeInput(badInput.data(), badInput.size(), decodedInput));
 
-    const auto validBundle = NsmbNetplayPoC::InputProtocol::EncodeInputBundle({ { 1, {} } });
-    std::vector<NsmbNetplayPoC::InputProtocol::FramedInput> decodedBundle;
-    CHECK(!NsmbNetplayPoC::InputProtocol::DecodeInputBundle(nullptr, validBundle.size(), decodedBundle));
-    CHECK(!NsmbNetplayPoC::InputProtocol::DecodeInputBundle(validBundle.data(), validBundle.size() - 1, decodedBundle));
+    const auto validBundle = NsmbMvlNetplay::InputProtocol::EncodeInputBundle({ { 1, {} } });
+    std::vector<NsmbMvlNetplay::InputProtocol::FramedInput> decodedBundle;
+    CHECK(!NsmbMvlNetplay::InputProtocol::DecodeInputBundle(nullptr, validBundle.size(), decodedBundle));
+    CHECK(!NsmbMvlNetplay::InputProtocol::DecodeInputBundle(validBundle.data(), validBundle.size() - 1, decodedBundle));
 
     auto badMagic = validBundle;
     badMagic[0] = 0;
-    CHECK(!NsmbNetplayPoC::InputProtocol::DecodeInputBundle(badMagic.data(), badMagic.size(), decodedBundle));
+    CHECK(!NsmbMvlNetplay::InputProtocol::DecodeInputBundle(badMagic.data(), badMagic.size(), decodedBundle));
 
     auto badVersion = validBundle;
     badVersion[4] = 2;
-    CHECK(!NsmbNetplayPoC::InputProtocol::DecodeInputBundle(badVersion.data(), badVersion.size(), decodedBundle));
+    CHECK(!NsmbMvlNetplay::InputProtocol::DecodeInputBundle(badVersion.data(), badVersion.size(), decodedBundle));
 
     auto badKind = validBundle;
     badKind[8] = 0;
-    CHECK(!NsmbNetplayPoC::InputProtocol::DecodeInputBundle(badKind.data(), badKind.size(), decodedBundle));
+    CHECK(!NsmbMvlNetplay::InputProtocol::DecodeInputBundle(badKind.data(), badKind.size(), decodedBundle));
 
     auto badCount = validBundle;
     std::fill(badCount.begin() + 12, badCount.begin() + 16, 0);
-    CHECK(!NsmbNetplayPoC::InputProtocol::DecodeInputBundle(badCount.data(), badCount.size(), decodedBundle));
+    CHECK(!NsmbMvlNetplay::InputProtocol::DecodeInputBundle(badCount.data(), badCount.size(), decodedBundle));
 
     auto tooMany = validBundle;
     tooMany[12] = 33;
-    CHECK(!NsmbNetplayPoC::InputProtocol::DecodeInputBundle(tooMany.data(), tooMany.size(), decodedBundle));
-    CHECK(NsmbNetplayPoC::InputProtocol::EncodeInputBundle({}).empty());
-    CHECK(NsmbNetplayPoC::InputProtocol::EncodeInputBundle(
-        std::vector<NsmbNetplayPoC::InputProtocol::FramedInput>(33)).empty());
+    CHECK(!NsmbMvlNetplay::InputProtocol::DecodeInputBundle(tooMany.data(), tooMany.size(), decodedBundle));
+    CHECK(NsmbMvlNetplay::InputProtocol::EncodeInputBundle({}).empty());
+    CHECK(NsmbMvlNetplay::InputProtocol::EncodeInputBundle(
+        std::vector<NsmbMvlNetplay::InputProtocol::FramedInput>(33)).empty());
 }
 
 }

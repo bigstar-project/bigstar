@@ -10,7 +10,7 @@
 #include <limits>
 #include <vector>
 
-namespace NsmbNetplayPoC::GameStateWriter {
+namespace NsmbMvlNetplay::GameStateWriter {
 
 namespace {
 
@@ -467,4 +467,4 @@ GameStateApplyResult ApplyGameState(
   return result;
 }
 
-} // namespace NsmbNetplayPoC::GameStateWriter
+} // namespace NsmbMvlNetplay::GameStateWriter

@@ -10,7 +10,7 @@ namespace melonDS {
 class NDS;
 }
 
-namespace NsmbNetplayPoC::TestStateHarness {
+namespace NsmbMvlNetplay::TestStateHarness {
 
 struct Context {
   const Config::HarnessConfig &Harness;
@@ -25,4 +25,4 @@ bool SaveLocalMPState(Context context, melonDS::u32 frame);
 bool LoadState(Context context, int instanceID, melonDS::u32 frame,
                melonDS::NDS *nds);
 
-} // namespace NsmbNetplayPoC::TestStateHarness
+} // namespace NsmbMvlNetplay::TestStateHarness

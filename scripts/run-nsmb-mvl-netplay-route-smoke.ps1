@@ -102,7 +102,7 @@ $clientProc = Start-MelonRouteNetplayProcess -Role "client" -LocalInstance 1 -St
 Complete-MelonRouteNetplayProcess $clientProc
 Complete-MelonRouteNetplayProcess $hostProc
 
-if (-not (Select-String -Path $hostOut -Pattern "NSMB PoC: peer connected" -Quiet)) {
+if (-not (Select-String -Path $hostOut -Pattern "NSMB MvL Netplay: peer connected" -Quiet)) {
     throw "host did not report peer connection. See $hostOut"
 }
 

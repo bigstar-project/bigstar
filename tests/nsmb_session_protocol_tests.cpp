@@ -22,7 +22,7 @@ std::vector<std::uint8_t> Bytes(const std::vector<char> &payload) {
 }
 
 void TestMatchSeedGoldenBytesAndRoundTrip() {
-  using namespace NsmbNetplayPoC::SessionProtocol;
+  using namespace NsmbMvlNetplay::SessionProtocol;
   const auto payload = Encode({MessageKind::MatchSeed, 0x11223344});
   const std::vector<std::uint8_t> expected{
       0x4E, 0x53, 0x4D, 0x4C, 0x01, 0x00, 0x00, 0x00,
@@ -37,7 +37,7 @@ void TestMatchSeedGoldenBytesAndRoundTrip() {
 }
 
 void TestStartReadyGoldenBytesAndRoundTrip() {
-  using namespace NsmbNetplayPoC::SessionProtocol;
+  using namespace NsmbMvlNetplay::SessionProtocol;
   const auto payload = Encode({MessageKind::StartReady, 0xA1B2C3D4});
   const std::vector<std::uint8_t> expected{
       0x4E, 0x53, 0x4D, 0x4C, 0x01, 0x00, 0x00, 0x00,
@@ -52,7 +52,7 @@ void TestStartReadyGoldenBytesAndRoundTrip() {
 }
 
 void TestMalformedPacketsAreRejected() {
-  using namespace NsmbNetplayPoC::SessionProtocol;
+  using namespace NsmbMvlNetplay::SessionProtocol;
   const auto valid = Encode({MessageKind::MatchSeed, 7});
   Message decoded{MessageKind::StartReady, 99};
   CHECK(!Decode(nullptr, valid.size(), decoded));

@@ -65,7 +65,7 @@
 #include "Savestate.h"
 
 #include "EmuInstance.h"
-#include "NsmbNetplayPoC.h"
+#include "NsmbMvlNetplayRuntime.h"
 
 using namespace melonDS;
 
@@ -154,7 +154,7 @@ struct NsmlPerformanceSample
     melonDS::u32 AudioQueueBefore = 0;
     melonDS::u32 AudioQueueAfter = 0;
     int Processor = -1;
-    NsmbNetplayPoC::PerformanceCounters Netplay;
+    NsmbMvlNetplay::PerformanceCounters Netplay;
 };
 
 class NsmlPerformanceLog
@@ -455,7 +455,7 @@ private:
     std::vector<NsmlPerformanceSample> Samples;
     unsigned long long LastSpikeUnixMs = 0;
     double LastWriteMs = 0.0;
-    NsmbNetplayPoC::PerformanceCounters LastSummaryNetplay;
+    NsmbMvlNetplay::PerformanceCounters LastSummaryNetplay;
 };
 
 }
@@ -716,7 +716,7 @@ void EmuThread::run()
             }
 
             // process input and hotkeys
-            NsmbNetplayPoC::InputState inputState {
+            NsmbMvlNetplay::InputState inputState {
                 emuInstance->inputMask,
                 emuInstance->isTouching,
                 emuInstance->touchX,
@@ -725,7 +725,7 @@ void EmuThread::run()
             const double nsmlBeforeHookStart = nsmlPerfPhaseTiming
                 ? SDL_GetPerformanceCounter() * perfCountsSec
                 : 0.0;
-            inputState = NsmbNetplayPoC::BeforeRunFrame(
+            inputState = NsmbMvlNetplay::BeforeRunFrame(
                 emuInstance->instanceID,
                 emuInstance->nds->NumFrames,
                 emuInstance->nds,
@@ -807,7 +807,7 @@ void EmuThread::run()
                     if (nsmlPerfBreakdown)
                         nsmlPerfRunFrame += nsmlPhaseRunFrame;
                 }
-                NsmbNetplayPoC::AfterRunFrame(
+                NsmbMvlNetplay::AfterRunFrame(
                     emuInstance->instanceID,
                     frameBeforeRun,
                     emuInstance->nds);
@@ -817,7 +817,7 @@ void EmuThread::run()
                     if (nsmlPerfBreakdown)
                         nsmlPerfAfterHook += nsmlPhaseAfterHook;
                 }
-                if (NsmbNetplayPoC::ShouldQuitAfterFrame(emuInstance->instanceID, frameBeforeRun))
+                if (NsmbMvlNetplay::ShouldQuitAfterFrame(emuInstance->instanceID, frameBeforeRun))
                     QMetaObject::invokeMethod(qApp, "quit", Qt::QueuedConnection);
             }
 
@@ -1097,7 +1097,7 @@ frame_limit_done:
                 sample.AudioQueueBefore = nsmlAudioQueueBefore;
                 sample.AudioQueueAfter = nsmlAudioQueueAfter;
                 sample.Processor = NsmlCurrentProcessorNumber();
-                sample.Netplay = NsmbNetplayPoC::GetPerformanceCounters();
+                sample.Netplay = NsmbMvlNetplay::GetPerformanceCounters();
                 nsmlPerformanceLog.Add(sample);
             }
 

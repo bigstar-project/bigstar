@@ -46,7 +46,7 @@ if ($Tier -eq "full") {
         -SkipRomEnsure `
         -LogDir "$LogDir-result"
 
-    Write-Host "NsmbNetplayPoC refactor full test passed: log=$LogDir"
+    Write-Host "NsmbMvlNetplayRuntime refactor full test passed: log=$LogDir"
     return
 }
 
@@ -211,7 +211,7 @@ if ($Tier -eq "rollback") {
     if ($rollbackText -match 'cannot resimulate|checkpoint missing|restore failed') {
         throw "rollback smoke reported a checkpoint/restore integrity error"
     }
-    Write-Host "NsmbNetplayPoC rollback checkpoint coverage passed"
+    Write-Host "NsmbMvlNetplayRuntime rollback checkpoint coverage passed"
 }
 
 if ($Tier -eq "diagnostics") {
@@ -288,7 +288,7 @@ if ($Tier -eq "diagnostics") {
             }
         }
     }
-    Write-Host "NsmbNetplayPoC hang diagnostics and frame heartbeat coverage passed"
+    Write-Host "NsmbMvlNetplayRuntime hang diagnostics and frame heartbeat coverage passed"
 }
 
 if (($Tier -eq "fast" -or $Tier -eq "rollback" -or $Tier -eq "diagnostics") -and -not $SkipGolden) {
@@ -307,7 +307,7 @@ if (($Tier -eq "fast" -or $Tier -eq "rollback" -or $Tier -eq "diagnostics") -and
     Assert-Sha256 -Path (Join-Path $resolvedLogDir "client.game-state.csv") -Expected $golden.clientGameState -Name "client semantic trace"
     Assert-Sha256 -Path (Join-Path $resolvedLogDir "host.inputs") -Expected $golden.hostInputs -Name "host applied input"
     Assert-Sha256 -Path (Join-Path $resolvedLogDir "client.inputs") -Expected $golden.clientInputs -Name "client applied input"
-    Write-Host "NsmbNetplayPoC refactor fast golden comparison passed"
+    Write-Host "NsmbMvlNetplayRuntime refactor fast golden comparison passed"
 }
 
-Write-Host "NsmbNetplayPoC refactor $Tier test passed: log=$LogDir"
+Write-Host "NsmbMvlNetplayRuntime refactor $Tier test passed: log=$LogDir"

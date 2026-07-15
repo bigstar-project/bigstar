@@ -1,7 +1,7 @@
 #ifndef NSMBINPUTTIMELINE_H
 #define NSMBINPUTTIMELINE_H
 
-#include "NsmbNetplayPoC.h"
+#include "NsmbMvlNetplayRuntime.h"
 
 #include <atomic>
 #include <chrono>
@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace NsmbNetplayPoC::InputTimeline
+namespace NsmbMvlNetplay::InputTimeline
 {
 
 struct InputSpan

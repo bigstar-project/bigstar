@@ -1,5 +1,5 @@
 /*
-    Experimental NSMB Mario vs Luigi input-lockstep PoC.
+    Experimental NSMB Mario vs Luigi netplay runtime.
 
     Usage example:
       Host:
@@ -11,7 +11,7 @@
     same ROM/BIOS/firmware/savestate setup. This module exchanges only input.
 */
 
-#include "NsmbNetplayPoC.h"
+#include "NsmbMvlNetplayRuntime.h"
 #include "NsmbNetplayConfig.h"
 #include "NsmbPacketBridgeIntegration.h"
 #include "NsmbPacketBridgeRuntime.h"
@@ -66,7 +66,7 @@
 #include "Savestate.h"
 #include "Platform.h"
 
-namespace NsmbNetplayPoC
+namespace NsmbMvlNetplay
 {
 
 namespace
@@ -1101,19 +1101,19 @@ void InitFromEnvironment()
     });
     if (transportResult == NsmbNetplayTransport::InitializeResult::ENetInitializationFailed)
     {
-        std::printf("NSMB PoC: ENet initialization failed\n");
+        std::printf("NSMB MvL Netplay: ENet initialization failed\n");
         G.Enabled = false;
         return;
     }
     if (transportResult == NsmbNetplayTransport::InitializeResult::HostCreationFailed)
     {
-        std::printf("NSMB PoC: failed to create ENet host\n");
+        std::printf("NSMB MvL Netplay: failed to create ENet host\n");
         G.Enabled = false;
         return;
     }
     if (G.NetRole == Role::Client && !G.Transport.IsConnecting())
     {
-        std::printf("NSMB PoC: failed to queue peer connect\n");
+        std::printf("NSMB MvL Netplay: failed to queue peer connect\n");
         std::fflush(stdout);
     }
 
@@ -1446,7 +1446,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         std::lock_guard<std::mutex> lock(G.Mutex);
 
         G.Coordinator.MarkNetplayLockstepStarted(instanceID);
-        std::printf("NSMB PoC: lockstep started inst=%d frame=%u\n", instanceID, targetFrame);
+        std::printf("NSMB MvL Netplay: lockstep started inst=%d frame=%u\n", instanceID, targetFrame);
     }
 
     if (isLocal)

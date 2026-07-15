@@ -4,7 +4,7 @@
 #include <iterator>
 #include <ostream>
 
-namespace NsmbNetplayPoC::GameStateModel {
+namespace NsmbMvlNetplay::GameStateModel {
 
 melonDS::u64 GameStateKey(int instanceID, melonDS::u32 frame) {
   return (static_cast<melonDS::u64>(static_cast<melonDS::u32>(instanceID))
@@ -921,4 +921,4 @@ void StateSyncRuntime::ResetForRestart(int instanceID) {
 
 }
 
-} // namespace NsmbNetplayPoC::GameStateModel
+} // namespace NsmbMvlNetplay::GameStateModel

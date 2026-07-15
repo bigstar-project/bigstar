@@ -2,7 +2,7 @@
 #define NSMBPACKETBRIDGERUNTIME_H
 
 #include "NsmbNetplayConfig.h"
-#include "NsmbNetplayPoC.h"
+#include "NsmbMvlNetplayRuntime.h"
 #include "NsmbNetplayProtocol.h"
 
 #include <array>
@@ -12,7 +12,7 @@
 #include <optional>
 #include <vector>
 
-namespace NsmbNetplayPoC::PacketBridge {
+namespace NsmbMvlNetplay::PacketBridge {
 
 inline constexpr melonDS::u32 kUnsetProgress = 0xFFFFFFFF;
 
@@ -101,6 +101,6 @@ private:
   std::array<melonDS::u32, 16> JitHookResumeFrame_{};
 };
 
-} // namespace NsmbNetplayPoC::PacketBridge
+} // namespace NsmbMvlNetplay::PacketBridge
 
 #endif

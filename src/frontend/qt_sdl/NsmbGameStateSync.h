@@ -14,7 +14,7 @@ namespace melonDS {
 class NDS;
 }
 
-namespace NsmbNetplayPoC::GameStateSync {
+namespace NsmbMvlNetplay::GameStateSync {
 
 struct Context {
   const Config::BootstrapConfig &Bootstrap;
@@ -54,6 +54,6 @@ void TraceWorld(Context context, int instanceID, melonDS::u32 frame,
 void Sync(Context context, const Hooks &hooks, int instanceID,
           melonDS::u32 frame, melonDS::NDS *nds);
 
-} // namespace NsmbNetplayPoC::GameStateSync
+} // namespace NsmbMvlNetplay::GameStateSync
 
 #endif

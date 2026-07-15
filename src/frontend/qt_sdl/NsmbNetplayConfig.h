@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-namespace NsmbNetplayPoC::Config {
+namespace NsmbMvlNetplay::Config {
 
 using FrameRange = std::pair<std::uint32_t, std::uint32_t>;
 
@@ -378,6 +378,6 @@ double EnvDouble(const char *name, double fallback);
 std::uint32_t EnvU32(const char *name, std::uint32_t fallback);
 bool EnvHasValue(const char *name);
 
-} // namespace NsmbNetplayPoC::Config
+} // namespace NsmbMvlNetplay::Config
 
 #endif

@@ -6,16 +6,16 @@
 
 namespace {
 
-using NsmbNetplayPoC::InputState;
-using NsmbNetplayPoC::Config::PacketBridgeConfig;
-using NsmbNetplayPoC::Config::RuntimePatchConfig;
-using NsmbNetplayPoC::PacketBridge::CanonicalTick;
-using NsmbNetplayPoC::PacketBridge::IsAcceptedIncomingPacket;
-using NsmbNetplayPoC::PacketBridge::JitHookRestoreAction;
-using NsmbNetplayPoC::PacketBridge::kUnsetProgress;
-using NsmbNetplayPoC::PacketBridge::Runtime;
-using NsmbNetplayPoC::PacketBridge::SelectPlayerInput;
-using NsmbNetplayPoC::WireProtocol::WireNSMLPacket;
+using NsmbMvlNetplay::InputState;
+using NsmbMvlNetplay::Config::PacketBridgeConfig;
+using NsmbMvlNetplay::Config::RuntimePatchConfig;
+using NsmbMvlNetplay::PacketBridge::CanonicalTick;
+using NsmbMvlNetplay::PacketBridge::IsAcceptedIncomingPacket;
+using NsmbMvlNetplay::PacketBridge::JitHookRestoreAction;
+using NsmbMvlNetplay::PacketBridge::kUnsetProgress;
+using NsmbMvlNetplay::PacketBridge::Runtime;
+using NsmbMvlNetplay::PacketBridge::SelectPlayerInput;
+using NsmbMvlNetplay::WireProtocol::WireNSMLPacket;
 
 void Require(bool condition, const std::string &message) {
   if (condition)
@@ -80,9 +80,9 @@ void TestInputSelectionAndCanonicalTick() {
 
 void TestIncomingPacketPolicy() {
   WireNSMLPacket packet{};
-  packet.Magic = NsmbNetplayPoC::WireProtocol::kMagic;
-  packet.Version = NsmbNetplayPoC::WireProtocol::kVersion;
-  packet.Kind = NsmbNetplayPoC::WireProtocol::kWireKindPacket;
+  packet.Magic = NsmbMvlNetplay::WireProtocol::kMagic;
+  packet.Version = NsmbMvlNetplay::WireProtocol::kVersion;
+  packet.Kind = NsmbMvlNetplay::WireProtocol::kWireKindPacket;
   packet.Frame = 100;
   packet.Player = 1;
   Require(IsAcceptedIncomingPacket(packet, 0) &&

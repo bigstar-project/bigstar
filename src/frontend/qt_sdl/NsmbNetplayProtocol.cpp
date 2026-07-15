@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace NsmbNetplayPoC::SessionProtocol {
+namespace NsmbMvlNetplay::SessionProtocol {
 
 namespace {
 
@@ -73,9 +73,9 @@ bool Decode(const void *data, std::size_t size, Message &message) {
   return true;
 }
 
-} // namespace NsmbNetplayPoC::SessionProtocol
+} // namespace NsmbMvlNetplay::SessionProtocol
 
-namespace NsmbNetplayPoC::SessionPolicy {
+namespace NsmbMvlNetplay::SessionPolicy {
 
 melonDS::u32 FirstGameplayInputFrame(melonDS::u32 netplayStartFrame,
                                      int inputDelay) {
@@ -227,9 +227,9 @@ bool Runtime::InputEpochPrimedFor(melonDS::u32 startFrame) const {
   return InputEpochPrimedStartFrame_ == startFrame;
 }
 
-} // namespace NsmbNetplayPoC::SessionPolicy
+} // namespace NsmbMvlNetplay::SessionPolicy
 
-namespace NsmbNetplayPoC::PacketClassifier {
+namespace NsmbMvlNetplay::PacketClassifier {
 
 namespace {
 
@@ -255,4 +255,4 @@ PacketClass Classify(std::size_t packetSize, const KnownPacketSizes &sizes) {
   return PacketClass::Unknown;
 }
 
-} // namespace NsmbNetplayPoC::PacketClassifier
+} // namespace NsmbMvlNetplay::PacketClassifier

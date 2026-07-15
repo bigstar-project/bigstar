@@ -5,7 +5,7 @@
 #include <memory>
 #include <utility>
 
-namespace NsmbNetplayPoC::Coordination {
+namespace NsmbMvlNetplay::Coordination {
 
 enum class FrameBarrierKind {
   Before,
@@ -68,4 +68,4 @@ private:
   std::unique_ptr<Impl> State;
 };
 
-} // namespace NsmbNetplayPoC::Coordination
+} // namespace NsmbMvlNetplay::Coordination

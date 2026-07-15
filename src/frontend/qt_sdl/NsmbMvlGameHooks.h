@@ -8,7 +8,7 @@ namespace melonDS {
 class NDS;
 }
 
-namespace NsmbNetplayPoC {
+namespace NsmbMvlNetplay {
 namespace Diagnostics {
 class Runtime;
 }
@@ -46,6 +46,6 @@ void ApplyNetRandomPatch(const Context &context, int instanceID,
                          melonDS::u32 frame, melonDS::NDS *nds);
 
 } // namespace MvlGameHooks
-} // namespace NsmbNetplayPoC
+} // namespace NsmbMvlNetplay
 
 #endif

@@ -6,13 +6,13 @@
 
 namespace {
 
-using NsmbNetplayPoC::Config::MvlConfig;
-using NsmbNetplayPoC::MvlRuntime::IsFrameInRange;
-using NsmbNetplayPoC::MvlRuntime::IsRoleAllowed;
-using NsmbNetplayPoC::MvlRuntime::ResolveResultWinner;
-using NsmbNetplayPoC::MvlRuntime::ResultSnapshot;
-using NsmbNetplayPoC::MvlRuntime::Runtime;
-using NsmbNetplayPoC::MvlRuntime::kNoFrame;
+using NsmbMvlNetplay::Config::MvlConfig;
+using NsmbMvlNetplay::MvlRuntime::IsFrameInRange;
+using NsmbMvlNetplay::MvlRuntime::IsRoleAllowed;
+using NsmbMvlNetplay::MvlRuntime::ResolveResultWinner;
+using NsmbMvlNetplay::MvlRuntime::ResultSnapshot;
+using NsmbMvlNetplay::MvlRuntime::Runtime;
+using NsmbMvlNetplay::MvlRuntime::kNoFrame;
 
 void Require(bool condition, const std::string &message) {
   if (condition)

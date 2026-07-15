@@ -10,7 +10,7 @@
 #include <cstdio>
 #include <cstring>
 
-namespace NsmbNetplayPoC::MvlGameHooks {
+namespace NsmbMvlNetplay::MvlGameHooks {
 namespace {
 
 constexpr melonDS::u32 kMainRAMBase = 0x02000000;
@@ -326,4 +326,4 @@ void ApplyNetRandomPatch(const Context &context, int instanceID,
       randomCallCountBeforePatch, gameRandomCallCountBeforePatch);
 }
 
-} // namespace NsmbNetplayPoC::MvlGameHooks
+} // namespace NsmbMvlNetplay::MvlGameHooks

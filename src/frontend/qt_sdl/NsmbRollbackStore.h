@@ -9,7 +9,7 @@
 #include <optional>
 #include <vector>
 
-namespace NsmbNetplayPoC::RollbackStorage {
+namespace NsmbMvlNetplay::RollbackStorage {
 
 constexpr melonDS::u32 kNoFrame = 0;
 
@@ -130,6 +130,6 @@ private:
   melonDS::u32 FrameShadowFrame_ = kNoFrame;
 };
 
-} // namespace NsmbNetplayPoC::RollbackStorage
+} // namespace NsmbMvlNetplay::RollbackStorage
 
 #endif

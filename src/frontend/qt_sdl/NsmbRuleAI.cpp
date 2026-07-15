@@ -59,7 +59,7 @@ std::string Upper(std::string value)
     return value;
 }
 
-void PressButton(NsmbNetplayPoC::InputState& input, int bit)
+void PressButton(NsmbMvlNetplay::InputState& input, int bit)
 {
     if (bit >= 0 && bit < 12)
         input.KeyMask &= ~(1u << bit);
@@ -140,7 +140,7 @@ const char* ObjectCategory(ObjectCategoryFunction objectCategory, melonDS::u16 o
 
 RuntimeHazardThreat FindRuntimeHazard(
     const RuntimeHazardConfig& config,
-    const NsmbNetplayPoC::GameStateReader::GameStateObjectScanCache& objectScanCache,
+    const NsmbMvlNetplay::GameStateReader::GameStateObjectScanCache& objectScanCache,
     melonDS::u32 selfX, melonDS::u32 selfY, melonDS::u32 selfVelX,
     ObjectCategoryFunction objectCategory)
 {
@@ -193,12 +193,12 @@ RuntimeHazardThreat FindRuntimeHazard(
     return best;
 }
 
-NsmbNetplayPoC::GameStateReader::ObjectScanSample NearestDroppedBattleStar(
+NsmbMvlNetplay::GameStateReader::ObjectScanSample NearestDroppedBattleStar(
     const Config& config,
-    const NsmbNetplayPoC::GameStateReader::GameStateObjectScanCache& objectScanCache,
+    const NsmbMvlNetplay::GameStateReader::GameStateObjectScanCache& objectScanCache,
     melonDS::u32 selfX, melonDS::u32 selfY, const FrameStateServices& services)
 {
-    NsmbNetplayPoC::GameStateReader::ObjectScanSample best {};
+    NsmbMvlNetplay::GameStateReader::ObjectScanSample best {};
     std::int64_t bestScore = 0;
     for (const auto& entry : objectScanCache.Entries)
     {
@@ -227,7 +227,7 @@ bool PlayerContactGround(melonDS::u32 collisionFlag)
 }
 
 void FillProbeSummary(PlayerFrameState& out,
-                      const NsmbNetplayPoC::GameStateModel::AIPlayerTileProbeSample& probe,
+                      const NsmbMvlNetplay::GameStateModel::AIPlayerTileProbeSample& probe,
                       melonDS::u32 collisionFlag, const FrameStateServices& services)
 {
     const bool contactGround = PlayerContactGround(collisionFlag);
@@ -236,7 +236,7 @@ void FillProbeSummary(PlayerFrameState& out,
     const auto summary =
         services.DeriveTerrainSummary
             ? services.DeriveTerrainSummary(probe, contactGround, contactWallLeft, contactWallRight)
-            : NsmbNetplayPoC::GameStateModel::AITerrainDerivedSummary {};
+            : NsmbMvlNetplay::GameStateModel::AITerrainDerivedSummary {};
     out.GroundBelowSolid = summary.EffectiveGroundBelowSolid != 0;
     out.BlockedAhead = summary.BlockedAhead != 0;
     out.HoleAhead = summary.EffectiveHoleAhead != 0;
@@ -249,7 +249,7 @@ void FillProbeSummary(PlayerFrameState& out,
 }
 
 bool TargetHasFloorBelow(const FrameStateServices& services,
-                         const NsmbNetplayPoC::GameStateModel::AIPlayerTileProbeSample& probe,
+                         const NsmbMvlNetplay::GameStateModel::AIPlayerTileProbeSample& probe,
                          melonDS::u32 selfX, melonDS::u32 selfY, melonDS::u32 targetX,
                          melonDS::u32 targetY)
 {
@@ -258,8 +258,8 @@ bool TargetHasFloorBelow(const FrameStateServices& services,
 }
 
 void FillHazard(PlayerFrameState& out, const Config& config,
-                const NsmbNetplayPoC::GameStateModel::GameStateSample& sample,
-                const NsmbNetplayPoC::GameStateReader::GameStateObjectScanCache& objectScanCache,
+                const NsmbMvlNetplay::GameStateModel::GameStateSample& sample,
+                const NsmbMvlNetplay::GameStateReader::GameStateObjectScanCache& objectScanCache,
                 int player, melonDS::u32 x, melonDS::u32 y, melonDS::u32 vx,
                 const FrameStateServices& services)
 {
@@ -280,7 +280,7 @@ void FillHazard(PlayerFrameState& out, const Config& config,
     };
     std::int64_t bestScore = best.Found ? scoreThreat(best) : 0;
     const std::int64_t selfVx = SignedCoordinate(vx);
-    for (int slot = 0; slot < NsmbNetplayPoC::GameStateModel::kAIFireballSlotCount; slot++)
+    for (int slot = 0; slot < NsmbMvlNetplay::GameStateModel::kAIFireballSlotCount; slot++)
     {
         if (sample.FireballSlotActive[slot] == 0)
             continue;
@@ -330,8 +330,8 @@ void FillHazard(PlayerFrameState& out, const Config& config,
 }
 
 FrameState BuildFrameState(
-    const Config& config, const NsmbNetplayPoC::GameStateModel::GameStateSample& sample,
-    const NsmbNetplayPoC::GameStateReader::GameStateObjectScanCache& objectScanCache,
+    const Config& config, const NsmbMvlNetplay::GameStateModel::GameStateSample& sample,
+    const NsmbMvlNetplay::GameStateReader::GameStateObjectScanCache& objectScanCache,
     bool inGameplay, const FrameStateServices& services)
 {
     FrameState state {};
@@ -479,9 +479,9 @@ StarSafety EvaluateStarSafety(
     return safety;
 }
 
-NsmbNetplayPoC::InputState NeutralInputPreservingTouch(const NsmbNetplayPoC::InputState& source)
+NsmbMvlNetplay::InputState NeutralInputPreservingTouch(const NsmbMvlNetplay::InputState& source)
 {
-    NsmbNetplayPoC::InputState input {};
+    NsmbMvlNetplay::InputState input {};
     input.KeyMask = 0xFFF;
     input.Touching = source.Touching;
     input.TouchX = source.TouchX;
@@ -489,14 +489,14 @@ NsmbNetplayPoC::InputState NeutralInputPreservingTouch(const NsmbNetplayPoC::Inp
     return input;
 }
 
-NsmbNetplayPoC::InputState DecideInput(
+NsmbMvlNetplay::InputState DecideInput(
     const Config& config,
     const FrameState& state,
     int instanceID,
     melonDS::u32 frame,
     int player,
     int localPlayer,
-    const NsmbNetplayPoC::InputState& fallback)
+    const NsmbMvlNetplay::InputState& fallback)
 {
     if (!ControlsPlayer(config, player, localPlayer) || frame < config.StartFrame)
         return fallback;
@@ -920,7 +920,7 @@ NsmbNetplayPoC::InputState DecideInput(
         mode = horizontalIntent == 0 ? "airHold" : "airRecover";
     }
 
-    NsmbNetplayPoC::InputState input = NeutralInputPreservingTouch(fallback);
+    NsmbMvlNetplay::InputState input = NeutralInputPreservingTouch(fallback);
     if (horizontalIntent > 0)
         PressButton(input, kButtonRight);
     else if (horizontalIntent < 0)

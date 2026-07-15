@@ -6,7 +6,7 @@
 #define NSMBRULEAI_H
 
 #include "NsmbGameStateReader.h"
-#include "NsmbNetplayPoC.h"
+#include "NsmbMvlNetplayRuntime.h"
 
 #include <cstdint>
 #include <string>
@@ -109,37 +109,37 @@ struct FrameState
 struct FrameStateServices
 {
     ObjectCategoryFunction ObjectCategory = nullptr;
-    NsmbNetplayPoC::GameStateModel::AITerrainDerivedSummary (*DeriveTerrainSummary)(
-        const NsmbNetplayPoC::GameStateModel::AIPlayerTileProbeSample& probe, bool contactGround,
+    NsmbMvlNetplay::GameStateModel::AITerrainDerivedSummary (*DeriveTerrainSummary)(
+        const NsmbMvlNetplay::GameStateModel::AIPlayerTileProbeSample& probe, bool contactGround,
         bool contactWallLeft, bool contactWallRight) = nullptr;
     bool (*TargetHasFloorBelow)(
-        const NsmbNetplayPoC::GameStateModel::AIPlayerTileProbeSample& probe, melonDS::u32 selfX,
+        const NsmbMvlNetplay::GameStateModel::AIPlayerTileProbeSample& probe, melonDS::u32 selfX,
         melonDS::u32 selfY, melonDS::u32 targetX, melonDS::u32 targetY) = nullptr;
 };
 
 FrameState BuildFrameState(
-    const Config& config, const NsmbNetplayPoC::GameStateModel::GameStateSample& sample,
-    const NsmbNetplayPoC::GameStateReader::GameStateObjectScanCache& objectScanCache,
+    const Config& config, const NsmbMvlNetplay::GameStateModel::GameStateSample& sample,
+    const NsmbMvlNetplay::GameStateReader::GameStateObjectScanCache& objectScanCache,
     bool inGameplay, const FrameStateServices& services);
 
 bool PlayerContactGround(melonDS::u32 collisionFlag);
 
 RuntimeHazardThreat FindRuntimeHazard(
     const RuntimeHazardConfig& config,
-    const NsmbNetplayPoC::GameStateReader::GameStateObjectScanCache& objectScanCache,
+    const NsmbMvlNetplay::GameStateReader::GameStateObjectScanCache& objectScanCache,
     melonDS::u32 selfX, melonDS::u32 selfY, melonDS::u32 selfVelX,
     ObjectCategoryFunction objectCategory);
 
 bool ControlsPlayer(const Config& config, int player, int localPlayer);
 
-NsmbNetplayPoC::InputState DecideInput(
+NsmbMvlNetplay::InputState DecideInput(
     const Config& config,
     const FrameState& state,
     int instanceID,
     melonDS::u32 frame,
     int player,
     int localPlayer,
-    const NsmbNetplayPoC::InputState& fallback);
+    const NsmbMvlNetplay::InputState& fallback);
 
 }
 

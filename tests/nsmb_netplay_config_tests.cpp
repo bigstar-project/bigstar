@@ -11,7 +11,7 @@ namespace {
 
 int Failures = 0;
 
-class MapEnvironment final : public NsmbNetplayPoC::Config::Environment {
+class MapEnvironment final : public NsmbMvlNetplay::Config::Environment {
 public:
   const char *Get(const char *name) const override {
     const auto it = Values.find(name);
@@ -31,7 +31,7 @@ void Check(bool condition, const char *expression, int line) {
 #define CHECK(expression) Check((expression), #expression, __LINE__)
 
 void TestFlagsPreserveExistingSemantics() {
-  using NsmbNetplayPoC::Config::ParseFlag;
+  using NsmbMvlNetplay::Config::ParseFlag;
   CHECK(!ParseFlag(nullptr));
   CHECK(!ParseFlag(""));
   CHECK(!ParseFlag("0"));
@@ -41,8 +41,8 @@ void TestFlagsPreserveExistingSemantics() {
 }
 
 void TestStringsPreserveFallbackSemantics() {
-  using NsmbNetplayPoC::Config::HasValue;
-  using NsmbNetplayPoC::Config::ValueOr;
+  using NsmbMvlNetplay::Config::HasValue;
+  using NsmbMvlNetplay::Config::ValueOr;
   CHECK(std::strcmp(ValueOr(nullptr, "fallback"), "fallback") == 0);
   CHECK(std::strcmp(ValueOr("", "fallback"), "fallback") == 0);
   CHECK(std::strcmp(ValueOr("value", "fallback"), "value") == 0);
@@ -52,7 +52,7 @@ void TestStringsPreserveFallbackSemantics() {
 }
 
 void TestIntegerParsingPreservesBaseAndFallback() {
-  using NsmbNetplayPoC::Config::ParseInt;
+  using NsmbMvlNetplay::Config::ParseInt;
   CHECK(ParseInt(nullptr, 17) == 17);
   CHECK(ParseInt("", 17) == 17);
   CHECK(ParseInt("invalid", 17) == 17);
@@ -64,7 +64,7 @@ void TestIntegerParsingPreservesBaseAndFallback() {
 }
 
 void TestDoubleParsingPreservesFallback() {
-  using NsmbNetplayPoC::Config::ParseDouble;
+  using NsmbMvlNetplay::Config::ParseDouble;
   CHECK(ParseDouble(nullptr, 1.5) == 1.5);
   CHECK(ParseDouble("", 1.5) == 1.5);
   CHECK(ParseDouble("invalid", 1.5) == 1.5);
@@ -73,7 +73,7 @@ void TestDoubleParsingPreservesFallback() {
 }
 
 void TestUnsignedParsingPreservesExistingInvalidValueBehavior() {
-  using NsmbNetplayPoC::Config::ParseU32;
+  using NsmbMvlNetplay::Config::ParseU32;
   CHECK(ParseU32(nullptr, 99) == 99u);
   CHECK(ParseU32("", 99) == 99u);
   CHECK(ParseU32("0xFFFFFFFF", 0) == UINT32_MAX);
@@ -81,7 +81,7 @@ void TestUnsignedParsingPreservesExistingInvalidValueBehavior() {
 }
 
 void TestUnsignedListParsingPreservesLegacySemantics() {
-  using NsmbNetplayPoC::Config::ParseU32List;
+  using NsmbMvlNetplay::Config::ParseU32List;
   CHECK(ParseU32List(nullptr).empty());
   CHECK(ParseU32List("").empty());
   const auto values = ParseU32List(" 1, 0x10, invalid, , 03 ");
@@ -94,7 +94,7 @@ void TestUnsignedListParsingPreservesLegacySemantics() {
 
 void TestBootstrapConfigDefaults() {
   const MapEnvironment environment;
-  const auto config = NsmbNetplayPoC::Config::LoadBootstrapConfig(environment);
+  const auto config = NsmbMvlNetplay::Config::LoadBootstrapConfig(environment);
   CHECK(!config.Enabled);
   CHECK(!config.TestEnabled);
   CHECK(config.TestFrames == 0u);
@@ -122,7 +122,7 @@ void TestBootstrapConfigReadsAndClampsEnvironment() {
       {"MELONDS_NSML_INPUT_TRACE_INTERVAL", "0"},
   };
 
-  const auto config = NsmbNetplayPoC::Config::LoadBootstrapConfig(environment);
+  const auto config = NsmbMvlNetplay::Config::LoadBootstrapConfig(environment);
   CHECK(config.Enabled);
   CHECK(config.TestEnabled);
   CHECK(config.TestFrames == 0u);
@@ -138,7 +138,7 @@ void TestBootstrapConfigReadsAndClampsEnvironment() {
 void TestConnectionConfigDefaultsAndRoleFallback() {
   MapEnvironment environment;
   auto config =
-      NsmbNetplayPoC::Config::LoadConnectionConfig(environment, false);
+      NsmbMvlNetplay::Config::LoadConnectionConfig(environment, false);
   CHECK(!config.Client);
   CHECK(config.Delay == 6);
   CHECK(config.WarmupFrames == 0);
@@ -149,16 +149,16 @@ void TestConnectionConfigDefaultsAndRoleFallback() {
   CHECK(!config.RemoteInputTimeoutFatal);
   CHECK(config.PeerHost == "127.0.0.1");
 
-  config = NsmbNetplayPoC::Config::LoadConnectionConfig(environment, true);
+  config = NsmbMvlNetplay::Config::LoadConnectionConfig(environment, true);
   CHECK(config.WarmupFrames == 12);
 
   environment.Values["MELONDS_NSML_LAN_ROLE"] = "client";
-  config = NsmbNetplayPoC::Config::LoadConnectionConfig(environment, false);
+  config = NsmbMvlNetplay::Config::LoadConnectionConfig(environment, false);
   CHECK(config.Client);
   CHECK(config.LocalInstance == 1);
 
   environment.Values["MELONDS_NSML_ROLE"] = "host";
-  config = NsmbNetplayPoC::Config::LoadConnectionConfig(environment, false);
+  config = NsmbMvlNetplay::Config::LoadConnectionConfig(environment, false);
   CHECK(!config.Client);
   CHECK(config.LocalInstance == 0);
 }
@@ -178,7 +178,7 @@ void TestConnectionConfigReadsExistingValuesAndClamps() {
   };
 
   const auto config =
-      NsmbNetplayPoC::Config::LoadConnectionConfig(environment, true);
+      NsmbMvlNetplay::Config::LoadConnectionConfig(environment, true);
   CHECK(config.Client);
   CHECK(config.Delay == 0);
   CHECK(config.WarmupFrames == 0);
@@ -192,7 +192,7 @@ void TestConnectionConfigReadsExistingValuesAndClamps() {
 
 void TestInputConfigDefaultsPreserveLegacyInitializationOrder() {
   MapEnvironment environment;
-  auto config = NsmbNetplayPoC::Config::LoadInputConfig(environment, false);
+  auto config = NsmbMvlNetplay::Config::LoadInputConfig(environment, false);
   CHECK(config.SendDelayFrames == 0);
   CHECK(config.SendJitterFrames == 0);
   CHECK(config.SendDelayStartFrame == 0u);
@@ -212,10 +212,10 @@ void TestInputConfigDefaultsPreserveLegacyInitializationOrder() {
   CHECK(config.WaitPollUs == 100);
 
   environment.Values["MELONDS_NSML_INPUT_NETPLAY_ONLY"] = "1";
-  config = NsmbNetplayPoC::Config::LoadInputConfig(environment, false);
+  config = NsmbMvlNetplay::Config::LoadInputConfig(environment, false);
   CHECK(config.NetplayOnly);
   CHECK(config.MaxFrameLead == -1);
-  config = NsmbNetplayPoC::Config::LoadInputConfig(environment, true);
+  config = NsmbMvlNetplay::Config::LoadInputConfig(environment, true);
   CHECK(config.MaxFrameLead == 2);
 }
 
@@ -241,7 +241,7 @@ void TestInputConfigReadsClampsAndNormalizesRanges() {
   };
 
   const auto config =
-      NsmbNetplayPoC::Config::LoadInputConfig(environment, false);
+      NsmbMvlNetplay::Config::LoadInputConfig(environment, false);
   CHECK(config.SendDelayFrames == 0);
   CHECK(config.SendJitterFrames == 4);
   CHECK(config.SendDelayStartFrame == 100u);
@@ -263,7 +263,7 @@ void TestInputConfigReadsClampsAndNormalizesRanges() {
 void TestRuntimePatchConfigDefaults() {
   const MapEnvironment environment;
   const auto config =
-      NsmbNetplayPoC::Config::LoadRuntimePatchConfig(environment);
+      NsmbMvlNetplay::Config::LoadRuntimePatchConfig(environment);
   CHECK(config.PlayerStickToStarStartFrame == 0u);
   CHECK(config.PlayerStickToStarEndFrame == 0u);
   CHECK(config.PlayerStickToStarSlot == 0);
@@ -319,7 +319,7 @@ void TestRuntimePatchConfigReadsAndClampsEnvironment() {
   };
 
   const auto config =
-      NsmbNetplayPoC::Config::LoadRuntimePatchConfig(environment);
+      NsmbMvlNetplay::Config::LoadRuntimePatchConfig(environment);
   CHECK(config.PlayerStickToStarStartFrame == 10u);
   CHECK(config.PlayerStickToStarEndFrame == 20u);
   CHECK(config.PlayerStickToStarSlot == 1);
@@ -359,7 +359,7 @@ void TestRuntimePatchConfigReadsAndClampsEnvironment() {
 
 void TestHarnessConfigDefaults() {
   const MapEnvironment environment;
-  const auto config = NsmbNetplayPoC::Config::LoadHarnessConfig(environment);
+  const auto config = NsmbMvlNetplay::Config::LoadHarnessConfig(environment);
   CHECK(config.InputScriptPath.empty());
   CHECK(!config.FrameBarrierEnabled);
   CHECK(!config.SerialRunEnabled);
@@ -400,7 +400,7 @@ void TestHarnessConfigReadsClampsAndPreservesPresence() {
       {"MELONDS_NSML_STATE_LOAD_FRAME", "invalid"},
   };
 
-  auto config = NsmbNetplayPoC::Config::LoadHarnessConfig(environment);
+  auto config = NsmbMvlNetplay::Config::LoadHarnessConfig(environment);
   CHECK(config.InputScriptPath == "inputs.txt");
   CHECK(config.FrameBarrierEnabled);
   CHECK(config.SerialRunEnabled);
@@ -421,13 +421,13 @@ void TestHarnessConfigReadsClampsAndPreservesPresence() {
 
   environment.Values["MELONDS_NSML_NET_PUMP_SLEEP_US"] = "99999";
   environment.Values["MELONDS_NSML_STATE_LOAD_FRAME"] = "84";
-  config = NsmbNetplayPoC::Config::LoadHarnessConfig(environment);
+  config = NsmbMvlNetplay::Config::LoadHarnessConfig(environment);
   CHECK(config.NetworkPumpSleepUs == 5000);
   CHECK(config.StateLoadFrame == 84u);
 
   environment.Values["MELONDS_NSML_STATE_SAVE_FRAME"] = "0x10";
   environment.Values["MELONDS_NSML_STATE_LOAD_FRAME"] = "0x10";
-  config = NsmbNetplayPoC::Config::LoadHarnessConfig(environment);
+  config = NsmbMvlNetplay::Config::LoadHarnessConfig(environment);
   CHECK(config.StateSaveFrame == 16u);
   CHECK(config.StateLoadFrame == 0u);
 }
@@ -435,7 +435,7 @@ void TestHarnessConfigReadsClampsAndPreservesPresence() {
 void TestPacketBridgeConfigDefaults() {
   const MapEnvironment environment;
   const auto config =
-      NsmbNetplayPoC::Config::LoadPacketBridgeConfig(environment);
+      NsmbMvlNetplay::Config::LoadPacketBridgeConfig(environment);
   CHECK(!config.Enabled);
   CHECK(!config.Only);
   CHECK(!config.AllowPreGame);
@@ -484,7 +484,7 @@ void TestPacketBridgeConfigReadsAndClampsEnvironment() {
       {"MELONDS_NSML_PACKET_BRIDGE_SEND_JITTER_FRAMES", "15"},
   };
 
-  auto config = NsmbNetplayPoC::Config::LoadPacketBridgeConfig(environment);
+  auto config = NsmbMvlNetplay::Config::LoadPacketBridgeConfig(environment);
   CHECK(config.Enabled);
   CHECK(config.Only);
   CHECK(config.AllowPreGame);
@@ -507,17 +507,17 @@ void TestPacketBridgeConfigReadsAndClampsEnvironment() {
   CHECK(config.SendJitterFrames == 15);
 
   environment.Values["MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER"] = "";
-  config = NsmbNetplayPoC::Config::LoadPacketBridgeConfig(environment);
+  config = NsmbMvlNetplay::Config::LoadPacketBridgeConfig(environment);
   CHECK(config.LocalPlayerOverride == 0);
   environment.Values["MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER"] = "invalid";
-  config = NsmbNetplayPoC::Config::LoadPacketBridgeConfig(environment);
+  config = NsmbMvlNetplay::Config::LoadPacketBridgeConfig(environment);
   CHECK(config.LocalPlayerOverride == 0);
 }
 
 void TestRollbackConfigDefaultsAndBackendAliases() {
-  using NsmbNetplayPoC::Config::RollbackBackend;
+  using NsmbMvlNetplay::Config::RollbackBackend;
   MapEnvironment environment;
-  auto config = NsmbNetplayPoC::Config::LoadRollbackConfig(environment);
+  auto config = NsmbMvlNetplay::Config::LoadRollbackConfig(environment);
   CHECK(!config.Enabled);
   CHECK(!config.Resimulate);
   CHECK(!config.SkipJitReset);
@@ -545,7 +545,7 @@ void TestRollbackConfigDefaultsAndBackendAliases() {
   };
   for (const auto &alias : aliases) {
     environment.Values["MELONDS_NSML_ROLLBACK_BACKEND"] = alias.first;
-    config = NsmbNetplayPoC::Config::LoadRollbackConfig(environment);
+    config = NsmbMvlNetplay::Config::LoadRollbackConfig(environment);
     CHECK(config.Backend == alias.second);
   }
 }
@@ -576,7 +576,7 @@ void TestRollbackConfigReadsClampsAndDependencies() {
       {"MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES", "-1"},
   };
 
-  const auto config = NsmbNetplayPoC::Config::LoadRollbackConfig(environment);
+  const auto config = NsmbMvlNetplay::Config::LoadRollbackConfig(environment);
   CHECK(config.Enabled);
   CHECK(config.Resimulate);
   CHECK(config.SkipRenderDuringResim);
@@ -602,7 +602,7 @@ void TestRollbackConfigReadsClampsAndDependencies() {
 
 void TestMvlConfigDefaults() {
   const MapEnvironment environment;
-  const auto config = NsmbNetplayPoC::Config::LoadMvlConfig(environment);
+  const auto config = NsmbMvlNetplay::Config::LoadMvlConfig(environment);
   CHECK(config.Stage == 0);
   CHECK(config.StageSequence.empty());
   CHECK(config.StageSceneSettings == 0x00B4FF00u);
@@ -655,7 +655,7 @@ void TestMvlConfigReadsClampsAndPreservesPriority() {
       {"MELONDS_NSML_MATCH_SEED_SEQUENCE", "0x333, 0x444"},
   };
 
-  auto config = NsmbNetplayPoC::Config::LoadMvlConfig(environment);
+  auto config = NsmbMvlNetplay::Config::LoadMvlConfig(environment);
   CHECK(config.StageSequence == std::vector<int>({4, 4, 0, 2}));
   CHECK(config.Stage == 4);
   CHECK(config.StageSceneSettings == 0x00B4FF00u);
@@ -685,17 +685,17 @@ void TestMvlConfigReadsClampsAndPreservesPriority() {
         std::vector<std::uint32_t>({0x333u, 0x444u}));
 
   environment.Values["MELONDS_NSML_MVL_SCENE_SETTINGS"] = "invalid";
-  config = NsmbNetplayPoC::Config::LoadMvlConfig(environment);
+  config = NsmbMvlNetplay::Config::LoadMvlConfig(environment);
   CHECK(config.StageSceneSettings == 0u);
 
   environment.Values.erase("MELONDS_NSML_MATCH_SEED_SEQUENCE");
-  config = NsmbNetplayPoC::Config::LoadMvlConfig(environment);
+  config = NsmbMvlNetplay::Config::LoadMvlConfig(environment);
   CHECK(config.MatchSeed == 0x222u);
   CHECK(config.NetRandom.Value == 0x111u);
 
   environment.Values["MELONDS_NSML_NET_RANDOM_VALUE"] = "";
   environment.Values.erase("MELONDS_NSML_MATCH_SEED");
-  config = NsmbNetplayPoC::Config::LoadMvlConfig(environment);
+  config = NsmbMvlNetplay::Config::LoadMvlConfig(environment);
   CHECK(!config.NetRandom.Enabled);
   CHECK(!config.NetRandom.Auto);
   CHECK(config.NetRandom.Frame == 0u);
@@ -705,7 +705,7 @@ void TestMvlConfigReadsClampsAndPreservesPriority() {
 void TestDiagnosticsConfigDefaults() {
   const MapEnvironment environment;
   const auto config =
-      NsmbNetplayPoC::Config::LoadDiagnosticsConfig(environment, 720);
+      NsmbMvlNetplay::Config::LoadDiagnosticsConfig(environment, 720);
   CHECK(!config.HangDiagnosticsEnabled);
   CHECK(config.HangWatchdogIntervalMs == 1000);
   CHECK(config.HangThresholdMs == 8000);
@@ -800,7 +800,7 @@ void TestDiagnosticsConfigReadsClampsAndPreservesPriority() {
       {"MELONDS_NSML_AI_PLAY_LOG_INCLUDE_NON_GAMEPLAY", "1"},
   };
 
-  auto config = NsmbNetplayPoC::Config::LoadDiagnosticsConfig(environment, 720);
+  auto config = NsmbMvlNetplay::Config::LoadDiagnosticsConfig(environment, 720);
   CHECK(config.HangDiagnosticsEnabled);
   CHECK(config.HangWatchdogIntervalMs == 100);
   CHECK(config.HangThresholdMs == 300000);
@@ -849,7 +849,7 @@ void TestDiagnosticsConfigReadsClampsAndPreservesPriority() {
   environment.Values["MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE"] = "custom.jsonl";
   environment.Values["MELONDS_NSML_DIAGNOSTIC_EVENTS_DISABLE"] = "1";
   environment.Values["MELONDS_NSML_INPUT_RECORD_INSTANCE"] = "15";
-  config = NsmbNetplayPoC::Config::LoadDiagnosticsConfig(environment, 720);
+  config = NsmbMvlNetplay::Config::LoadDiagnosticsConfig(environment, 720);
   CHECK(config.DiagnosticEventsPath == "custom.jsonl");
   CHECK(!config.DiagnosticEventsEnabled);
   CHECK(config.InputRecordInstance == 15);
@@ -857,7 +857,7 @@ void TestDiagnosticsConfigReadsClampsAndPreservesPriority() {
 
 void TestAIConfigDefaults() {
   const MapEnvironment environment;
-  const auto config = NsmbNetplayPoC::Config::LoadAIConfig(environment);
+  const auto config = NsmbMvlNetplay::Config::LoadAIConfig(environment);
   CHECK(!config.Rule.Enabled);
   CHECK(!config.Rule.HostOnly);
   CHECK(!config.Rule.ClientOnly);
@@ -928,7 +928,7 @@ void TestAIConfigReadsClampsAndPreservesDependencies() {
       {"MELONDS_NSML_IMITATION_AI_DISABLE_FEATURE_WARNING", "1"},
       {"MELONDS_NSML_IMITATION_AI_MODEL", "model.json"},
   };
-  const auto config = NsmbNetplayPoC::Config::LoadAIConfig(environment);
+  const auto config = NsmbMvlNetplay::Config::LoadAIConfig(environment);
   CHECK(config.Rule.Enabled);
   CHECK(config.Rule.HostOnly);
   CHECK(config.Rule.ClientOnly);
@@ -965,7 +965,7 @@ void TestAIConfigReadsClampsAndPreservesDependencies() {
 
 void TestStateSyncConfigDefaultsAndApplyModes() {
   MapEnvironment environment;
-  auto config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
+  auto config = NsmbMvlNetplay::Config::LoadStateSyncConfig(environment);
   CHECK(!config.GameEnabled);
   CHECK(!config.GameExtended);
   CHECK(!config.GameApplyEnabled);
@@ -978,28 +978,28 @@ void TestStateSyncConfigDefaultsAndApplyModes() {
   CHECK(config.WorldTraceObjectLifecyclesInterval == 60);
 
   environment.Values["MELONDS_NSML_STATE_APPLY_MODE"] = "critical";
-  config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
+  config = NsmbMvlNetplay::Config::LoadStateSyncConfig(environment);
   CHECK(config.GameApplyCriticalGlobals);
   CHECK(config.GameApplyStarObjects);
   CHECK(!config.GameApplyStageObjects);
   CHECK(!config.GameApplyPlayerActors);
 
   environment.Values["MELONDS_NSML_STATE_APPLY_MODE"] = "globals";
-  config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
+  config = NsmbMvlNetplay::Config::LoadStateSyncConfig(environment);
   CHECK(config.GameApplyCriticalGlobals);
   CHECK(!config.GameApplyStarObjects);
   CHECK(!config.GameApplyStageObjects);
   CHECK(!config.GameApplyPlayerActors);
 
   environment.Values["MELONDS_NSML_STATE_APPLY_MODE"] = "objects";
-  config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
+  config = NsmbMvlNetplay::Config::LoadStateSyncConfig(environment);
   CHECK(!config.GameApplyCriticalGlobals);
   CHECK(config.GameApplyStarObjects);
   CHECK(config.GameApplyStageObjects);
   CHECK(config.GameApplyPlayerActors);
 
   environment.Values["MELONDS_NSML_STATE_APPLY_MODE"] = "remote-player";
-  config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
+  config = NsmbMvlNetplay::Config::LoadStateSyncConfig(environment);
   CHECK(!config.GameApplyCriticalGlobals);
   CHECK(!config.GameApplyStarObjects);
   CHECK(!config.GameApplyStageObjects);
@@ -1007,7 +1007,7 @@ void TestStateSyncConfigDefaultsAndApplyModes() {
   CHECK(config.GameApplyRemotePlayerOnly);
 
   environment.Values["MELONDS_NSML_STATE_APPLY_MODE"] = "unknown";
-  config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
+  config = NsmbMvlNetplay::Config::LoadStateSyncConfig(environment);
   CHECK(config.GameApplyCriticalGlobals);
   CHECK(config.GameApplyStarObjects);
   CHECK(config.GameApplyStageObjects);
@@ -1031,7 +1031,7 @@ void TestStateSyncConfigReadsClampsAndSkipPriorities() {
       {"MELONDS_NSML_WORLD_STATE_TRACE_OBJECT_LIFECYCLES_END_FRAME", "-2"},
   };
 
-  const auto config = NsmbNetplayPoC::Config::LoadStateSyncConfig(environment);
+  const auto config = NsmbMvlNetplay::Config::LoadStateSyncConfig(environment);
   CHECK(config.GameEnabled);
   CHECK(config.GameExtended);
   CHECK(config.GameApplyEnabled);

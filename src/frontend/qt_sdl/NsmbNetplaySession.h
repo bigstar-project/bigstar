@@ -19,7 +19,7 @@ namespace melonDS {
 class NDS;
 }
 
-namespace NsmbNetplayPoC::NetplaySession {
+namespace NsmbMvlNetplay::NetplaySession {
 
 struct Runtime {
   SessionPolicy::Runtime Handshake;
@@ -104,6 +104,6 @@ void WaitForRemoteStartReady(Context context, const Hooks &hooks,
 void ThrottleFrameLead(Context context, const Hooks &hooks, melonDS::NDS *nds,
                        melonDS::u32 frame, melonDS::u32 sendFrame);
 
-} // namespace NsmbNetplayPoC::NetplaySession
+} // namespace NsmbMvlNetplay::NetplaySession
 
 #endif

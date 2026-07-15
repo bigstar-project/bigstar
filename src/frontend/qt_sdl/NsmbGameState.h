@@ -11,7 +11,7 @@
 #include <optional>
 #include <string>
 
-namespace NsmbNetplayPoC::GameStateModel {
+namespace NsmbMvlNetplay::GameStateModel {
 
 constexpr int kAITileProbeCount = 17;
 constexpr int kAITileGridWidth = 33;
@@ -692,6 +692,6 @@ void WriteGameStateTraceRow(std::ostream &out, int instanceID,
                             const GameStateTraceHashes *extendedHashes);
 void WriteGameStateTraceHeader(std::ostream &out, bool extended);
 
-} // namespace NsmbNetplayPoC::GameStateModel
+} // namespace NsmbMvlNetplay::GameStateModel
 
 #endif

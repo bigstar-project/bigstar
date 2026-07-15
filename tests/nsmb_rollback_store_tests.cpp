@@ -7,14 +7,14 @@
 
 namespace {
 
-using NsmbNetplayPoC::RollbackStorage::CheckpointBytes;
-using NsmbNetplayPoC::RollbackStorage::ClampResimulationMismatch;
-using NsmbNetplayPoC::RollbackStorage::DeltaMode;
-using NsmbNetplayPoC::RollbackStorage::IsResimulationDelayElapsed;
-using NsmbNetplayPoC::RollbackStorage::ShouldSaveCheckpoint;
-using NsmbNetplayPoC::RollbackStorage::Store;
-using NsmbNetplayPoC::RollbackStorage::StoredState;
-using NsmbNetplayPoC::RollbackStorage::Statistics;
+using NsmbMvlNetplay::RollbackStorage::CheckpointBytes;
+using NsmbMvlNetplay::RollbackStorage::ClampResimulationMismatch;
+using NsmbMvlNetplay::RollbackStorage::DeltaMode;
+using NsmbMvlNetplay::RollbackStorage::IsResimulationDelayElapsed;
+using NsmbMvlNetplay::RollbackStorage::ShouldSaveCheckpoint;
+using NsmbMvlNetplay::RollbackStorage::Store;
+using NsmbMvlNetplay::RollbackStorage::StoredState;
+using NsmbMvlNetplay::RollbackStorage::Statistics;
 
 void Require(bool condition, const std::string &message) {
   if (condition)

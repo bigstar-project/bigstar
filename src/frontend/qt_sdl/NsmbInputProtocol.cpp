@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <cstring>
 
-namespace NsmbNetplayPoC::InputProtocol
+namespace NsmbMvlNetplay::InputProtocol
 {
 
 namespace

@@ -17,7 +17,7 @@ void Check(bool condition, const char *expression, int line) {
 #define CHECK(expression) Check((expression), #expression, __LINE__)
 
 void TestStartFrameAndReceivePolicy() {
-  using namespace NsmbNetplayPoC::SessionPolicy;
+  using namespace NsmbMvlNetplay::SessionPolicy;
   CHECK(FirstGameplayInputFrame(100, -3) == 100);
   CHECK(FirstGameplayInputFrame(100, 4) == 104);
   CHECK(!HasPostStartRemoteInput(false, 999, 100, 4));
@@ -36,7 +36,7 @@ void TestStartFrameAndReceivePolicy() {
 }
 
 void TestResendPolicy() {
-  using namespace NsmbNetplayPoC::SessionPolicy;
+  using namespace NsmbMvlNetplay::SessionPolicy;
   StartReadyResendState state;
   state.HasPeer = true;
   state.InputNetplayOnly = true;
@@ -81,7 +81,7 @@ void TestResendPolicy() {
 }
 
 void TestFrameActivationPolicy() {
-  using namespace NsmbNetplayPoC::SessionPolicy;
+  using namespace NsmbMvlNetplay::SessionPolicy;
   CHECK(ShouldPumpNetworkAtFrame(false, 100, 0, 90));
   CHECK(ShouldPumpNetworkAtFrame(true, 0, 0, 90));
   CHECK(!ShouldPumpNetworkAtFrame(true, 100, 89, 90));
@@ -95,7 +95,7 @@ void TestFrameActivationPolicy() {
 }
 
 void TestRuntimeReadyOrderingAndSendState() {
-  using NsmbNetplayPoC::SessionPolicy::Runtime;
+  using NsmbMvlNetplay::SessionPolicy::Runtime;
   Runtime runtime;
   const auto sentAt = Runtime::Clock::time_point(std::chrono::seconds(5));
 
@@ -132,7 +132,7 @@ void TestRuntimeReadyOrderingAndSendState() {
 }
 
 void TestRuntimeResetContracts() {
-  using NsmbNetplayPoC::SessionPolicy::Runtime;
+  using NsmbMvlNetplay::SessionPolicy::Runtime;
   Runtime runtime;
   const auto sentAt = Runtime::Clock::time_point(std::chrono::seconds(7));
   runtime.MarkMatchSeedSent();

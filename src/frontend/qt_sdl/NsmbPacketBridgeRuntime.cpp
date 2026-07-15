@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace NsmbNetplayPoC::PacketBridge {
+namespace NsmbMvlNetplay::PacketBridge {
 
 namespace {
 
@@ -238,4 +238,4 @@ melonDS::u32 Runtime::JitHookResumeFrame(int instanceID) const {
   return ValidInstance(instanceID) ? JitHookResumeFrame_[instanceID] : 0;
 }
 
-} // namespace NsmbNetplayPoC::PacketBridge
+} // namespace NsmbMvlNetplay::PacketBridge

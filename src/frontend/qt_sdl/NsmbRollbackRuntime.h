@@ -12,7 +12,7 @@ namespace melonDS {
 class NDS;
 }
 
-namespace NsmbNetplayPoC::RollbackRuntime {
+namespace NsmbMvlNetplay::RollbackRuntime {
 
 struct Context {
   const Config::RollbackConfig &Config;
@@ -53,6 +53,6 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
                         int instanceID, melonDS::u32 frame, melonDS::NDS *nds);
 void TraceStatsIfNeeded(Context context, melonDS::u32 frame);
 
-} // namespace NsmbNetplayPoC::RollbackRuntime
+} // namespace NsmbMvlNetplay::RollbackRuntime
 
 #endif

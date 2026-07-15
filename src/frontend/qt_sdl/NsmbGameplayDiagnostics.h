@@ -14,7 +14,7 @@ namespace melonDS {
 class NDS;
 }
 
-namespace NsmbNetplayPoC::GameplayDiagnostics {
+namespace NsmbMvlNetplay::GameplayDiagnostics {
 
 struct Context {
   Config::DiagnosticsConfig &Diagnostics;
@@ -54,4 +54,4 @@ void TraceGameplayHeartbeatIfNeeded(Context context, int instanceID,
 void CaptureScreenshotIfNeeded(Context context, int instanceID,
                                melonDS::u32 frame, melonDS::NDS *nds);
 
-} // namespace NsmbNetplayPoC::GameplayDiagnostics
+} // namespace NsmbMvlNetplay::GameplayDiagnostics

@@ -90,7 +90,7 @@ $clientProc = Start-MelonTestProcess -Role "client" -Stdout $clientOut -HashLog 
 Complete-MelonTestProcess $clientProc
 Complete-MelonTestProcess $hostProc
 
-if (-not (Select-String -Path $hostOut -Pattern "NSMB PoC: peer connected" -Quiet)) {
+if (-not (Select-String -Path $hostOut -Pattern "NSMB MvL Netplay: peer connected" -Quiet)) {
     throw "host did not report peer connection. See $hostOut"
 }
 

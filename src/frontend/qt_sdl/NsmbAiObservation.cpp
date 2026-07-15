@@ -22,7 +22,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace NsmbNetplayPoC::AIObservation {
+namespace NsmbMvlNetplay::AIObservation {
 namespace {
 
 using GameStateModel::AIPlayerTileProbeSample;
@@ -4258,4 +4258,4 @@ void TracePlayLog(Context context, const Hooks &hooks, int instanceID,
   TraceAIPlayLog(instanceID, frame, nds);
 }
 
-} // namespace NsmbNetplayPoC::AIObservation
+} // namespace NsmbMvlNetplay::AIObservation

@@ -9,7 +9,7 @@
 #include <optional>
 #include <vector>
 
-namespace NsmbNetplayPoC::WireProtocol {
+namespace NsmbMvlNetplay::WireProtocol {
 
 constexpr melonDS::u32 kMagic = 0x4C4D534E; // "NSML", little endian
 constexpr melonDS::u32 kVersion = 1;
@@ -128,9 +128,9 @@ struct WireGameState {
 
 static_assert(sizeof(WireGameState) == 380);
 
-} // namespace NsmbNetplayPoC::WireProtocol
+} // namespace NsmbMvlNetplay::WireProtocol
 
-namespace NsmbNetplayPoC::SessionProtocol {
+namespace NsmbMvlNetplay::SessionProtocol {
 
 constexpr std::size_t kSessionPacketSize = 16;
 
@@ -147,9 +147,9 @@ struct Message {
 std::vector<char> Encode(const Message &message);
 bool Decode(const void *data, std::size_t size, Message &message);
 
-} // namespace NsmbNetplayPoC::SessionProtocol
+} // namespace NsmbMvlNetplay::SessionProtocol
 
-namespace NsmbNetplayPoC::SessionPolicy {
+namespace NsmbMvlNetplay::SessionPolicy {
 
 constexpr std::int64_t kStartReadyResendIntervalMs = 250;
 
@@ -227,9 +227,9 @@ private:
   std::optional<melonDS::u32> InputEpochPrimedStartFrame_;
 };
 
-} // namespace NsmbNetplayPoC::SessionPolicy
+} // namespace NsmbMvlNetplay::SessionPolicy
 
-namespace NsmbNetplayPoC::PacketClassifier {
+namespace NsmbMvlNetplay::PacketClassifier {
 
 enum class PacketClass {
   Unknown,
@@ -249,6 +249,6 @@ struct KnownPacketSizes {
 
 PacketClass Classify(std::size_t packetSize, const KnownPacketSizes &sizes);
 
-} // namespace NsmbNetplayPoC::PacketClassifier
+} // namespace NsmbMvlNetplay::PacketClassifier
 
 #endif

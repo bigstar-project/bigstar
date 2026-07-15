@@ -15,7 +15,7 @@
 #include <thread>
 #include <vector>
 
-namespace NsmbNetplayPoC::TestStateHarness {
+namespace NsmbMvlNetplay::TestStateHarness {
 namespace {
 
 std::filesystem::path StatePath(const std::string &dir, int instanceID) {
@@ -268,4 +268,4 @@ bool LoadState(Context context, int instanceID, melonDS::u32 frame,
   return true;
 }
 
-} // namespace NsmbNetplayPoC::TestStateHarness
+} // namespace NsmbMvlNetplay::TestStateHarness

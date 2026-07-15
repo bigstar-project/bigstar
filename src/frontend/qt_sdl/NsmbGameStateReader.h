@@ -9,12 +9,12 @@ namespace melonDS {
 class NDS;
 }
 
-namespace NsmbNetplayPoC::Diagnostics {
+namespace NsmbMvlNetplay::Diagnostics {
 struct DiagnosticFrameSnapshot;
 struct DiagnosticPlayerSnapshot;
 }
 
-namespace NsmbNetplayPoC::GameStateReader {
+namespace NsmbMvlNetplay::GameStateReader {
 
 struct ObjectScanSample {
   melonDS::u32 Found = 0;
@@ -184,6 +184,6 @@ melonDS::u64 HashFramebuffers(melonDS::NDS *nds);
 melonDS::u64 HashMainRAMRange(melonDS::NDS *nds, melonDS::u32 address,
                               melonDS::u32 length);
 
-} // namespace NsmbNetplayPoC::GameStateReader
+} // namespace NsmbMvlNetplay::GameStateReader
 
 #endif

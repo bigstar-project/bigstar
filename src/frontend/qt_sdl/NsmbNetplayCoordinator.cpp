@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <mutex>
 
-namespace NsmbNetplayPoC::Coordination {
+namespace NsmbMvlNetplay::Coordination {
 namespace {
 
 constexpr int kMaxInstances = 16;
@@ -109,7 +109,7 @@ NetplayStartWaitResult Runtime::WaitForNetplayStart(int instanceID,
       if (timeoutMs > 0) {
         if (State->Condition.wait_until(lock, deadline) ==
             std::cv_status::timeout) {
-          std::printf("NSMB PoC: netplay start local barrier timeout inst=%d "
+          std::printf("NSMB MvL Netplay: netplay start local barrier timeout inst=%d "
                       "frame=%u waitedMs=%d\n",
                       instanceID, frame, timeoutMs);
           break;
@@ -125,7 +125,7 @@ NetplayStartWaitResult Runtime::WaitForNetplayStart(int instanceID,
     if (timeoutMs > 0) {
       if (State->Condition.wait_until(lock, deadline) ==
           std::cv_status::timeout) {
-        std::printf("NSMB PoC: netplay start peer wait barrier timeout inst=%d "
+        std::printf("NSMB MvL Netplay: netplay start peer wait barrier timeout inst=%d "
                     "frame=%u waitedMs=%d\n",
                     instanceID, frame, timeoutMs);
         return NetplayStartWaitResult::TimedOut;
@@ -364,4 +364,4 @@ std::pair<bool, bool> Runtime::LocalMPLoadStatus() const {
   return {State->LocalMPLoadFinished, State->LocalMPLoaded};
 }
 
-} // namespace NsmbNetplayPoC::Coordination
+} // namespace NsmbMvlNetplay::Coordination

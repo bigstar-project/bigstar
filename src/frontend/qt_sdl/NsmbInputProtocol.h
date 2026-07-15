@@ -1,12 +1,12 @@
 #ifndef NSMBINPUTPROTOCOL_H
 #define NSMBINPUTPROTOCOL_H
 
-#include "NsmbNetplayPoC.h"
+#include "NsmbMvlNetplayRuntime.h"
 
 #include <cstddef>
 #include <vector>
 
-namespace NsmbNetplayPoC::InputProtocol
+namespace NsmbMvlNetplay::InputProtocol
 {
 
 constexpr std::size_t kInputPacketSize = 24;

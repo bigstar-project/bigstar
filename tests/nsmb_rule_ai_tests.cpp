@@ -31,8 +31,8 @@ const char* TestObjectCategory(melonDS::u16 objectID, melonDS::u32)
     return "other";
 }
 
-NsmbNetplayPoC::GameStateModel::AITerrainDerivedSummary TestTerrainSummary(
-    const NsmbNetplayPoC::GameStateModel::AIPlayerTileProbeSample&, bool contactGround,
+NsmbMvlNetplay::GameStateModel::AITerrainDerivedSummary TestTerrainSummary(
+    const NsmbMvlNetplay::GameStateModel::AIPlayerTileProbeSample&, bool contactGround,
     bool contactWallLeft, bool contactWallRight)
 {
     if (TerrainSummaryCalls == 0)
@@ -42,7 +42,7 @@ NsmbNetplayPoC::GameStateModel::AITerrainDerivedSummary TestTerrainSummary(
         FirstContactWallRight = contactWallRight;
     }
     TerrainSummaryCalls++;
-    NsmbNetplayPoC::GameStateModel::AITerrainDerivedSummary summary {};
+    NsmbMvlNetplay::GameStateModel::AITerrainDerivedSummary summary {};
     summary.EffectiveGroundBelowSolid = 1;
     summary.BlockedAhead = 1;
     summary.EffectiveHoleAhead = 1;
@@ -55,7 +55,7 @@ NsmbNetplayPoC::GameStateModel::AITerrainDerivedSummary TestTerrainSummary(
     return summary;
 }
 
-bool TestTargetHasFloorBelow(const NsmbNetplayPoC::GameStateModel::AIPlayerTileProbeSample&,
+bool TestTargetHasFloorBelow(const NsmbMvlNetplay::GameStateModel::AIPlayerTileProbeSample&,
                              melonDS::u32, melonDS::u32, melonDS::u32 targetX, melonDS::u32)
 {
     return targetX != 0xDEAD;
@@ -72,7 +72,7 @@ NsmbRuleAI::FrameStateServices TestServices()
 
 void TestFrameStateMapsGameSampleAndObjectScan()
 {
-    using namespace NsmbNetplayPoC;
+    using namespace NsmbMvlNetplay;
     GameStateModel::GameStateSample sample {};
     sample.PlayerActor0Found = 1;
     sample.PlayerActor0PosX = 0x10000;
@@ -181,7 +181,7 @@ void TestFrameStateMapsGameSampleAndObjectScan()
 
 void TestOwnFireballIsNotAThreat()
 {
-    using namespace NsmbNetplayPoC;
+    using namespace NsmbMvlNetplay;
     GameStateModel::GameStateSample sample {};
     sample.PlayerActor0Found = 1;
     sample.PlayerActor0PosX = 0x100000;
@@ -218,16 +218,16 @@ void TestDecisionUsesMappedPlayerPositions()
     state.Players[1].Found = true;
     state.Players[1].X = 0x20000;
     state.Players[1].Y = 0;
-    NsmbNetplayPoC::InputState fallback {};
+    NsmbMvlNetplay::InputState fallback {};
 
-    const NsmbNetplayPoC::InputState input =
+    const NsmbMvlNetplay::InputState input =
         NsmbRuleAI::DecideInput(config, state, 15, 1000, 0, 0, fallback);
     CHECK((input.KeyMask & (1u << 4)) == 0);
     CHECK((input.KeyMask & (1u << 5)) != 0);
     CHECK((input.KeyMask & (1u << 11)) == 0);
 
     config.Enabled = false;
-    const NsmbNetplayPoC::InputState disabled =
+    const NsmbMvlNetplay::InputState disabled =
         NsmbRuleAI::DecideInput(config, state, 15, 1001, 0, 0, fallback);
     CHECK(disabled.KeyMask == fallback.KeyMask);
 }

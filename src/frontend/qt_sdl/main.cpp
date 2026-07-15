@@ -62,7 +62,7 @@
 #include "LAN.h"
 #include "MPInterface.h"
 #include "Net.h"
-#include "NsmbNetplayPoC.h"
+#include "NsmbMvlNetplayRuntime.h"
 
 #include "CLI.h"
 
@@ -499,7 +499,7 @@ int main(int argc, char** argv)
     delete camManager[1];
 
     Config::Save();
-    NsmbNetplayPoC::Shutdown();
+    NsmbMvlNetplay::Shutdown();
 
     SDL_Quit();
     return ret;

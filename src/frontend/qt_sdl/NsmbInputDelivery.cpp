@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace NsmbNetplayPoC::InputDelivery
+namespace NsmbMvlNetplay::InputDelivery
 {
 
 SendDecision DecideSend(melonDS::u32 frame, const SendConfig& config)

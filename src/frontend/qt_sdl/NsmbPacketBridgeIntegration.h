@@ -2,7 +2,7 @@
 #define NSMB_PACKET_BRIDGE_INTEGRATION_H
 
 #include "NsmbNetplayConfig.h"
-#include "NsmbNetplayPoC.h"
+#include "NsmbMvlNetplayRuntime.h"
 #include "NsmbPacketBridgeRuntime.h"
 
 #include <cstddef>
@@ -17,7 +17,7 @@ namespace NsmbNetplayTransport {
 class Transport;
 }
 
-namespace NsmbNetplayPoC::PacketBridge {
+namespace NsmbMvlNetplay::PacketBridge {
 
 struct IntegrationContext {
   const Config::PacketBridgeConfig &Config;
@@ -67,6 +67,6 @@ void WriteJitScratchInputs(IntegrationContext context,
 void ApplyJitHelperPatchIfNeeded(IntegrationContext context, int instanceID,
                                  melonDS::u32 frame, melonDS::NDS *nds);
 
-} // namespace NsmbNetplayPoC::PacketBridge
+} // namespace NsmbMvlNetplay::PacketBridge
 
 #endif

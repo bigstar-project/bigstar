@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace NsmbNetplayPoC::RollbackRuntime {
+namespace NsmbMvlNetplay::RollbackRuntime {
 namespace {
 
 constexpr melonDS::u32 kNoFrame = 0;
@@ -697,4 +697,4 @@ void TraceStatsIfNeeded(Context context, melonDS::u32 frame) {
   std::fflush(stdout);
 }
 
-} // namespace NsmbNetplayPoC::RollbackRuntime
+} // namespace NsmbMvlNetplay::RollbackRuntime

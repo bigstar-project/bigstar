@@ -12,7 +12,7 @@
 
 #include "NDS.h"
 
-namespace NsmbNetplayPoC::GameStateSync {
+namespace NsmbMvlNetplay::GameStateSync {
 namespace {
 
 constexpr melonDS::u32 kMainRAMBase = 0x02000000;
@@ -273,7 +273,7 @@ void ApplyRemote(Context context, const Hooks &hooks, int instanceID,
   if (options.RemotePlayerOnly) {
     if ((context.Bootstrap.InputTraceEnabled || context.Input.NetplayTrace) &&
         traceFrame) {
-      std::printf("NSMB PoC: applied remote-player snapshot inst=%d frame=%u "
+      std::printf("NSMB MvL Netplay: applied remote-player snapshot inst=%d frame=%u "
                   "sampleFrame=%u remotePlayer=%d applied=%d\n",
                   instanceID, frame, sampleFrame, options.RemotePlayer,
                   result.RemotePlayerApplied ? 1 : 0);
@@ -281,7 +281,7 @@ void ApplyRemote(Context context, const Hooks &hooks, int instanceID,
     return;
   }
   if (context.Bootstrap.InputTraceEnabled && traceFrame)
-    std::printf("NSMB PoC: applied remote game state inst=%d frame=%u "
+    std::printf("NSMB MvL Netplay: applied remote game state inst=%d frame=%u "
                 "sampleFrame=%u\n",
                 instanceID, frame, sampleFrame);
 }
@@ -377,4 +377,4 @@ void Sync(Context context, const Hooks &hooks, int instanceID,
                          false);
 }
 
-} // namespace NsmbNetplayPoC::GameStateSync
+} // namespace NsmbMvlNetplay::GameStateSync

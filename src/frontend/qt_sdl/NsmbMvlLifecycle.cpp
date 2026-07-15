@@ -11,7 +11,7 @@
 #include "Platform.h"
 #include "Savestate.h"
 
-namespace NsmbNetplayPoC::MvlLifecycle {
+namespace NsmbMvlNetplay::MvlLifecycle {
 namespace {
 
 constexpr melonDS::u32 kNoFrame = 0;
@@ -518,4 +518,4 @@ void SaveGameplayCheckpointIfNeeded(Context context, const Hooks &hooks,
   std::fflush(stdout);
 }
 
-} // namespace NsmbNetplayPoC::MvlLifecycle
+} // namespace NsmbMvlNetplay::MvlLifecycle

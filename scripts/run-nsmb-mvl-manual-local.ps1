@@ -562,7 +562,7 @@ if (-not $ClientOnly) {
                 throw "host wrapper exited before netplay init. See $hostOut / $hostErr"
             }
             if (Test-Path $hostReadyLog) {
-                if (Select-String -Path $hostReadyLog -Pattern "NSMB PoC: enabled role=host" -Quiet) {
+                if (Select-String -Path $hostReadyLog -Pattern "NSMB MvL Netplay: enabled role=host" -Quiet) {
                     $hostReady = $true
                     break
                 }

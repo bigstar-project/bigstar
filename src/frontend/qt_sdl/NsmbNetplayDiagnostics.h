@@ -19,7 +19,7 @@ struct ModelDescription;
 struct ModelInitializationResult;
 } // namespace NsmbImitationAI
 
-namespace NsmbNetplayPoC::Diagnostics {
+namespace NsmbMvlNetplay::Diagnostics {
 
 constexpr std::size_t kDiagnosticRingCapacity = 720;
 
@@ -411,4 +411,4 @@ private:
   std::unique_ptr<Impl> State;
 };
 
-} // namespace NsmbNetplayPoC::Diagnostics
+} // namespace NsmbMvlNetplay::Diagnostics

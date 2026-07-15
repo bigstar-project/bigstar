@@ -19,9 +19,9 @@ void Check(bool condition, const char* expression, int line)
 
 #define CHECK(expression) Check((expression), #expression, __LINE__)
 
-using NsmbNetplayPoC::InputDelivery::DecideSend;
-using NsmbNetplayPoC::InputDelivery::Runtime;
-using NsmbNetplayPoC::InputDelivery::SendConfig;
+using NsmbMvlNetplay::InputDelivery::DecideSend;
+using NsmbMvlNetplay::InputDelivery::Runtime;
+using NsmbMvlNetplay::InputDelivery::SendConfig;
 
 void TestDefaultDecision()
 {
@@ -82,13 +82,13 @@ void TestBundleAndDelayBoundaries()
 
 void TestBundleInputSelection()
 {
-    NsmbNetplayPoC::InputState current;
+    NsmbMvlNetplay::InputState current;
     current.KeyMask = 0xAAA;
-    std::map<melonDS::u32, NsmbNetplayPoC::InputState> localInputs;
+    std::map<melonDS::u32, NsmbMvlNetplay::InputState> localInputs;
     localInputs[0].KeyMask = 0xFFE;
     localInputs[2].KeyMask = 0xFDF;
 
-    const auto entries = NsmbNetplayPoC::InputDelivery::SelectBundleInputs(
+    const auto entries = NsmbMvlNetplay::InputDelivery::SelectBundleInputs(
         2,
         current,
         31,
@@ -106,27 +106,27 @@ void TestDelayedInputReleaseUsesFrameOrWallClock()
 {
     const auto now = std::chrono::steady_clock::time_point(std::chrono::seconds(10));
     const auto releaseTime = now + std::chrono::milliseconds(50);
-    CHECK(!NsmbNetplayPoC::InputDelivery::ShouldReleaseDelayedInput(
+    CHECK(!NsmbMvlNetplay::InputDelivery::ShouldReleaseDelayedInput(
         9, now, 10, releaseTime));
-    CHECK(NsmbNetplayPoC::InputDelivery::ShouldReleaseDelayedInput(
+    CHECK(NsmbMvlNetplay::InputDelivery::ShouldReleaseDelayedInput(
         10, now, 10, releaseTime));
-    CHECK(NsmbNetplayPoC::InputDelivery::ShouldReleaseDelayedInput(
+    CHECK(NsmbMvlNetplay::InputDelivery::ShouldReleaseDelayedInput(
         9, releaseTime, 10, releaseTime));
 }
 
 void TestRuntimePreparesWirePayloads()
 {
     Runtime runtime;
-    std::map<melonDS::u32, NsmbNetplayPoC::InputState> localInputs;
-    NsmbNetplayPoC::InputState current;
+    std::map<melonDS::u32, NsmbMvlNetplay::InputState> localInputs;
+    NsmbMvlNetplay::InputState current;
     current.KeyMask = 0xFFE;
     const auto now = Runtime::Clock::time_point(std::chrono::seconds(10));
 
     auto prepared = runtime.Prepare(4, current, {}, localInputs, now);
     CHECK(!prepared.Decision.Drop);
     CHECK(!prepared.Decision.Bundle);
-    NsmbNetplayPoC::InputProtocol::FramedInput single;
-    CHECK(NsmbNetplayPoC::InputProtocol::DecodeInput(
+    NsmbMvlNetplay::InputProtocol::FramedInput single;
+    CHECK(NsmbMvlNetplay::InputProtocol::DecodeInput(
         prepared.ImmediatePayload.data(), prepared.ImmediatePayload.size(), single));
     CHECK(single.Frame == 4);
     CHECK(single.Input.KeyMask == 0xFFE);
@@ -137,9 +137,9 @@ void TestRuntimePreparesWirePayloads()
     bundle.UseHistoryBundle = true;
     bundle.BundleHistory = 2;
     prepared = runtime.Prepare(4, current, bundle, localInputs, now);
-    std::vector<NsmbNetplayPoC::InputProtocol::FramedInput> entries;
+    std::vector<NsmbMvlNetplay::InputProtocol::FramedInput> entries;
     CHECK(prepared.Decision.Bundle);
-    CHECK(NsmbNetplayPoC::InputProtocol::DecodeInputBundle(
+    CHECK(NsmbMvlNetplay::InputProtocol::DecodeInputBundle(
         prepared.ImmediatePayload.data(), prepared.ImmediatePayload.size(), entries));
     CHECK(entries.size() == 3);
     CHECK(entries[0].Frame == 2 && entries[0].Input.KeyMask == 0xFFB);
@@ -157,8 +157,8 @@ void TestRuntimePreparesWirePayloads()
 void TestRuntimeOwnsDelayedQueue()
 {
     Runtime runtime;
-    std::map<melonDS::u32, NsmbNetplayPoC::InputState> localInputs;
-    NsmbNetplayPoC::InputState current;
+    std::map<melonDS::u32, NsmbMvlNetplay::InputState> localInputs;
+    NsmbMvlNetplay::InputState current;
     current.KeyMask = 0xFDF;
     SendConfig config;
     config.DelayFrames = 3;
@@ -178,8 +178,8 @@ void TestRuntimeOwnsDelayedQueue()
     runtime.DrainDue(13, now, collect);
     CHECK(due.size() == 1);
     CHECK(runtime.PendingCount() == 0);
-    NsmbNetplayPoC::InputProtocol::FramedInput decoded;
-    CHECK(NsmbNetplayPoC::InputProtocol::DecodeInput(
+    NsmbMvlNetplay::InputProtocol::FramedInput decoded;
+    CHECK(NsmbMvlNetplay::InputProtocol::DecodeInput(
         due[0].data(), due[0].size(), decoded));
     CHECK(decoded.Frame == 10 && decoded.Input.KeyMask == 0xFDF);
 

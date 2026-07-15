@@ -2,7 +2,7 @@
 
 #include "NsmbGameState.h"
 #include "NsmbNetplayConfig.h"
-#include "NsmbNetplayPoC.h"
+#include "NsmbMvlNetplayRuntime.h"
 
 #include <algorithm>
 #include <array>
@@ -21,7 +21,7 @@ namespace NsmbImitationAI {
 class Runtime;
 }
 
-namespace NsmbNetplayPoC::AIObservation {
+namespace NsmbMvlNetplay::AIObservation {
 
 enum class LogKind : std::size_t {
   V1,
@@ -268,4 +268,4 @@ InputState ApplyImitationInput(Context context, const Hooks &hooks,
 void TracePlayLog(Context context, const Hooks &hooks, int instanceID,
                   melonDS::u32 frame, melonDS::NDS *nds);
 
-} // namespace NsmbNetplayPoC::AIObservation
+} // namespace NsmbMvlNetplay::AIObservation

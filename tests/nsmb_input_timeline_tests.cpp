@@ -22,16 +22,16 @@ void Check(bool condition, const char* expression, int line)
 
 #define CHECK(expression) Check((expression), #expression, __LINE__)
 
-NsmbNetplayPoC::InputState Input(melonDS::u32 keys)
+NsmbMvlNetplay::InputState Input(melonDS::u32 keys)
 {
-    NsmbNetplayPoC::InputState input;
+    NsmbMvlNetplay::InputState input;
     input.KeyMask = keys;
     return input;
 }
 
 bool SameInput(
-    const NsmbNetplayPoC::InputState& left,
-    const NsmbNetplayPoC::InputState& right)
+    const NsmbMvlNetplay::InputState& left,
+    const NsmbMvlNetplay::InputState& right)
 {
     return left.KeyMask == right.KeyMask
         && left.Touching == right.Touching
@@ -41,7 +41,7 @@ bool SameInput(
 
 void TestPredictionAndConfirmation()
 {
-    using NsmbNetplayPoC::InputTimeline::PredictionRuntime;
+    using NsmbMvlNetplay::InputTimeline::PredictionRuntime;
     PredictionRuntime timeline;
     PredictionRuntime::InputMap confirmed;
     const auto neutral = Input(0xFFF);
@@ -71,7 +71,7 @@ void TestPredictionAndConfirmation()
 
 void TestPredictionMismatchScheduling()
 {
-    using NsmbNetplayPoC::InputTimeline::PredictionRuntime;
+    using NsmbMvlNetplay::InputTimeline::PredictionRuntime;
     PredictionRuntime timeline;
     PredictionRuntime::InputMap confirmed;
     const auto neutral = Input(0xFFF);
@@ -115,8 +115,8 @@ void TestPredictionMismatchScheduling()
 
 void TestPredictionProbeAndPrune()
 {
-    using NsmbNetplayPoC::InputTimeline::PredictionProbe;
-    using NsmbNetplayPoC::InputTimeline::PredictionRuntime;
+    using NsmbMvlNetplay::InputTimeline::PredictionProbe;
+    using NsmbMvlNetplay::InputTimeline::PredictionRuntime;
     PredictionRuntime timeline;
     PredictionRuntime::InputMap confirmed;
     const auto neutral = Input(0xFFF);
@@ -146,7 +146,7 @@ void TestPredictionProbeAndPrune()
 
 void TestRuntimeRemoteStorePrimeAndPrune()
 {
-    using NsmbNetplayPoC::InputTimeline::Runtime;
+    using NsmbMvlNetplay::InputTimeline::Runtime;
     constexpr melonDS::u32 noFrameLimit = 0;
     Runtime runtime;
     const auto neutral = Input(0xFFF);
@@ -179,7 +179,7 @@ void TestRuntimeRemoteStorePrimeAndPrune()
 
 void TestRuntimeRestartContractAndStatistics()
 {
-    using NsmbNetplayPoC::InputTimeline::Runtime;
+    using NsmbMvlNetplay::InputTimeline::Runtime;
     constexpr melonDS::u32 noFrameLimit = 0;
     Runtime runtime;
     const auto neutral = Input(0xFFF);
@@ -227,14 +227,14 @@ void TestRuntimeRestartContractAndStatistics()
 
 void TestButtonAndMaskParsing()
 {
-    NsmbNetplayPoC::InputState input;
-    CHECK(NsmbNetplayPoC::InputTimeline::ParseInputSpec("RIGHT+A+Y", input));
+    NsmbMvlNetplay::InputState input;
+    CHECK(NsmbMvlNetplay::InputTimeline::ParseInputSpec("RIGHT+A+Y", input));
     CHECK(input.KeyMask == (0xFFFu & ~(1u << 4) & ~(1u << 0) & ~(1u << 11)));
-    CHECK(NsmbNetplayPoC::InputTimeline::ParseInputSpec("mask=0x1234", input));
+    CHECK(NsmbMvlNetplay::InputTimeline::ParseInputSpec("mask=0x1234", input));
     CHECK(input.KeyMask == 0x234u);
-    CHECK(NsmbNetplayPoC::InputTimeline::ParseInputSpec("NEUTRAL", input));
+    CHECK(NsmbMvlNetplay::InputTimeline::ParseInputSpec("NEUTRAL", input));
     CHECK(input.KeyMask == 0xFFFu);
-    CHECK(!NsmbNetplayPoC::InputTimeline::ParseInputSpec("A+INVALID", input));
+    CHECK(!NsmbMvlNetplay::InputTimeline::ParseInputSpec("A+INVALID", input));
 }
 
 void TestTimelineTargetsTouchAndFirstMatch()
@@ -245,20 +245,20 @@ void TestTimelineTargetsTouchAndFirstMatch()
         "inst1 10-19 RIGHT+B 300,250\n"
         "ALL 20-29 LEFT\n"
         "inst1 10-19 Y\n");
-    std::vector<NsmbNetplayPoC::InputTimeline::InputSpan> spans;
-    NsmbNetplayPoC::InputTimeline::ParseError error;
-    CHECK(NsmbNetplayPoC::InputTimeline::ParseInputScript(script, spans, error));
+    std::vector<NsmbMvlNetplay::InputTimeline::InputSpan> spans;
+    NsmbMvlNetplay::InputTimeline::ParseError error;
+    CHECK(NsmbMvlNetplay::InputTimeline::ParseInputScript(script, spans, error));
     CHECK(spans.size() == 4);
 
-    NsmbNetplayPoC::InputState fallback;
+    NsmbMvlNetplay::InputState fallback;
     fallback.KeyMask = 0x321;
-    const auto all = NsmbNetplayPoC::InputTimeline::Apply(spans, 0, 5, fallback);
+    const auto all = NsmbMvlNetplay::InputTimeline::Apply(spans, 0, 5, fallback);
     CHECK((all.KeyMask & 1u) == 0);
 
-    const auto wrongInstance = NsmbNetplayPoC::InputTimeline::Apply(spans, 0, 15, fallback);
+    const auto wrongInstance = NsmbMvlNetplay::InputTimeline::Apply(spans, 0, 15, fallback);
     CHECK(wrongInstance.KeyMask == fallback.KeyMask);
 
-    const auto instance = NsmbNetplayPoC::InputTimeline::Apply(spans, 1, 15, fallback);
+    const auto instance = NsmbMvlNetplay::InputTimeline::Apply(spans, 1, 15, fallback);
     CHECK((instance.KeyMask & (1u << 4)) == 0);
     CHECK((instance.KeyMask & (1u << 1)) == 0);
     CHECK((instance.KeyMask & (1u << 11)) != 0);
@@ -266,23 +266,23 @@ void TestTimelineTargetsTouchAndFirstMatch()
     CHECK(instance.TouchX == 255);
     CHECK(instance.TouchY == 191);
 
-    const auto explicitAll = NsmbNetplayPoC::InputTimeline::Apply(spans, 7, 25, fallback);
+    const auto explicitAll = NsmbMvlNetplay::InputTimeline::Apply(spans, 7, 25, fallback);
     CHECK((explicitAll.KeyMask & (1u << 5)) == 0);
 }
 
-void CheckParseError(const char* text, NsmbNetplayPoC::InputTimeline::ParseErrorKind kind)
+void CheckParseError(const char* text, NsmbMvlNetplay::InputTimeline::ParseErrorKind kind)
 {
     std::istringstream script(text);
-    std::vector<NsmbNetplayPoC::InputTimeline::InputSpan> spans;
-    NsmbNetplayPoC::InputTimeline::ParseError error;
-    CHECK(!NsmbNetplayPoC::InputTimeline::ParseInputScript(script, spans, error));
+    std::vector<NsmbMvlNetplay::InputTimeline::InputSpan> spans;
+    NsmbMvlNetplay::InputTimeline::ParseError error;
+    CHECK(!NsmbMvlNetplay::InputTimeline::ParseInputScript(script, spans, error));
     CHECK(error.Kind == kind);
     CHECK(error.Line == 1);
 }
 
 void TestParseErrorsAreClassified()
 {
-    using NsmbNetplayPoC::InputTimeline::ParseErrorKind;
+    using NsmbMvlNetplay::InputTimeline::ParseErrorKind;
     CheckParseError("player0 0-1 A\n", ParseErrorKind::Target);
     CheckParseError("ALL 10 A\n", ParseErrorKind::Range);
     CheckParseError("ALL 9-1 A\n", ParseErrorKind::Input);
@@ -292,7 +292,7 @@ void TestParseErrorsAreClassified()
 
 void TestInputRecorderSpanAndFilterContract()
 {
-    using NsmbNetplayPoC::InputTimeline::Recorder;
+    using NsmbMvlNetplay::InputTimeline::Recorder;
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() / "nsmb_input_timeline_recorder_test.txt";
     std::error_code error;
@@ -333,7 +333,7 @@ void TestInputRecorderSpanAndFilterContract()
 
 void TestInputRecorderPeriodicFlush()
 {
-    using NsmbNetplayPoC::InputTimeline::Recorder;
+    using NsmbMvlNetplay::InputTimeline::Recorder;
     const std::filesystem::path path =
         std::filesystem::temp_directory_path() / "nsmb_input_timeline_recorder_flush_test.txt";
     std::error_code error;

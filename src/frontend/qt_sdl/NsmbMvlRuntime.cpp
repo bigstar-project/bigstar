@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace NsmbNetplayPoC::MvlRuntime {
+namespace NsmbMvlNetplay::MvlRuntime {
 
 int ResolveResultWinner(const ResultSnapshot &result) {
   const auto higherWins = [](melonDS::u32 a, melonDS::u32 b) {
@@ -139,4 +139,4 @@ void Runtime::SetStartupFrameBase(melonDS::u32 frame) {
   StartupFrameBase_ = frame;
 }
 
-} // namespace NsmbNetplayPoC::MvlRuntime
+} // namespace NsmbMvlNetplay::MvlRuntime

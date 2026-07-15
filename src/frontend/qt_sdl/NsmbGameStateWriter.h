@@ -8,7 +8,7 @@ namespace melonDS {
 class NDS;
 }
 
-namespace NsmbNetplayPoC::GameStateWriter {
+namespace NsmbMvlNetplay::GameStateWriter {
 
 struct ObjectTransform {
   melonDS::u32 PosX = 0;
@@ -84,6 +84,6 @@ bool WritePlayerStarCounterPatch(
 GameStateApplyResult ApplyGameState(
     melonDS::NDS *nds, const GameStateModel::GameStateSample &sample,
     const GameStateApplyOptions &options);
-} // namespace NsmbNetplayPoC::GameStateWriter
+} // namespace NsmbMvlNetplay::GameStateWriter
 
 #endif

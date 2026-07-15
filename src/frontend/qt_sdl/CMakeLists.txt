@@ -11,8 +11,8 @@ set(SOURCES_QT_SDL
     EmuInstanceAudio.cpp
     EmuInstanceInput.cpp
     EmuThread.cpp
-    NsmbNetplayPoC.cpp
-    NsmbNetplayPoC.h
+    NsmbMvlNetplayRuntime.cpp
+    NsmbMvlNetplayRuntime.h
     NsmbNetplayConfig.cpp
     NsmbNetplayConfig.h
     NsmbPacketBridgeRuntime.cpp
@@ -182,7 +182,7 @@ if (BUILD_TESTING)
     add_executable(nsmb_input_timeline_tests
         NsmbInputTimeline.cpp
         NsmbInputTimeline.h
-        NsmbNetplayPoC.h
+        NsmbMvlNetplayRuntime.h
         ${CMAKE_SOURCE_DIR}/tests/nsmb_input_timeline_tests.cpp
     )
     target_include_directories(nsmb_input_timeline_tests PRIVATE
@@ -199,7 +199,7 @@ if (BUILD_TESTING)
     add_executable(nsmb_input_protocol_tests
         NsmbInputProtocol.cpp
         NsmbInputProtocol.h
-        NsmbNetplayPoC.h
+        NsmbMvlNetplayRuntime.h
         ${CMAKE_SOURCE_DIR}/tests/nsmb_input_protocol_tests.cpp
     )
     target_include_directories(nsmb_input_protocol_tests PRIVATE
@@ -218,7 +218,7 @@ if (BUILD_TESTING)
         NsmbInputDelivery.h
         NsmbInputProtocol.cpp
         NsmbInputProtocol.h
-        NsmbNetplayPoC.h
+        NsmbMvlNetplayRuntime.h
         ${CMAKE_SOURCE_DIR}/tests/nsmb_input_delivery_tests.cpp
     )
     target_include_directories(nsmb_input_delivery_tests PRIVATE
@@ -303,7 +303,7 @@ if (BUILD_TESTING)
         NsmbRuleAI.h
         NsmbGameState.h
         NsmbGameStateReader.h
-        NsmbNetplayPoC.h
+        NsmbMvlNetplayRuntime.h
         ${CMAKE_SOURCE_DIR}/tests/nsmb_rule_ai_tests.cpp
     )
     target_include_directories(nsmb_rule_ai_tests PRIVATE

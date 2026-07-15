@@ -8,7 +8,7 @@
 #include <cstring>
 #include <set>
 
-namespace NsmbNetplayPoC::GameStateReader {
+namespace NsmbMvlNetplay::GameStateReader {
 
 namespace {
 
@@ -2176,4 +2176,4 @@ bool ReadWorldEffectSlot(melonDS::NDS *nds, melonDS::u32 base,
   return false;
 }
 
-} // namespace NsmbNetplayPoC::GameStateReader
+} // namespace NsmbMvlNetplay::GameStateReader

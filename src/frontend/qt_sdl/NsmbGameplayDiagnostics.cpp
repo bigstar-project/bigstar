@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-namespace NsmbNetplayPoC::GameplayDiagnostics {
+namespace NsmbMvlNetplay::GameplayDiagnostics {
 namespace {
 
 constexpr std::size_t kTrackedWorldMovingHazardCount = 4;
@@ -56,14 +56,14 @@ void WriteDiagnosticsJson(const Context &context, const std::string &json) {
   {
     std::ofstream file(tmp, std::ios::binary | std::ios::trunc);
     if (!file) {
-      std::printf("NSMB PoC: failed to open diagnostics file: %s\n",
+      std::printf("NSMB MvL Netplay: failed to open diagnostics file: %s\n",
                   tmp.string().c_str());
       return;
     }
     file << json;
     file.flush();
     if (!file) {
-      std::printf("NSMB PoC: failed to write diagnostics file: %s\n",
+      std::printf("NSMB MvL Netplay: failed to write diagnostics file: %s\n",
                   tmp.string().c_str());
       return;
     }
@@ -73,7 +73,7 @@ void WriteDiagnosticsJson(const Context &context, const std::string &json) {
   error.clear();
   std::filesystem::rename(tmp, path, error);
   if (error) {
-    std::printf("NSMB PoC: failed to publish diagnostics file: %s error=%s\n",
+    std::printf("NSMB MvL Netplay: failed to publish diagnostics file: %s error=%s\n",
                 path.string().c_str(), error.message().c_str());
   }
 }
@@ -91,7 +91,7 @@ void WriteGameStateMismatchDiagnostics(
       local.RenderCandidate == remote.RenderCandidate;
 
   std::ostringstream line;
-  line << "NSMB PoC: game state mismatch inst=" << instanceID
+  line << "NSMB MvL Netplay: game state mismatch inst=" << instanceID
        << " frame=" << frame << " local=" << Hex64(localHash)
        << " remote=" << Hex64(remoteHash) << " basic=" << (basicMatches ? 1 : 0)
        << " playerGlobal=" << (playerGlobalMatches ? 1 : 0)
@@ -329,7 +329,7 @@ void ReportGameStateMismatchLocked(
   const GameStateModel::GameStateSyncHashes &remote = mismatch.Remote;
   WriteGameStateMismatchDiagnostics(context, instanceID, frame, local, remote);
   EmitGameStateMismatchEventLocked(context, instanceID, frame, local, remote);
-  std::printf("NSMB PoC: game state mismatch inst=%d frame=%u local=%016llX "
+  std::printf("NSMB MvL Netplay: game state mismatch inst=%d frame=%u local=%016llX "
               "remote=%016llX basic=%d playerGlobal=%d wifiCandidate=%d "
               "renderCandidate=%d\n",
               instanceID, frame,
@@ -342,14 +342,14 @@ void ReportGameStateMismatchLocked(
               local.WifiCandidate == remote.WifiCandidate ? 1 : 0,
               local.RenderCandidate == remote.RenderCandidate ? 1 : 0);
   std::printf(
-      "NSMB PoC: game state components local basic=%016llX "
+      "NSMB MvL Netplay: game state components local basic=%016llX "
       "playerGlobal=%016llX wifiCandidate=%016llX renderCandidate=%016llX\n",
       static_cast<unsigned long long>(local.Basic),
       static_cast<unsigned long long>(local.PlayerGlobal),
       static_cast<unsigned long long>(local.WifiCandidate),
       static_cast<unsigned long long>(local.RenderCandidate));
   std::printf(
-      "NSMB PoC: game state components remote basic=%016llX "
+      "NSMB MvL Netplay: game state components remote basic=%016llX "
       "playerGlobal=%016llX wifiCandidate=%016llX renderCandidate=%016llX\n",
       static_cast<unsigned long long>(remote.Basic),
       static_cast<unsigned long long>(remote.PlayerGlobal),
@@ -629,4 +629,4 @@ void CaptureScreenshotIfNeeded(Context context, int instanceID,
                                  screenshot);
 }
 
-} // namespace NsmbNetplayPoC::GameplayDiagnostics
+} // namespace NsmbMvlNetplay::GameplayDiagnostics

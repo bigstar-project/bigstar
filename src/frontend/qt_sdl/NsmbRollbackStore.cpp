@@ -4,7 +4,7 @@
 #include <set>
 #include <utility>
 
-namespace NsmbNetplayPoC::RollbackStorage {
+namespace NsmbMvlNetplay::RollbackStorage {
 
 std::size_t CheckpointBytes(const StoredState &checkpoint) {
   return checkpoint.Buffer.size() +
@@ -320,4 +320,4 @@ bool Store::HasUsableFrameShadow() const {
          States_.find(FrameShadowFrame_) != States_.end();
 }
 
-} // namespace NsmbNetplayPoC::RollbackStorage
+} // namespace NsmbMvlNetplay::RollbackStorage

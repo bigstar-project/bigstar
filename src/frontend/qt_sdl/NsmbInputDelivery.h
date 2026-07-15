@@ -9,7 +9,7 @@
 #include <map>
 #include <vector>
 
-namespace NsmbNetplayPoC::InputDelivery
+namespace NsmbMvlNetplay::InputDelivery
 {
 
 struct SendConfig

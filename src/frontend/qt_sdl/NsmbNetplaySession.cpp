@@ -10,7 +10,7 @@
 #include <thread>
 #include <vector>
 
-namespace NsmbNetplayPoC::NetplaySession {
+namespace NsmbMvlNetplay::NetplaySession {
 namespace {
 
 constexpr melonDS::u32 kNoFrame = 0;
@@ -131,7 +131,7 @@ void StoreRemoteInputLocked(Context context, melonDS::u32 frame,
                    context.Bootstrap.InputTraceInterval) ==
            0)) {
     context.Inputs.LastTracedReceivedInputFrame = frame;
-    std::printf("NSMB PoC: recv input tUnixMs=%llu frame=%u keys=0x%03X "
+    std::printf("NSMB MvL Netplay: recv input tUnixMs=%llu frame=%u keys=0x%03X "
                 "remoteQueue=%zu lastSent=%u lead=%d localFrame=%u\n",
                 NowUnixMs(), frame, receivedInput.KeyMask,
                 context.Inputs.RemoteInputs.size(),
@@ -174,7 +174,7 @@ void HandleReceivedSessionLocked(Context context, const Hooks &hooks,
       context.Mvl.NetRandom.Enabled = true;
       context.Mvl.NetRandom.Auto = true;
     }
-    std::printf("NSMB PoC: received match seed 0x%08X\n", message.Value);
+    std::printf("NSMB MvL Netplay: received match seed 0x%08X\n", message.Value);
     return;
   }
 
@@ -246,7 +246,7 @@ void PumpLocked(Context context, const Hooks &hooks, melonDS::NDS *nds,
       context.State.Handshake.OnPeerConnected();
       UpdateHangSnapshotLocked(context, localFrame);
       context.State.InputCond.notify_all();
-      std::printf("NSMB PoC: peer connected tUnixMs=%llu localFrame=%u peer=%d "
+      std::printf("NSMB MvL Netplay: peer connected tUnixMs=%llu localFrame=%u peer=%d "
                   "connectingPeer=%d lastSent=%u lastRecv=%u localQueue=%zu "
                   "remoteQueue=%zu\n",
                   NowUnixMs(), localFrame,
@@ -290,7 +290,7 @@ void PumpLocked(Context context, const Hooks &hooks, melonDS::NDS *nds,
 
     case ENET_EVENT_TYPE_DISCONNECT:
       std::printf(
-          "NSMB PoC: peer disconnected tUnixMs=%llu localFrame=%u "
+          "NSMB MvL Netplay: peer disconnected tUnixMs=%llu localFrame=%u "
           "eventPeerMatches=%d peerBefore=%d connectingPeer=%d lastSent=%u "
           "lastRecv=%u lead=%d localQueue=%zu remoteQueue=%zu delayed=%zu "
           "resendCount=%d netplayStart=%u localReady=%u remoteReady=%u "
@@ -333,7 +333,7 @@ void StartNetworkPumpThreadIfNeeded(Context context, const Hooks &hooks) {
   context.State.NetworkPumpThreadStarted = true;
   context.State.NetworkPumpThread =
       std::thread([context, &hooks] { NetworkPumpThreadMain(context, hooks); });
-  std::printf("NSMB PoC: network pump thread started sleepUs=%d "
+  std::printf("NSMB MvL Netplay: network pump thread started sleepUs=%d "
               "inputWaitPollUs=%d rollbackInputWaitUs=%d\n",
               context.Harness.NetworkPumpSleepUs, context.Input.WaitPollUs,
               context.Rollback.InputWaitUs);
@@ -367,7 +367,7 @@ void SendMatchSeedLocked(Context context) {
                              true) == NsmbNetplayTransport::SendUnavailable)
     return;
   context.State.Handshake.MarkMatchSeedSent();
-  std::printf("NSMB PoC: sent match seed 0x%08X\n", context.Mvl.MatchSeed);
+  std::printf("NSMB MvL Netplay: sent match seed 0x%08X\n", context.Mvl.MatchSeed);
 }
 
 void SendStartReadyLocked(Context context, const Hooks &hooks,
@@ -459,7 +459,7 @@ void SendInputLocked(Context context, const Hooks &hooks, melonDS::u32 frame,
            0)) {
     context.Inputs.LastTracedSentInputFrame = frame;
     std::printf(
-        "NSMB PoC: sent input tUnixMs=%llu frame=%u keys=0x%03X "
+        "NSMB MvL Netplay: sent input tUnixMs=%llu frame=%u keys=0x%03X "
         "localQueue=%zu lastRecv=%u lead=%d bundle=%d "
         "delayedFrames=%d peer=%d\n",
         NowUnixMs(), frame, input.KeyMask, context.Inputs.LocalInputs.size(),
@@ -780,7 +780,7 @@ void WaitForMatchSeed(Context context, const Hooks &hooks) {
               std::chrono::steady_clock::now() - start)
               .count();
       if (elapsed >= context.Harness.SeedWaitTimeoutMs) {
-        std::printf("NSMB PoC: match seed wait timeout waitedMs=%d\n",
+        std::printf("NSMB MvL Netplay: match seed wait timeout waitedMs=%d\n",
                     context.Harness.SeedWaitTimeoutMs);
         return;
       }
@@ -807,7 +807,7 @@ void WaitForPeer(Context context, const Hooks &hooks, bool force) {
               std::chrono::steady_clock::now() - start)
               .count();
       if (elapsed >= context.Harness.SeedWaitTimeoutMs) {
-        std::printf("NSMB PoC: peer wait timeout waitedMs=%d\n",
+        std::printf("NSMB MvL Netplay: peer wait timeout waitedMs=%d\n",
                     context.Harness.SeedWaitTimeoutMs);
         return;
       }
@@ -844,7 +844,7 @@ void WaitForPeerAtStartBarrier(Context context, const Hooks &hooks,
       context.Harness.SeedWaitTimeoutMs);
   if (result != Coordination::NetplayStartWaitResult::LocalLeader)
     return;
-  std::printf("NSMB PoC: waiting for peer at netplay start frame=%u\n",
+  std::printf("NSMB MvL Netplay: waiting for peer at netplay start frame=%u\n",
               syncFrame);
   std::fflush(stdout);
   WaitForPeer(context, hooks, true);
@@ -853,7 +853,7 @@ void WaitForPeerAtStartBarrier(Context context, const Hooks &hooks,
     context.State.Handshake.MarkWaitedForPeerAtStart();
   }
   context.Coordinator.CompleteNetplayStartWait();
-  std::printf("NSMB PoC: peer wait at netplay start finished frame=%u\n",
+  std::printf("NSMB MvL Netplay: peer wait at netplay start finished frame=%u\n",
               syncFrame);
   std::fflush(stdout);
 }
@@ -1031,4 +1031,4 @@ void ThrottleFrameLead(Context context, const Hooks &hooks, melonDS::NDS *nds,
   }
 }
 
-} // namespace NsmbNetplayPoC::NetplaySession
+} // namespace NsmbMvlNetplay::NetplaySession

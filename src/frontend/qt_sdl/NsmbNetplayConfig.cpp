@@ -7,7 +7,7 @@
 #include <filesystem>
 #include <sstream>
 
-namespace NsmbNetplayPoC::Config {
+namespace NsmbMvlNetplay::Config {
 
 namespace {
 
@@ -968,4 +968,4 @@ bool EnvHasValue(const char *name) {
   return ReadHasValue(GetProcessEnvironment(), name);
 }
 
-} // namespace NsmbNetplayPoC::Config
+} // namespace NsmbMvlNetplay::Config

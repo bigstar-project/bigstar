@@ -17,9 +17,9 @@ int Failures = 0;
     }                                                                          \
   } while (false)
 
-using NsmbNetplayPoC::Coordination::FrameBarrierKind;
-using NsmbNetplayPoC::Coordination::NetplayStartWaitResult;
-using NsmbNetplayPoC::Coordination::Runtime;
+using NsmbMvlNetplay::Coordination::FrameBarrierKind;
+using NsmbMvlNetplay::Coordination::NetplayStartWaitResult;
+using NsmbMvlNetplay::Coordination::Runtime;
 
 void TestFrameBarrier() {
   Runtime runtime;
