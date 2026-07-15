@@ -2124,84 +2124,6 @@ void PumpNSMLPacketBridgeLocked(melonDS::NDS* nds, melonDS::u32 frame)
     SendMatchSeedLocked();
 }
 
-int NSMLPacketTickLead(melonDS::u32 localTick, melonDS::u32 remoteTick)
-{
-    return static_cast<int>(static_cast<melonDS::s16>((localTick - remoteTick) & 0xFFFF));
-}
-
-void ThrottleNSMLPacketBridgeLead(melonDS::NDS* nds, melonDS::u32 frame)
-{
-    if (G.PacketBridge.MaxTickLead < 0 || !nds)
-        return;
-    if (frame < G.PacketBridge.ThrottleStartFrame)
-        return;
-
-    const melonDS::u32 remotePlayer = LocalPlayerID(nds) ^ 1;
-    const auto start = std::chrono::steady_clock::now();
-
-    for (;;)
-    {
-        melonDS::u32 remoteTick = 0xFFFFFFFF;
-        melonDS::u32 remoteFrame = 0xFFFFFFFF;
-        {
-            std::lock_guard<std::mutex> lock(G.Mutex);
-            const PacketBridge::ReceivedProgress progress =
-                G.PacketBridgeRuntime.ReceivedPacketProgress(remotePlayer);
-            remoteTick = progress.Tick;
-            remoteFrame = progress.Frame;
-        }
-
-        if (remoteTick == 0xFFFFFFFF)
-            return;
-
-        const melonDS::u32 localTick = PacketBridgeCanonicalTick(nds, frame);
-        const int lead = NSMLPacketTickLead(localTick, remoteTick);
-        if (lead <= G.PacketBridge.MaxTickLead)
-            return;
-
-        if (G.PacketBridge.TraceEnabled
-            && G.PacketBridgeRuntime.ShouldTraceTickThrottle(localTick))
-        {
-            std::printf("NSMB PacketBridge: throttle localTick=0x%04X remotePlayer=%u remoteTick=0x%04X lead=%d maxLead=%d frame=%u remoteFrame=%u\n",
-                localTick,
-                remotePlayer,
-                remoteTick,
-                lead,
-                G.PacketBridge.MaxTickLead,
-                frame,
-                remoteFrame);
-            std::fflush(stdout);
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(G.Mutex);
-            PumpNSMLPacketBridgeLocked(nds, frame);
-        }
-
-        if (G.PacketBridge.ThrottleTimeoutMs > 0)
-        {
-            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start).count();
-            if (elapsed >= G.PacketBridge.ThrottleTimeoutMs)
-            {
-                if (G.PacketBridge.TraceEnabled)
-                {
-                    std::printf("NSMB PacketBridge: throttle timeout localTick=0x%04X remoteTick=0x%04X lead=%d frame=%u waitedMs=%d\n",
-                        localTick,
-                        remoteTick,
-                        lead,
-                        frame,
-                        G.PacketBridge.ThrottleTimeoutMs);
-                    std::fflush(stdout);
-                }
-                return;
-            }
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-}
-
 void ThrottleNSMLPacketBridgeFrameLead(melonDS::NDS* nds, melonDS::u32 frame)
 {
     if (G.PacketBridge.MaxFrameLead < 0 || !nds)
@@ -5717,7 +5639,6 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             ForceNSMLGameLocalPlayerIDIfNeeded(syncFrame, nds);
             melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);
             ForceNSMLGameLocalPlayerIDIfNeeded(syncFrame, nds);
-            ThrottleNSMLPacketBridgeLead(nds, syncFrame);
         }
         return ConvertStockXToTouch(packetBridgeInput);
     }

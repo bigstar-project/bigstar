@@ -138,7 +138,6 @@ struct PacketBridgeConfig {
   std::uint32_t ForceGameLocalPlayerIDStartFrame = 0;
   bool ForceGameLocalPlayerIDEarly = false;
   int MaxPumpEvents = PacketBridgePumpEventLimit;
-  int MaxTickLead = -1;
   int MaxFrameLead = -1;
   int ThrottleTimeoutMs = 5000;
   std::uint32_t ThrottleStartFrame = 0;

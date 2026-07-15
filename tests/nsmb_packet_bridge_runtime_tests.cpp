@@ -112,12 +112,6 @@ void TestProgressAndTraceMarkers() {
               !runtime.ShouldTraceSentTick(30) &&
               runtime.ShouldTraceSentTick(31),
           "sent tick trace is emitted once per value");
-  Require(runtime.ShouldTraceWaitTimeout(40) &&
-              !runtime.ShouldTraceWaitTimeout(40),
-          "wait timeout trace is deduplicated");
-  Require(runtime.ShouldTraceTickThrottle(50) &&
-              !runtime.ShouldTraceTickThrottle(50),
-          "tick throttle trace is deduplicated");
   Require(runtime.ShouldTraceFrameThrottle(60) &&
               !runtime.ShouldTraceFrameThrottle(60),
           "frame throttle trace is deduplicated");

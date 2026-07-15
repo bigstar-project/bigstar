@@ -463,8 +463,6 @@ PacketBridgeConfig LoadPacketBridgeConfig(const Environment &environment) {
       ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS",
               PacketBridgePumpEventLimit),
       1, PacketBridgePumpEventLimit);
-  config.MaxTickLead =
-      ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_MAX_TICK_LEAD", -1);
   config.MaxFrameLead =
       ReadInt(environment, "MELONDS_NSML_PACKET_BRIDGE_MAX_FRAME_LEAD", -1);
   config.ThrottleTimeoutMs = std::max(

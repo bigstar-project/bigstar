@@ -753,8 +753,8 @@ void TestStartupReportFormattingContract() {
         std::string::npos);
   CHECK(!netplayReport.empty() && netplayReport.back() == '\n');
 
-  CHECK(Fnv1a64(testReport) == 17818733127289311667ull);
-  CHECK(Fnv1a64(netplayReport) == 3455746755802390722ull);
+  CHECK(Fnv1a64(testReport) == 16774390328572156944ull);
+  CHECK(Fnv1a64(netplayReport) == 6470114001370961897ull);
 }
 
 void TestAIStartupReportFormattingContract() {

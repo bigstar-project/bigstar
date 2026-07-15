@@ -141,14 +141,6 @@ bool Runtime::ShouldTraceSentTick(melonDS::u32 tick) {
   return UpdateTraceMarker(tick, LastSentTick_);
 }
 
-bool Runtime::ShouldTraceWaitTimeout(melonDS::u32 tick) {
-  return UpdateTraceMarker(tick, LastWaitTimeoutTick_);
-}
-
-bool Runtime::ShouldTraceTickThrottle(melonDS::u32 tick) {
-  return UpdateTraceMarker(tick, LastThrottleTick_);
-}
-
 bool Runtime::ShouldTraceFrameThrottle(melonDS::u32 frame) {
   return UpdateTraceMarker(frame, LastFrameThrottleFrame_);
 }

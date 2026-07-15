@@ -60,8 +60,6 @@ public:
                             melonDS::u32 frame);
   ReceivedProgress ReceivedPacketProgress(melonDS::u32 player) const;
   bool ShouldTraceSentTick(melonDS::u32 tick);
-  bool ShouldTraceWaitTimeout(melonDS::u32 tick);
-  bool ShouldTraceTickThrottle(melonDS::u32 tick);
   bool ShouldTraceFrameThrottle(melonDS::u32 frame);
   bool MarkForcedTickFrame(int instanceID, melonDS::u32 frame);
 
@@ -87,8 +85,6 @@ private:
   std::vector<DelayedPacket> DelayedPackets_;
   melonDS::u32 LastSentTick_ = kUnsetProgress;
   std::array<ReceivedProgress, 2> ReceivedProgress_{};
-  melonDS::u32 LastWaitTimeoutTick_ = kUnsetProgress;
-  melonDS::u32 LastThrottleTick_ = kUnsetProgress;
   melonDS::u32 LastFrameThrottleFrame_ = kUnsetProgress;
   std::array<melonDS::u32, 16> LastForcedTickFrame_{};
   std::array<bool, 16> JitHookApplied_{};
