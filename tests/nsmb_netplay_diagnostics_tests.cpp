@@ -31,6 +31,15 @@ std::vector<melonDS::u32> ReadFrames(const std::filesystem::path &path) {
   return frames;
 }
 
+std::uint64_t Fnv1a64(const std::string &text) {
+  std::uint64_t hash = 1469598103934665603ull;
+  for (const unsigned char byte : text) {
+    hash ^= byte;
+    hash *= 1099511628211ull;
+  }
+  return hash;
+}
+
 std::string ReadText(const std::filesystem::path &path) {
   std::ifstream input(path);
   return {std::istreambuf_iterator<char>(input),
@@ -485,6 +494,85 @@ void TestDiagnosticJsonAndPositionContract() {
   CHECK(context.str().find("\"previous\":{") != std::string::npos);
 }
 
+void TestStartupReportFormattingContract() {
+  using namespace NsmbNetplayPoC;
+  Config::BootstrapConfig bootstrap;
+  bootstrap.TestFrames = 123;
+  bootstrap.TestInstanceCount = 2;
+  bootstrap.HashInterval = 17;
+  bootstrap.InputTraceEnabled = true;
+  Config::DiagnosticsConfig diagnostics;
+  diagnostics.HashLogPath = "hash.csv";
+  diagnostics.ScreenshotDir = "shots";
+  diagnostics.RamDumpDir = "ram";
+  diagnostics.GameStateTracePath = "state.csv";
+  diagnostics.GameStateTraceInterval = 9;
+  Config::HarnessConfig harness;
+  harness.InputScriptPath = "input.txt";
+  harness.FrameBarrierEnabled = true;
+  harness.WaitForPeerBeforeStart = true;
+  harness.NetworkPumpThreadEnabled = true;
+  harness.MemPatchFile = "patch.bin";
+  harness.MemPatchFrameSet = true;
+  harness.MemPatchFrame = 42;
+  harness.MemPatchRanges.emplace_back(1, 2);
+  Config::StateSyncConfig stateSync;
+  stateSync.GameEnabled = true;
+  stateSync.PlayerEnabled = true;
+  stateSync.PlayerMaxPredictFrames = 7;
+  Config::PacketBridgeConfig packetBridge;
+  packetBridge.Enabled = true;
+  packetBridge.WaitEnabled = true;
+  packetBridge.WaitTimeoutMs = 33;
+  Config::MvlConfig mvl;
+  mvl.DirectBootEnabled = true;
+  mvl.NetRandom.Enabled = true;
+  mvl.NetRandom.Value = 0xABCDEF01;
+  mvl.MatchSeedConfigured = true;
+  mvl.MatchSeed = 0x10203040;
+
+  const std::string testReport = Diagnostics::FormatTestStartupReport(
+      123456789, bootstrap, diagnostics, harness, stateSync, packetBridge, mvl,
+      3, 4, 0x55667788);
+  CHECK(testReport.rfind("NSMB Test: enabled tUnixMs=123456789 ", 0) == 0);
+  CHECK(testReport.find("memPatchFile=patch.bin memPatchFrame=42 memPatchRanges=1") !=
+        std::string::npos);
+  CHECK(testReport.find("netRandomValue=0xABCDEF01") != std::string::npos);
+  CHECK(testReport.find("directBootStage=4") != std::string::npos);
+  CHECK(!testReport.empty() && testReport.back() == '\n');
+
+  Config::ConnectionConfig connection;
+  connection.Port = 9001;
+  connection.PeerHost = "peer.example";
+  connection.Delay = 8;
+  connection.LocalInstance = 1;
+  connection.StartFrame = 840;
+  Config::InputConfig input;
+  input.NetplayOnly = true;
+  input.UseHistoryBundle = true;
+  input.BundleHistory = 6;
+  input.DropModulo = 11;
+  Config::RollbackConfig rollback;
+  rollback.Enabled = true;
+  rollback.Backend = Config::RollbackBackend::CorePreimage;
+  rollback.Window = 32;
+  const std::string netplayReport = Diagnostics::FormatNetplayStartupReport(
+      987654321, "client", connection, harness, packetBridge, input, rollback,
+      "corepreimage", mvl, 3, 0x11223344);
+  CHECK(netplayReport.rfind("NSMB PoC: enabled tUnixMs=987654321 role=client ",
+                            0) == 0);
+  CHECK(netplayReport.find("port=9001 peer=peer.example delay=8") !=
+        std::string::npos);
+  CHECK(netplayReport.find("rollback=1 rollbackBackend=corepreimage rollbackWindow=32") !=
+        std::string::npos);
+  CHECK(netplayReport.find("matchSeed=0x10203040 seedConfigured=1") !=
+        std::string::npos);
+  CHECK(!netplayReport.empty() && netplayReport.back() == '\n');
+
+  CHECK(Fnv1a64(testReport) == 4787404296778715784ull);
+  CHECK(Fnv1a64(netplayReport) == 12223666959346911241ull);
+}
+
 } // namespace
 
 int main() {
@@ -498,6 +586,7 @@ int main() {
   TestPlayerLifeObservationContract();
   TestRuntimePatchLogContract();
   TestDiagnosticJsonAndPositionContract();
+  TestStartupReportFormattingContract();
   if (Failures != 0) {
     std::printf("nsmb_netplay_diagnostics_tests: %d failure(s)\n", Failures);
     return 1;

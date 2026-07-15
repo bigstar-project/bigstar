@@ -53,6 +53,16 @@ bool EnsureLogOpen(std::ofstream &file, const std::string &path) {
   return true;
 }
 
+template <typename... Args>
+std::string FormatPrintf(const char *format, Args... args) {
+  const int length = std::snprintf(nullptr, 0, format, args...);
+  if (length <= 0)
+    return {};
+  std::vector<char> buffer(static_cast<std::size_t>(length) + 1);
+  std::snprintf(buffer.data(), buffer.size(), format, args...);
+  return std::string(buffer.data(), static_cast<std::size_t>(length));
+}
+
 #ifdef _WIN32
 bool WriteMiniDump(const std::string &path) {
   if (path.empty())
@@ -361,6 +371,109 @@ bool IsPlayerScreenPositionAnomalous(
       return true;
   }
   return false;
+}
+
+std::string FormatTestStartupReport(
+    std::uint64_t unixMs, const Config::BootstrapConfig &bootstrap,
+    const Config::DiagnosticsConfig &diagnostics,
+    const Config::HarnessConfig &harness,
+    const Config::StateSyncConfig &stateSync,
+    const Config::PacketBridgeConfig &packetBridge,
+    const Config::MvlConfig &mvl, std::size_t ramDumpRangeCount,
+    int currentStage, melonDS::u32 currentSceneSettings) {
+  return FormatPrintf(
+      "NSMB Test: enabled tUnixMs=%llu frames=%u instances=%d frameBarrier=%d serialRun=%d input=%s hashLog=%s interval=%d screenshotDir=%s screenshotInterval=%d ramDumpDir=%s ramDumpInterval=%d ramDumpRanges=%zu gameStateTrace=%s gameStateTraceInterval=%d stateSync=%d stateApply=%d stateSyncInterval=%d playerStateSync=%d playerStateApply=%d playerStateGlobals=%d playerStateInterval=%d playerStatePredict=%d memPatchFile=%s memPatchFrame=%u memPatchRanges=%zu netRandomEnabled=%d netRandomAuto=%d netRandomFrame=%u netRandomValue=0x%08X stateSaveDir=%s stateSaveFrame=%u stateLoadDir=%s stateLoadFrame=%u waitTimeoutMs=%d quitGraceMs=%d inputTrace=%d inputTraceInterval=%d seedWaitMs=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
+      static_cast<unsigned long long>(unixMs), bootstrap.TestFrames,
+      bootstrap.TestInstanceCount, harness.FrameBarrierEnabled ? 1 : 0,
+      harness.SerialRunEnabled ? 1 : 0,
+      harness.InputScriptPath.empty() ? "<none>" : harness.InputScriptPath.c_str(),
+      diagnostics.HashLogPath.empty() ? "<none>" : diagnostics.HashLogPath.c_str(),
+      bootstrap.HashInterval,
+      diagnostics.ScreenshotDir.empty() ? "<none>" : diagnostics.ScreenshotDir.c_str(),
+      diagnostics.ScreenshotInterval,
+      diagnostics.RamDumpDir.empty() ? "<none>" : diagnostics.RamDumpDir.c_str(),
+      diagnostics.RamDumpInterval, ramDumpRangeCount,
+      diagnostics.GameStateTracePath.empty()
+          ? "<none>"
+          : diagnostics.GameStateTracePath.c_str(),
+      diagnostics.GameStateTraceInterval, stateSync.GameEnabled ? 1 : 0,
+      stateSync.GameApplyEnabled ? 1 : 0, stateSync.GameInterval,
+      stateSync.PlayerEnabled ? 1 : 0,
+      stateSync.PlayerApplyEnabled ? 1 : 0,
+      stateSync.PlayerGlobalsEnabled ? 1 : 0, stateSync.PlayerInterval,
+      stateSync.PlayerMaxPredictFrames,
+      harness.MemPatchFile.empty() ? "<none>" : harness.MemPatchFile.c_str(),
+      harness.MemPatchFrameSet ? harness.MemPatchFrame : 0,
+      harness.MemPatchRanges.size(), mvl.NetRandom.Enabled ? 1 : 0,
+      mvl.NetRandom.Auto ? 1 : 0, mvl.NetRandom.Frame, mvl.NetRandom.Value,
+      harness.StateSaveDir.empty() ? "<none>" : harness.StateSaveDir.c_str(),
+      harness.StateSaveFrame,
+      harness.StateLoadDir.empty() ? "<none>" : harness.StateLoadDir.c_str(),
+      harness.StateLoadFrameSet ? harness.StateLoadFrame : 0,
+      bootstrap.WaitTimeoutMs, bootstrap.QuitGraceMs,
+      bootstrap.InputTraceEnabled ? 1 : 0, bootstrap.InputTraceInterval,
+      harness.SeedWaitTimeoutMs, harness.WaitForPeerBeforeStart ? 1 : 0,
+      harness.WaitForPeerAtNetplayStart ? 1 : 0,
+      harness.DeferNetworkUntilStart ? 1 : 0,
+      harness.NetplayFrameBarrierEnabled ? 1 : 0,
+      packetBridge.Enabled ? 1 : 0, packetBridge.Only ? 1 : 0,
+      packetBridge.AllowPreGame ? 1 : 0, packetBridge.TraceEnabled ? 1 : 0,
+      packetBridge.WaitEnabled ? 1 : 0, packetBridge.WaitTimeoutMs,
+      packetBridge.WaitStartFrame, packetBridge.WaitTickAhead,
+      packetBridge.DirectCaptureEnabled ? 1 : 0,
+      packetBridge.ForceTickEnabled ? 1 : 0,
+      packetBridge.ForceTickStartFrame, packetBridge.MaxTickLead,
+      packetBridge.MaxFrameLead, packetBridge.ThrottleTimeoutMs,
+      packetBridge.ThrottleStartFrame, mvl.DirectBootEnabled ? 1 : 0,
+      mvl.DirectBootFrame, mvl.DirectBootScene, currentStage,
+      mvl.DirectBootPlayerID, currentSceneSettings, mvl.CourseMode.c_str(),
+      mvl.BigStarTarget);
+}
+
+std::string FormatNetplayStartupReport(
+    std::uint64_t unixMs, const char *role,
+    const Config::ConnectionConfig &connection,
+    const Config::HarnessConfig &harness,
+    const Config::PacketBridgeConfig &packetBridge,
+    const Config::InputConfig &input, const Config::RollbackConfig &rollback,
+    const char *rollbackBackend, const Config::MvlConfig &mvl,
+    int currentStage, melonDS::u32 currentSceneSettings) {
+  return FormatPrintf(
+      "NSMB PoC: enabled tUnixMs=%llu role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeWait=%d packetBridgeWaitMs=%d packetBridgeWaitStart=%u packetBridgeWaitAhead=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxTickLead=%d packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputHealthTrace=%d inputHealthInterval=%d inputHealthWaitThresholdMs=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputSendDelay=%d inputSendJitter=%d inputSendDelayStart=%u inputSendDelayEnd=%u inputDropModulo=%d inputDropOffset=%d inputDropStart=%u inputDropEnd=%u netPumpThread=%d netPumpSleepUs=%d inputWaitPollUs=%d rollbackInputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d matchSeed=0x%08X seedConfigured=%d directBoot=%d directBootFrame=%u directBootScene=%d directBootStage=%d directBootPlayerID=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
+      static_cast<unsigned long long>(unixMs), role, connection.Port,
+      connection.PeerHost.c_str(), connection.Delay, connection.WarmupFrames,
+      connection.LocalInstance, connection.StartFrame,
+      connection.LocalWaitsForRemote ? 1 : 0,
+      connection.RemoteInputTimeoutFatal ? 1 : 0,
+      harness.WaitForPeerBeforeStart ? 1 : 0,
+      harness.WaitForPeerAtNetplayStart ? 1 : 0,
+      harness.DeferNetworkUntilStart ? 1 : 0,
+      harness.NetplayFrameBarrierEnabled ? 1 : 0,
+      packetBridge.Enabled ? 1 : 0, packetBridge.Only ? 1 : 0,
+      packetBridge.AllowPreGame ? 1 : 0, packetBridge.TraceEnabled ? 1 : 0,
+      packetBridge.WaitEnabled ? 1 : 0, packetBridge.WaitTimeoutMs,
+      packetBridge.WaitStartFrame, packetBridge.WaitTickAhead,
+      packetBridge.DirectCaptureEnabled ? 1 : 0,
+      packetBridge.ForceTickEnabled ? 1 : 0,
+      packetBridge.ForceTickStartFrame, packetBridge.MaxTickLead,
+      packetBridge.MaxFrameLead, packetBridge.ThrottleTimeoutMs,
+      packetBridge.ThrottleStartFrame, input.NetplayOnly ? 1 : 0,
+      input.NetplayTrace ? 1 : 0, input.HealthTrace ? 1 : 0,
+      input.HealthTraceInterval, input.HealthTraceWaitThresholdMs,
+      input.MaxFrameLead, input.UseHistoryBundle ? 1 : 0, input.BundleHistory,
+      input.SendDelayFrames, input.SendJitterFrames, input.SendDelayStartFrame,
+      input.SendDelayEndFrame, input.DropModulo, input.DropOffset,
+      input.DropStartFrame, input.DropEndFrame,
+      harness.NetworkPumpThreadEnabled ? 1 : 0, harness.NetworkPumpSleepUs,
+      input.WaitPollUs, rollback.InputWaitUs, rollback.Enabled ? 1 : 0,
+      rollbackBackend, rollback.Window, rollback.CheckpointInterval,
+      rollback.ResimulateDelayFrames, rollback.Resimulate ? 1 : 0,
+      rollback.RestoreProbe ? 1 : 0, rollback.PredictionProbeModulo,
+      rollback.PredictionProbeLimit, mvl.MatchSeed,
+      mvl.MatchSeedConfigured ? 1 : 0, mvl.DirectBootEnabled ? 1 : 0,
+      mvl.DirectBootFrame, mvl.DirectBootScene, currentStage,
+      mvl.DirectBootPlayerID, currentSceneSettings, mvl.CourseMode.c_str(),
+      mvl.BigStarTarget);
 }
 
 struct Runtime::Impl {

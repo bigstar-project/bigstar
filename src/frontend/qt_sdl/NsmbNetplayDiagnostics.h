@@ -128,6 +128,22 @@ void AppendDiagnosticPlayerContextJson(
 bool IsPlayerScreenPositionAnomalous(
     const DiagnosticFrameSnapshot &snapshot,
     const DiagnosticFrameSnapshot *previous, int player);
+std::string FormatTestStartupReport(
+    std::uint64_t unixMs, const Config::BootstrapConfig &bootstrap,
+    const Config::DiagnosticsConfig &diagnostics,
+    const Config::HarnessConfig &harness,
+    const Config::StateSyncConfig &stateSync,
+    const Config::PacketBridgeConfig &packetBridge,
+    const Config::MvlConfig &mvl, std::size_t ramDumpRangeCount,
+    int currentStage, melonDS::u32 currentSceneSettings);
+std::string FormatNetplayStartupReport(
+    std::uint64_t unixMs, const char *role,
+    const Config::ConnectionConfig &connection,
+    const Config::HarnessConfig &harness,
+    const Config::PacketBridgeConfig &packetBridge,
+    const Config::InputConfig &input, const Config::RollbackConfig &rollback,
+    const char *rollbackBackend, const Config::MvlConfig &mvl,
+    int currentStage, melonDS::u32 currentSceneSettings);
 
 enum class RuntimePatchLogKind : std::size_t {
   ForceDeathCounters,
