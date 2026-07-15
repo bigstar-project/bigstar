@@ -64,7 +64,6 @@ struct NSMLLocalPacketCapture
 
 static std::map<NDS*, NSMLLocalPacketCapture> NSMLLocalPackets;
 static std::map<NDS*, std::map<u32, NSMLPacketReplayEntry>> NSMLLiveReplayPackets;
-static std::map<NDS*, std::map<u32, u32>> NSMLPreservedNetWords;
 
 static bool NSMLEnvFlag(const char* name)
 {
@@ -90,7 +89,6 @@ static bool NSMLRuntimeHooksMaybeEnabled()
 {
     static const bool enabled =
         NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE") ||
-        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY") ||
         NSMLEnvFlag("MELONDS_NSML_PACKET_CAPTURE_LOG") ||
         NSMLEnvFlag("MELONDS_NSML_PACKET_REPLAY_FILE") ||
         NSMLEnvFlag("MELONDS_NSML_RANDOM_TRACE") ||
@@ -104,7 +102,6 @@ static bool NSMLRuntimeHooksMaybeEnabled()
         NSMLEnvFlag("MELONDS_NSML_RENDER_CAMERA_ALIAS") ||
         NSMLEnvFlag("MELONDS_NSML_FORCE_CAMERA_FOCUS_LOOP_COUNT") ||
         NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT") ||
-        NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_RESET") ||
         NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT");
     return enabled;
 }
@@ -115,22 +112,8 @@ static bool NSMLPacketBridgeEnabled()
 {
     static int enabled = -1;
     if (enabled < 0)
-        enabled = (NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE")
-            || NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY")) ? 1 : 0;
+        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE") ? 1 : 0;
     return enabled != 0;
-}
-
-static int NSMLPacketBridgeReplayTickOffset()
-{
-    static int offset = 0x7FFFFFFF;
-    if (offset == 0x7FFFFFFF)
-    {
-        if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET"))
-            offset = atoi(value);
-        else
-            offset = 0;
-    }
-    return offset;
 }
 
 static u32 NSMLPacketBridgeLocalPlayer()
@@ -150,101 +133,6 @@ static u32 NSMLPacketBridgeLocalPlayer()
     return 0;
 }
 
-static bool NSMLPacketBridgeMaintainPacketFreeBytes()
-{
-    static int enabled = -1;
-    if (enabled < 0)
-        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_PACKET_FREE_BYTES") ? 1 : 0;
-    return enabled != 0;
-}
-
-static void NSMLMaintainPacketFreeBytes(NDS& nds)
-{
-    if (!NSMLPacketBridgeMaintainPacketFreeBytes())
-        return;
-
-    // PacketBridge supplies remote packets below LocalMP. Keep the Net packet
-    // free-byte receive bitmap consistent with the two-player packet stream.
-    nds.ARM9Write32(0x02088A84, 0x00000003);
-    nds.ARM9Write32(0x02088A88, 0x00000003);
-}
-
-static bool NSMLPacketBridgeMaintainSessionPeers()
-{
-    static int enabled = -1;
-    if (enabled < 0)
-        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS") ? 1 : 0;
-    return enabled != 0;
-}
-
-static u32 NSMLPacketBridgeMaintainSessionPeersStartFrame()
-{
-    static u32 startFrame = 0xFFFFFFFF;
-    if (startFrame == 0xFFFFFFFF)
-        startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_START_FRAME", 0);
-    return startFrame;
-}
-
-static void NSMLWritePeerIdentity(NDS& nds, u32 addr, u32 player)
-{
-    static constexpr u8 kPeerIdentity[2][6] = {
-        { 'M', 'A', 'R', 'I', 'O', 0 },
-        { 'L', 'U', 'I', 'G', 'I', 0 },
-    };
-    for (u32 i = 0; i < 6; i++)
-        nds.ARM9Write8(addr + i, kPeerIdentity[player & 1][i]);
-}
-
-static void NSMLMaintainSessionPeers(NDS& nds)
-{
-    if (!NSMLPacketBridgeMaintainSessionPeers())
-        return;
-    if (nds.NumFrames < NSMLPacketBridgeMaintainSessionPeersStartFrame())
-        return;
-    static int hostOnly = -1;
-    static int clientOnly = -1;
-    if (hostOnly < 0)
-    {
-        hostOnly = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_HOST_ONLY") ? 1 : 0;
-        clientOnly = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_CLIENT_ONLY") ? 1 : 0;
-    }
-    const char* role = getenv("MELONDS_NSML_ROLE");
-    const bool isClient = role && strcmp(role, "client") == 0;
-    if (hostOnly && isClient)
-        return;
-    if (clientOnly && !isClient)
-        return;
-
-    // LoadGameSM waits for the lower Net peer/session tables, not only for
-    // packet payloads. Populate the two-player peer entries that LocalMP would
-    // normally maintain, while leaving higher VSConnect state alone.
-    nds.ARM9Write32(0x0208880C, 0x00000002);
-    nds.ARM9Write8(0x02088814, 2);
-    nds.ARM9Write8(0x0208881C, 2);
-
-    const u32 compactPeerBase = nds.ARM9Read32(0x02088850);
-    if (compactPeerBase >= 0x02000000 && compactPeerBase < 0x02400000)
-    {
-        for (u32 player = 0; player < 2; player++)
-        {
-            const u32 entry = compactPeerBase + player * 0x1E;
-            nds.ARM9Write8(entry + 0x01, 6);
-            NSMLWritePeerIdentity(nds, entry + 0x02, player);
-            nds.ARM9Write8(entry + 0x1D, 1);
-        }
-    }
-
-    constexpr u32 fullPeerBase = 0x0208B6C0;
-    for (u32 player = 0; player < 2; player++)
-    {
-        const u32 entry = fullPeerBase + player * 0xC0;
-        nds.ARM9Write16(entry + 0x00, 1);
-        NSMLWritePeerIdentity(nds, entry + 0x04, player);
-        nds.ARM9Write8(entry + 0x50, static_cast<u8>(player));
-        nds.ARM9Write8(entry + 0x51, 6);
-        NSMLWritePeerIdentity(nds, entry + 0x52, player);
-    }
-}
 
 static bool IsNSMLMarioVsLuigiPacketContext(NDS& nds);
 
@@ -343,9 +231,7 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
     {
         if (cpu->R[0] == 0x0F && cpu->R[2] == 9)
         {
-            u32 localPlayer = NSMLPacketBridgeLocalPlayer();
-            if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_LOAD_LEVEL_PLAYER_ID"))
-                localPlayer = static_cast<u32>(strtoul(value, nullptr, 0)) & 1;
+            const u32 localPlayer = NSMLPacketBridgeLocalPlayer();
             const u32 sp = cpu->R[13];
             cpu->R[1] = 1; // vs
             cpu->R[3] = NSMLMvlStage();
@@ -404,38 +290,6 @@ static void HandleNSMLNetReadyHotPatch(ARM* cpu, u32 instrAddr)
 
     cpu->NDS.ARM9Write32(0x02088A84, 0x00000003); // Net::packetFreeBytesRecvBitmap
     cpu->NDS.ARM9Write32(0x02088A88, 0x00000003);
-}
-
-static bool HandleNSMLNetResetBypass(ARM* cpu, u32 instrAddr)
-{
-    static int enabled = -1;
-    if (enabled < 0)
-        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_RESET") ? 1 : 0;
-    if (!enabled || !cpu || cpu->Num != 0)
-        return false;
-    if (instrAddr != 0x0200EDF8 && instrAddr != 0x0200EE00)
-        return false;
-    if (!NSMLPacketBridgeEnabled() || !IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
-        return false;
-
-    static int logCount = 0;
-    if (logCount < 16)
-    {
-        printf("NSMB PacketBridge: bypass Net reset function at %08X frame=%u lr=%08X\n",
-            instrAddr,
-            cpu->NDS.NumFrames,
-            cpu->R[14]);
-        logCount++;
-    }
-
-    if (instrAddr == 0x0200EE00)
-    {
-        // 0x0200EE00 is after the function prologue at 0x0200EDF8. If a build
-        // reaches this address directly, undo the pushed r4/lr before returning.
-        cpu->R[13] += 8;
-    }
-    cpu->JumpTo(cpu->R[14]);
-    return true;
 }
 
 static bool HandleNSMLNetDisconnectBypass(ARM* cpu, u32 instrAddr)
@@ -618,12 +472,6 @@ static void BuildNSMLMarioVsLuigiPacket(NDS& nds, std::array<u8, 52>& packet, u3
     // offset 0x29. Build the WAN packet from the same source so ready-bit
     // waits such as StageScene::onCreate can observe peer progress.
     packet[0x29] = nds.ARM9Read8(0x02088A4C);
-    if (NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_PREGAME_ACTION1")
-        && NSMLPacketBridgeAllowPreGame()
-        && !IsNSMLMarioVsLuigiGameplay(nds))
-    {
-        packet[4] = 1;
-    }
 }
 
 bool NSML_TakeMarioVsLuigiLocalPacket(NDS* nds, u8 outPacket[52], u32* outTick, u32* outKeys)
@@ -664,9 +512,7 @@ void NSML_PushMarioVsLuigiRemotePacket(NDS* nds, u32 player, const u8 packet[52]
     if (!nds || !packet || player > 1)
         return;
 
-    const u32 packetTick = packet[0] | (packet[1] << 8);
-    const int offset = NSMLPacketBridgeReplayTickOffset();
-    const u32 tick = static_cast<u32>((static_cast<int>(packetTick) + offset) & 0xFFFF);
+    const u32 tick = packet[0] | (packet[1] << 8);
     std::lock_guard<std::mutex> lock(NSMLPacketBridgeMutex);
     auto& packets = NSMLLiveReplayPackets[nds];
     auto& entry = packets[tick];
@@ -900,15 +746,9 @@ static bool HandleNSMLLowerMPBridge(ARM* cpu, u32 instrAddr)
     if (!IsNSMLMarioVsLuigiPacketContext(cpu->NDS))
         return false;
 
-    NSMLMaintainPacketFreeBytes(cpu->NDS);
-    NSMLMaintainSessionPeers(cpu->NDS);
-
     static int traceLower = -1;
     if (traceLower < 0)
-    {
-        traceLower = (NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_TRACE")
-            || NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_LOWER_TRACE")) ? 1 : 0;
-    }
+        traceLower = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_TRACE") ? 1 : 0;
 
     const bool oldStatusProbe = instrAddr == 0x0204619C;
     const bool usUpdateSharedData = instrAddr == 0x02046ECC;
@@ -917,14 +757,7 @@ static bool HandleNSMLLowerMPBridge(ARM* cpu, u32 instrAddr)
         // A2DJ used a lower-MP status probe where false kept the packet-copy
         // path active. US A2DE calls Wifi::updateSharedData(), where true
         // enters the packet-copy path in Net::Core::transferPacket().
-        static int statusResult = -1;
-        if (statusResult < 0)
-        {
-            if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT"))
-                statusResult = atoi(value) != 0 ? 1 : 0;
-            else
-                statusResult = usUpdateSharedData ? 1 : 0;
-        }
+        const int statusResult = usUpdateSharedData ? 1 : 0;
         static u32 traceCount = 0;
         if (traceLower && (traceCount < 24 || (traceCount % 300) == 0))
             printf("NSMB PacketBridge lower: %s %08X frame=%u tick=0x%04X lr=%08X -> %d\n",
@@ -1046,15 +879,6 @@ static void NSMLWriteReplayEntryToLocalMPSlots(
     }
 }
 
-static bool NSMLShouldMirrorPacketsToLocalMPSlots(NDS& nds)
-{
-    static int writeGameplayLocalMPSlots = -1;
-    if (writeGameplayLocalMPSlots < 0)
-        writeGameplayLocalMPSlots =
-            NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_WRITE_GAMEPLAY_LOCAL_MP_SLOTS") ? 1 : 0;
-    return !IsNSMLMarioVsLuigiGameplay(nds) || writeGameplayLocalMPSlots != 0;
-}
-
 static bool NSMLFindReplayEntryForTick(
     const std::map<u32, NSMLPacketReplayEntry>& packets,
     u32 tick,
@@ -1094,8 +918,6 @@ void NSML_RefreshMarioVsLuigiPacketSlots(NDS* nds)
     static int fallbackWindow = -1;
     static int normalizeTick = -1;
     static int suppressDisconnect = -1;
-    static int suppressBlackout = -1;
-    static int preserveNetPointers = -1;
     if (fallbackWindow < 0)
     {
         if (const char* value = getenv("MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW"))
@@ -1107,14 +929,8 @@ void NSML_RefreshMarioVsLuigiPacketSlots(NDS* nds)
         normalizeTick = NSMLEnvFlag("MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK") ? 1 : 0;
     if (suppressDisconnect < 0)
         suppressDisconnect = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_DISCONNECT") ? 1 : 0;
-    if (suppressBlackout < 0)
-        suppressBlackout = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_BLACKOUT") ? 1 : 0;
-    if (preserveNetPointers < 0)
-        preserveNetPointers = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_PRESERVE_NET_POINTERS") ? 1 : 0;
 
     const u32 tick = nds->ARM9Read16(0x020888E0);
-    NSMLMaintainPacketFreeBytes(*nds);
-    NSMLMaintainSessionPeers(*nds);
 
     // The old local-MP slot mirror uses 0x0208B040 + player * 0x3E. In US
     // direct MvL gameplay the player1 range overlaps Entrance globals
@@ -1122,7 +938,7 @@ void NSML_RefreshMarioVsLuigiPacketSlots(NDS* nds)
     // it corrupts entrance transition state and eventually crashes
     // Player::viewTransitState. During gameplay, prefer the lower packet API
     // hooks that return scratch packets from 0x023C1000.
-    if (NSMLShouldMirrorPacketsToLocalMPSlots(*nds))
+    if (!IsNSMLMarioVsLuigiGameplay(*nds))
     {
         NSMLWriteLiveReplayPacketsToLocalMPSlots(
             *nds,
@@ -1139,42 +955,6 @@ void NSML_RefreshMarioVsLuigiPacketSlots(NDS* nds)
             nds->ARM9Write8(0x02088804, 6);
     }
 
-    if (preserveNetPointers)
-    {
-        static constexpr u32 addrs[] = {
-            0x020887F4,
-            0x02088878,
-            0x020888C0,
-            0x020888C4,
-            0x02088A00,
-        };
-        auto& saved = NSMLPreservedNetWords[nds];
-        for (const u32 addr : addrs)
-        {
-            const u32 current = nds->ARM9Read32(addr);
-            auto it = saved.find(addr);
-            if (current != 0)
-            {
-                saved[addr] = current;
-            }
-            else if (it != saved.end() && it->second != 0)
-            {
-                nds->ARM9Write32(addr, it->second);
-            }
-        }
-    }
-
-    if (suppressBlackout)
-    {
-        // MvL disables display layers when the underlying LocalMP path disappears.
-        // Keep the normal gameplay display setup while the packet bridge supplies game packets.
-        nds->ARM9Write32(0x04000000, 0xC8211F3D);
-        nds->ARM9Write32(0x04001000, 0x00011E10);
-        nds->ARM9Write16(0x04000050, 0x3F40);
-        nds->ARM9Write16(0x04000054, 0x0000);
-        nds->ARM9Write16(0x04001050, 0x00FF);
-        nds->ARM9Write16(0x04001054, 0x0000);
-    }
 }
 
 static std::vector<std::string> SplitNSMLCsvLine(const std::string& line)
@@ -1365,14 +1145,14 @@ static bool HandleNSMLPacketReplay(ARM* cpu, u32 instrAddr)
 
     const u32 currentTick = NSMLPacketBridgeCanonicalTick(cpu->NDS);
     const u32 tick = (currentTick - cfg.LookupTickDelay) & 0xFFFF;
-    if (NSMLPacketBridgeEnabled() && NSMLShouldMirrorPacketsToLocalMPSlots(cpu->NDS))
+    if (NSMLPacketBridgeEnabled() && !IsNSMLMarioVsLuigiGameplay(cpu->NDS))
         NSMLWriteLiveReplayPacketsToLocalMPSlots(cpu->NDS, tick, cfg.LiveFallbackWindow, cfg.ReturnLookupTick);
 
     const NSMLPacketReplayEntry* replaySlotEntry = nullptr;
     u32 replaySlotTick = tick;
     if (NSMLFindReplayEntryForTick(cfg.Packets, tick, cfg.LiveFallbackWindow, &replaySlotEntry, &replaySlotTick))
     {
-        if (NSMLShouldMirrorPacketsToLocalMPSlots(cpu->NDS))
+        if (!IsNSMLMarioVsLuigiGameplay(cpu->NDS))
         {
             NSMLWriteReplayEntryToLocalMPSlots(
                 cpu->NDS,
@@ -3593,11 +3373,6 @@ void ARMv5::Execute()
                         NDS.ARM9Timestamp++;
                         continue;
                     }
-                    if (HandleNSMLNetResetBypass(this, instrAddr))
-                    {
-                        NDS.ARM9Timestamp++;
-                        continue;
-                    }
                     if (HandleNSMLPacketReplay(this, instrAddr))
                     {
                         NDS.ARM9Timestamp++;
@@ -3645,11 +3420,6 @@ void ARMv5::Execute()
                         continue;
                     }
                     if (HandleNSMLNetDisconnectBypass(this, instrAddr))
-                    {
-                        NDS.ARM9Timestamp++;
-                        continue;
-                    }
-                    if (HandleNSMLNetResetBypass(this, instrAddr))
                     {
                         NDS.ARM9Timestamp++;
                         continue;

@@ -96,15 +96,10 @@ param(
     [switch]$NoLocalWait,
     [string]$HostPacketBridgeLocalPlayer = "",
     [string]$ClientPacketBridgeLocalPlayer = "",
-    [string]$HostPacketBridgeLoadLevelPlayerID = "",
-    [string]$ClientPacketBridgeLoadLevelPlayerID = "",
     [string]$HostPacketBridgeForceGameLocalPlayerID = "",
     [string]$ClientPacketBridgeForceGameLocalPlayerID = "",
     [int]$PacketBridgeForceGameLocalPlayerIDStartFrame = 0,
     [switch]$PacketBridgeForceGameLocalPlayerIDEarly,
-    [int]$PacketBridgeReplayTickOffset = 0,
-    [int]$HostPacketBridgeReplayTickOffset = [int]::MinValue,
-    [int]$ClientPacketBridgeReplayTickOffset = [int]::MinValue,
     [switch]$PacketBridgeStrictRemote,
     [string]$PacketBridgeStrictPlayers = "",
     [int]$PacketBridgeStrictStartFrame = 0,
@@ -114,12 +109,6 @@ param(
     [switch]$PacketBridgeLiveFallbackLatestBefore,
     [int]$PacketBridgeLiveFallbackStartFrame = 0,
     [switch]$PacketBridgeReplayReturnLookupTick,
-    [switch]$PacketBridgeMaintainPacketFreeBytes,
-    [switch]$PacketBridgeMaintainSessionPeers,
-    [int]$PacketBridgeMaintainSessionPeersStartFrame = 0,
-    [switch]$PacketBridgeMaintainSessionPeersHostOnly,
-    [switch]$PacketBridgeMaintainSessionPeersClientOnly,
-    [int]$PacketBridgeLowerStatusResult = -1,
     [string]$PacketBridgeReplayOps = "",
     [switch]$PacketBridgeDirectCapture,
     [switch]$PacketBridgeForceTick,
@@ -135,9 +124,6 @@ param(
     [int]$PacketBridgeSendJitterFrames = 0,
     [int]$PacketBridgeMaxPumpEvents = 64,
     [switch]$PacketBridgeSuppressDisconnect,
-    [switch]$PacketBridgeSuppressBlackout,
-    [switch]$PacketBridgePreserveNetPointers,
-    [switch]$PacketBridgeBypassNetReset,
     [switch]$PacketBridgeBypassNetDisconnect,
     [int]$PacketBridgeBypassNetDisconnectStartFrame = 0,
     [string]$PacketBridgeBypassNetDisconnectMode = "skip",
@@ -213,7 +199,6 @@ param(
     [int]$TraceStageCameraStartFrame = 0,
     [int]$TraceStageCameraEndFrame = 0,
     [int]$TraceStageCameraInterval = 1,
-    [switch]$PacketBridgeArmOnly,
     [switch]$PacketBridgeJitHelperPatch,
     [int]$PacketBridgeJitHelperPatchFrame = 0,
     [switch]$ClearMvlCameraInitHold,
@@ -1130,15 +1115,6 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_TRACE_STAGE_CAMERA_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_TRACE_STAGE_CAMERA_INTERVAL -ErrorAction SilentlyContinue
     }
-    if ($PacketBridgeArmOnly) {
-        $env:MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY = "1"
-        if ($PacketBridgeTrace) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_TRACE = "1"
-            $env:MELONDS_NSML_PACKET_REPLAY_LOG = "$Stdout.packet-replay.csv"
-        }
-    } else {
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ARM_ONLY -ErrorAction SilentlyContinue
-    }
     if ($PacketBridgeJitHelperPatch) {
         $env:MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH = "1"
         $env:MELONDS_NSML_PACKET_BRIDGE_JIT_HELPER_PATCH_FRAME = "$PacketBridgeJitHelperPatchFrame"
@@ -1165,9 +1141,6 @@ function Start-MelonLANProcess {
     } else {
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_FILE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LOG -ErrorAction SilentlyContinue
-    }
-    if ($PacketBridgeArmOnly -and $PacketBridgeTrace) {
-        $env:MELONDS_NSML_PACKET_REPLAY_LOG = "$Stdout.packet-replay.csv"
     }
     if ($PacketCapture) {
         $env:MELONDS_NSML_PACKET_CAPTURE_LOG = $PacketCapturePath
@@ -1212,13 +1185,6 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER -ErrorAction SilentlyContinue
         }
-        if ($Role -eq "host" -and $HostPacketBridgeLoadLevelPlayerID) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_LOAD_LEVEL_PLAYER_ID = $HostPacketBridgeLoadLevelPlayerID
-        } elseif ($Role -eq "client" -and $ClientPacketBridgeLoadLevelPlayerID) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_LOAD_LEVEL_PLAYER_ID = $ClientPacketBridgeLoadLevelPlayerID
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOAD_LEVEL_PLAYER_ID -ErrorAction SilentlyContinue
-        }
         if ($Role -eq "host" -and $HostPacketBridgeForceGameLocalPlayerID) {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID = $HostPacketBridgeForceGameLocalPlayerID
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_START_FRAME = "$PacketBridgeForceGameLocalPlayerIDStartFrame"
@@ -1239,22 +1205,10 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME -ErrorAction SilentlyContinue
         }
-        $roleReplayOffset = $PacketBridgeReplayTickOffset
-        if ($Role -eq "host" -and $HostPacketBridgeReplayTickOffset -ne [int]::MinValue) {
-            $roleReplayOffset = $HostPacketBridgeReplayTickOffset
-        } elseif ($Role -eq "client" -and $ClientPacketBridgeReplayTickOffset -ne [int]::MinValue) {
-            $roleReplayOffset = $ClientPacketBridgeReplayTickOffset
-        }
-        $env:MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET = "$roleReplayOffset"
         if ($PacketBridgeDirectCapture) {
             $env:MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE = "1"
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE -ErrorAction SilentlyContinue
-        }
-        if ($PacketBridgeLowerStatusResult -ge 0) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT = "$PacketBridgeLowerStatusResult"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeForceTick) {
             $env:MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK = "1"
@@ -1318,21 +1272,6 @@ function Start-MelonLANProcess {
             $env:MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_DISCONNECT = "1"
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_DISCONNECT -ErrorAction SilentlyContinue
-        }
-        if ($PacketBridgeSuppressBlackout) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_BLACKOUT = "1"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_BLACKOUT -ErrorAction SilentlyContinue
-        }
-        if ($PacketBridgePreserveNetPointers) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_PRESERVE_NET_POINTERS = "1"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_PRESERVE_NET_POINTERS -ErrorAction SilentlyContinue
-        }
-        if ($PacketBridgeBypassNetReset) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_RESET = "1"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_RESET -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeBypassNetDisconnect) {
             $env:MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT = "1"
@@ -1433,27 +1372,6 @@ function Start-MelonLANProcess {
             $env:MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK = "1"
         } else {
             Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK -ErrorAction SilentlyContinue
-        }
-        if ($PacketBridgeMaintainPacketFreeBytes) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_PACKET_FREE_BYTES = "1"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_PACKET_FREE_BYTES -ErrorAction SilentlyContinue
-        }
-        if ($PacketBridgeMaintainSessionPeers) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS = "1"
-            $env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_START_FRAME = "$PacketBridgeMaintainSessionPeersStartFrame"
-            if ($PacketBridgeMaintainSessionPeersHostOnly) { $env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_HOST_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_HOST_ONLY -ErrorAction SilentlyContinue }
-            if ($PacketBridgeMaintainSessionPeersClientOnly) { $env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_CLIENT_ONLY = "1" } else { Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_CLIENT_ONLY -ErrorAction SilentlyContinue }
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_START_FRAME -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_HOST_ONLY -ErrorAction SilentlyContinue
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_CLIENT_ONLY -ErrorAction SilentlyContinue
-        }
-        if ($PacketBridgeLowerStatusResult -ge 0) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT = "$PacketBridgeLowerStatusResult"
-        } else {
-            Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT -ErrorAction SilentlyContinue
         }
         if ($PacketBridgeReplayOps) {
             $env:MELONDS_NSML_PACKET_REPLAY_OPS = $PacketBridgeReplayOps
@@ -1606,25 +1524,19 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ONLY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ALLOW_JIT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOAD_LEVEL_PLAYER_ID -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_EARLY -ErrorAction SilentlyContinue
         if (-not ($PacketCapture -and $PacketCaptureAllowPreGame)) {
             Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_ALLOW_PRE_GAME -ErrorAction SilentlyContinue
         }
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_DIRECT_CAPTURE -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LOOKUP_TICK_DELAY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAX_PUMP_EVENTS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_DISCONNECT -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_SUPPRESS_BLACKOUT -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_PRESERVE_NET_POINTERS -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_RESET -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT_MODE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT_START_FRAME -ErrorAction SilentlyContinue
@@ -1649,11 +1561,6 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_WINDOW -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_NEAREST -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_PACKET_FREE_BYTES -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_START_FRAME -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_HOST_ONLY -ErrorAction SilentlyContinue
-        Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_CLIENT_ONLY -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_REPLAY_OPS -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_PACKET_BRIDGE_TRACE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_WAIT_FOR_PEER -ErrorAction SilentlyContinue
@@ -1700,18 +1607,6 @@ function Start-MelonLANProcess {
         }
         if ($PacketBridgeReplayReturnLookupTick) {
             $env:MELONDS_NSML_PACKET_REPLAY_RETURN_LOOKUP_TICK = "1"
-        }
-        if ($PacketBridgeMaintainPacketFreeBytes) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_PACKET_FREE_BYTES = "1"
-        }
-        if ($PacketBridgeMaintainSessionPeers) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS = "1"
-            $env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_START_FRAME = "$PacketBridgeMaintainSessionPeersStartFrame"
-            if ($PacketBridgeMaintainSessionPeersHostOnly) { $env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_HOST_ONLY = "1" }
-            if ($PacketBridgeMaintainSessionPeersClientOnly) { $env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_CLIENT_ONLY = "1" }
-        }
-        if ($PacketBridgeLowerStatusResult -ge 0) {
-            $env:MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT = "$PacketBridgeLowerStatusResult"
         }
         if ($PacketBridgeReplayOps) {
             $env:MELONDS_NSML_PACKET_REPLAY_OPS = $PacketBridgeReplayOps
@@ -1851,9 +1746,7 @@ function Start-MelonLANProcess {
         "lanHost=$($env:MELONDS_NSML_LAN_HOST)"
         "packetBridge=$PacketBridge"
         "localInstance=$($env:MELONDS_NSML_LOCAL_INSTANCE)"
-        "packetBridgeReplayTickOffset=$($env:MELONDS_NSML_PACKET_BRIDGE_REPLAY_TICK_OFFSET)"
         "packetBridgeLocalPlayer=$($env:MELONDS_NSML_PACKET_BRIDGE_LOCAL_PLAYER)"
-        "packetBridgeLoadLevelPlayerID=$($env:MELONDS_NSML_PACKET_BRIDGE_LOAD_LEVEL_PLAYER_ID)"
         "packetBridgeForceGameLocalPlayerID=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID)"
         "packetBridgeForceGameLocalPlayerIDStartFrame=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_START_FRAME)"
         "packetBridgeForceGameLocalPlayerIDEarly=$($env:MELONDS_NSML_PACKET_BRIDGE_FORCE_GAME_LOCAL_PLAYER_ID_EARLY)"
@@ -1883,12 +1776,6 @@ function Start-MelonLANProcess {
         "packetBridgeLiveFallbackLatestBefore=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_LATEST_BEFORE)"
         "packetBridgeLiveFallbackStartFrame=$($env:MELONDS_NSML_PACKET_REPLAY_LIVE_FALLBACK_START_FRAME)"
         "waitForPeer=$($env:MELONDS_NSML_WAIT_FOR_PEER)"
-        "packetBridgeMaintainPacketFreeBytes=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_PACKET_FREE_BYTES)"
-        "packetBridgeMaintainSessionPeers=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS)"
-        "packetBridgeMaintainSessionPeersStart=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_START_FRAME)"
-        "packetBridgeMaintainSessionPeersHostOnly=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_HOST_ONLY)"
-        "packetBridgeMaintainSessionPeersClientOnly=$($env:MELONDS_NSML_PACKET_BRIDGE_MAINTAIN_SESSION_PEERS_CLIENT_ONLY)"
-        "packetBridgeLowerStatusResult=$($env:MELONDS_NSML_PACKET_BRIDGE_LOWER_STATUS_RESULT)"
         "inputMaxFrameLead=$($env:MELONDS_NSML_INPUT_MAX_FRAME_LEAD)"
         "gameplayHeartbeatInterval=$($env:MELONDS_NSML_GAMEPLAY_HEARTBEAT_INTERVAL)"
         "worldStateTraceActorInternals=$($env:MELONDS_NSML_WORLD_STATE_TRACE_ACTOR_INTERNALS)"
