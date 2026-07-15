@@ -24,6 +24,7 @@
 #include "NsmbNetplayProtocol.h"
 #include "NsmbNetplayTransport.h"
 #include "NsmbNetplayDiagnostics.h"
+#include "NsmbGameplayDiagnostics.h"
 #include "NsmbNetplaySession.h"
 #include "NsmbTestStateHarness.h"
 #include "NsmbGameState.h"
@@ -71,7 +72,6 @@ namespace NsmbNetplayPoC
 namespace
 {
 
-constexpr std::size_t kTrackedWorldMovingHazardCount = 4;
 using WireProtocol::WireGameState;
 using WireProtocol::kWireKindState;
 using GameStateModel::AITerrainDerivedSummary;
@@ -80,10 +80,8 @@ using GameStateModel::AITileProbeSample;
 using GameStateModel::AIPlayerTileProbeSample;
 using GameStateModel::GameStateHashMismatch;
 using GameStateModel::GameStateSample;
-using GameStateModel::GameStateSyncHashes;
 using GameStateModel::GameStateTraceHashes;
 using GameStateModel::GameStateTraceWriter;
-using GameStateModel::CombinedGameStateHash;
 using GameStateModel::ComputeBasicGameStateHash;
 using GameStateModel::DecodedGameState;
 using GameStateModel::DecodeWireGameState;
@@ -101,7 +99,6 @@ using GameStateModel::kAIFireballSlotCount;
 using GameStateModel::kAIFireballSlotDebugWordCount;
 using GameStateModel::kAIFireballSlotStateByteCount;
 using GameStateModel::kAISpecialHandlerWordCount;
-using GameStateModel::kObjectTraceSlots;
 using GameStateReader::ObjectPairScanSample;
 using GameStateReader::ObjectScanSample;
 using GameStateReader::PlayerActorScanSample;
@@ -122,7 +119,6 @@ using GameStateReader::FindPlayerActors;
 using GameStateReader::FindVsBattleStarCandidate;
 using GameStateReader::HasActiveObjectScanCache;
 using GameStateReader::HashFramebuffers;
-using GameStateReader::HashMainRAMRange;
 using GameStateReader::HashNDS;
 using GameStateReader::ReadObjectByBase;
 using GameStateReader::ReadAIPlayerTileProbeSample;
@@ -142,10 +138,6 @@ unsigned long long NowUnixMs()
 constexpr melonDS::u32 kInputKeyXMask = 1u << 10;
 constexpr melonDS::u16 kMvlStockItemTouchX = 217;
 constexpr melonDS::u16 kMvlStockItemTouchY = 153;
-constexpr melonDS::u32 kGamePlayerDeadAddr = 0x0208B328;
-constexpr melonDS::u32 kGamePlayerTransitionStatusAddr = 0x0208B354; // Game::playerVSPipeState
-constexpr melonDS::u32 kGamePlayerLivesAddr = 0x0208B364;
-constexpr melonDS::u32 kGamePlayerDeathsAddr = 0x0208B394;
 constexpr melonDS::u16 kPlayerObjectID = 0x0015;
 constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
 constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
@@ -215,11 +207,6 @@ enum class Role
     Client,
 };
 
-constexpr melonDS::u32 kDiagnosticPostTriggerFrames = 120;
-constexpr melonDS::u32 kDiagnosticRepeatedAnomalyFrames = 120;
-constexpr melonDS::u32 kPlayerPitDeathTransitStateAddr = 0x021196B0;
-
-
 AITerrainDerivedSummary DeriveAITerrainSummaryFromGrid(
     const AIPlayerTileProbeSample& probe,
     bool contactGround,
@@ -237,28 +224,7 @@ const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings);
 
 
 GameStateSample ReadGameStateSample(melonDS::NDS* nds);
-using Diagnostics::DiagnosticFrameSnapshot;
-using Diagnostics::DiagnosticPlayerSnapshot;
 using Diagnostics::BeforeHookPhaseTrace;
-using Diagnostics::IsPlayerScreenPositionAnomalous;
-using Diagnostics::JsonEscape;
-
-void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);
-
-
-void EmitGameStateMismatchEventLocked(
-    int instanceID,
-    melonDS::u32 frame,
-    const GameStateSyncHashes& local,
-    const GameStateSyncHashes& remote);
-void EmitPlayerLifeEvent(
-    int instanceID,
-    melonDS::u32 frame,
-    int player,
-    const char* reason,
-    const GameStateSample& sample,
-    melonDS::NDS* nds);
-void EmitStartReadyEventLocked(const char* direction, melonDS::u32 localFrame, melonDS::u32 remoteFrame);
 
 int CurrentPacketBridgeLocalPlayer();
 const PacketBridge::IntegrationHooks& PacketBridgeHooks();
@@ -415,10 +381,34 @@ MvlLifecycle::Context MvlLifecycleContext()
     };
 }
 
+GameplayDiagnostics::Context GameplayDiagnosticsContext()
+{
+    return {
+        G.Diagnostics,
+        G.Connection,
+        G.StateSync,
+        G.RuntimePatch,
+        G.DiagnosticsRuntime,
+        G.InputRuntime,
+        G.NetplaySession,
+        G.GameSync,
+        G.RollbackStats,
+        G.Mutex,
+        G.NetRole == Role::Host,
+    };
+}
+
+const GameplayDiagnostics::Hooks& GameplayDiagnosticsHooks()
+{
+    static const GameplayDiagnostics::Hooks hooks {
+        [](melonDS::NDS* nds) { return ReadGameStateSample(nds); },
+        [](melonDS::NDS* nds) { return IsMarioVsLuigiGameplay(nds); },
+    };
+    return hooks;
+}
+
 void TraceHangPhase(const char* event, const char* phase, int instanceID = -1,
     melonDS::u32 frame = 0, melonDS::u32 logicalFrame = 0, melonDS::u32 sendFrame = 0);
-void StartHangWatchdogIfNeeded();
-void StopDiagnostics();
 
 
 void TraceHangPhase(
@@ -430,16 +420,6 @@ void TraceHangPhase(
     melonDS::u32 sendFrame)
 {
     G.DiagnosticsRuntime.TracePhase(event, phase, instanceID, frame, logicalFrame, sendFrame);
-}
-
-void StartHangWatchdogIfNeeded()
-{
-    G.DiagnosticsRuntime.StartHangDiagnostics(G.Diagnostics, G.NetRole == Role::Host);
-}
-
-void StopDiagnostics()
-{
-    G.DiagnosticsRuntime.Stop();
 }
 
 melonDS::u32 GenerateMatchSeed()
@@ -521,121 +501,6 @@ bool LoadInputScriptFileLocked(
 bool LoadInputScriptLocked()
 {
     return LoadInputScriptFileLocked(G.Harness.InputScriptPath, GInputScript);
-}
-
-std::string Hex64(melonDS::u64 value)
-{
-    std::ostringstream out;
-    out << std::hex << std::uppercase << std::setw(16) << std::setfill('0')
-        << static_cast<unsigned long long>(value);
-    return out.str();
-}
-
-void WriteDiagnosticsJson(const std::string& json)
-{
-    if (G.Diagnostics.DiagnosticsPath.empty())
-        return;
-
-    const std::filesystem::path path(G.Diagnostics.DiagnosticsPath);
-    const std::filesystem::path tmp = path.string() + ".tmp";
-    std::error_code ec;
-    if (path.has_parent_path())
-        std::filesystem::create_directories(path.parent_path(), ec);
-
-    {
-        std::ofstream file(tmp, std::ios::binary | std::ios::trunc);
-        if (!file)
-        {
-            std::printf("NSMB PoC: failed to open diagnostics file: %s\n", tmp.string().c_str());
-            return;
-        }
-        file << json;
-        file.flush();
-        if (!file)
-        {
-            std::printf("NSMB PoC: failed to write diagnostics file: %s\n", tmp.string().c_str());
-            return;
-        }
-    }
-
-    std::filesystem::remove(path, ec);
-    ec.clear();
-    std::filesystem::rename(tmp, path, ec);
-    if (ec)
-    {
-        std::printf("NSMB PoC: failed to publish diagnostics file: %s error=%s\n",
-            path.string().c_str(),
-            ec.message().c_str());
-    }
-}
-
-void WriteGameStateMismatchDiagnostics(
-    int instanceID,
-    melonDS::u32 frame,
-    const GameStateSyncHashes& local,
-    const GameStateSyncHashes& remote)
-{
-    const melonDS::u64 localHash = CombinedGameStateHash(local);
-    const melonDS::u64 remoteHash = CombinedGameStateHash(remote);
-    const bool basicMatches = local.Basic == remote.Basic;
-    const bool playerGlobalMatches = local.PlayerGlobal == remote.PlayerGlobal;
-    const bool wifiCandidateMatches = local.WifiCandidate == remote.WifiCandidate;
-    const bool renderCandidateMatches = local.RenderCandidate == remote.RenderCandidate;
-
-    std::ostringstream line;
-    line << "NSMB PoC: game state mismatch inst=" << instanceID
-         << " frame=" << frame
-         << " local=" << Hex64(localHash)
-         << " remote=" << Hex64(remoteHash)
-         << " basic=" << (basicMatches ? 1 : 0)
-         << " playerGlobal=" << (playerGlobalMatches ? 1 : 0)
-         << " wifiCandidate=" << (wifiCandidateMatches ? 1 : 0)
-         << " renderCandidate=" << (renderCandidateMatches ? 1 : 0);
-
-    std::ostringstream json;
-    json << "{\n"
-         << "  \"game_state_mismatch\": {\n"
-         << "    \"instance\": " << instanceID << ",\n"
-         << "    \"frame\": " << frame << ",\n"
-         << "    \"local_hash\": \"" << Hex64(localHash) << "\",\n"
-         << "    \"remote_hash\": \"" << Hex64(remoteHash) << "\",\n"
-         << "    \"basic_matches\": " << (basicMatches ? "true" : "false") << ",\n"
-         << "    \"player_global_matches\": " << (playerGlobalMatches ? "true" : "false") << ",\n"
-         << "    \"wifi_candidate_matches\": " << (wifiCandidateMatches ? "true" : "false") << ",\n"
-         << "    \"render_candidate_matches\": " << (renderCandidateMatches ? "true" : "false") << ",\n"
-         << "    \"line\": \"" << JsonEscape(line.str()) << "\"\n"
-         << "  }\n"
-         << "}\n";
-    WriteDiagnosticsJson(json.str());
-}
-
-void ReportGameStateMismatchLocked(const GameStateHashMismatch& mismatch)
-{
-    const int instanceID = mismatch.InstanceID;
-    const melonDS::u32 frame = mismatch.Frame;
-    const GameStateSyncHashes& lhs = mismatch.Local;
-    const GameStateSyncHashes& rhs = mismatch.Remote;
-    WriteGameStateMismatchDiagnostics(instanceID, frame, lhs, rhs);
-    EmitGameStateMismatchEventLocked(instanceID, frame, lhs, rhs);
-    std::printf("NSMB PoC: game state mismatch inst=%d frame=%u local=%016llX remote=%016llX basic=%d playerGlobal=%d wifiCandidate=%d renderCandidate=%d\n",
-        instanceID,
-        frame,
-        static_cast<unsigned long long>(CombinedGameStateHash(lhs)),
-        static_cast<unsigned long long>(CombinedGameStateHash(rhs)),
-        lhs.Basic == rhs.Basic ? 1 : 0,
-        lhs.PlayerGlobal == rhs.PlayerGlobal ? 1 : 0,
-        lhs.WifiCandidate == rhs.WifiCandidate ? 1 : 0,
-        lhs.RenderCandidate == rhs.RenderCandidate ? 1 : 0);
-    std::printf("NSMB PoC: game state components local basic=%016llX playerGlobal=%016llX wifiCandidate=%016llX renderCandidate=%016llX\n",
-        static_cast<unsigned long long>(lhs.Basic),
-        static_cast<unsigned long long>(lhs.PlayerGlobal),
-        static_cast<unsigned long long>(lhs.WifiCandidate),
-        static_cast<unsigned long long>(lhs.RenderCandidate));
-    std::printf("NSMB PoC: game state components remote basic=%016llX playerGlobal=%016llX wifiCandidate=%016llX renderCandidate=%016llX\n",
-        static_cast<unsigned long long>(rhs.Basic),
-        static_cast<unsigned long long>(rhs.PlayerGlobal),
-        static_cast<unsigned long long>(rhs.WifiCandidate),
-        static_cast<unsigned long long>(rhs.RenderCandidate));
 }
 
 InputState ApplyInputScript(int instanceID, melonDS::u32 frame, const InputState& fallback)
@@ -749,40 +614,6 @@ unsigned long long ElapsedUs(std::chrono::steady_clock::time_point start)
             std::chrono::steady_clock::now() - start).count());
 }
 
-void RecordActiveFrameTiming(int instanceID, melonDS::u32 frame)
-{
-    RollbackStorage::StatisticsSnapshot rollbackStats;
-    if (G.Diagnostics.ActiveFrameSpikeTrace)
-        rollbackStats = G.RollbackStats.Snapshot();
-    const Diagnostics::Runtime::ActiveFrameSample sample =
-        G.DiagnosticsRuntime.RecordActiveFrameTiming(
-            instanceID,
-            frame,
-            std::chrono::steady_clock::now(),
-            G.Diagnostics.ActiveFrameSpikeTrace,
-            static_cast<std::uint64_t>(G.Diagnostics.ActiveFrameSpikeThresholdUs),
-            rollbackStats.RestoreCount,
-            rollbackStats.ResimulateCount);
-    if (!sample.Spike)
-        return;
-
-    std::printf(
-        "NSMB PerfSpike: inst=%d frame=%u frameTimeUs=%llu thresholdUs=%d rollbackRestores=%u rollbackResims=%u rollbackRestoreDelta=%u rollbackResimDelta=%u saveMaxUs=%llu restoreMaxUs=%llu resimRunMaxUs=%llu resimSaveMaxUs=%llu resimTotalMaxUs=%llu\n",
-        instanceID,
-        frame,
-        static_cast<unsigned long long>(sample.ElapsedUs),
-        G.Diagnostics.ActiveFrameSpikeThresholdUs,
-        rollbackStats.RestoreCount,
-        rollbackStats.ResimulateCount,
-        sample.RollbackRestoreDelta,
-        sample.RollbackResimulateDelta,
-        rollbackStats.CheckpointSaveMaxUs,
-        rollbackStats.CheckpointRestoreMaxUs,
-        rollbackStats.ResimRunFrameMaxUs,
-        rollbackStats.ResimCheckpointSaveMaxUs,
-        rollbackStats.ResimCorrectionMaxUs);
-}
-
 bool IsInputNetplayGameplayStartReady(melonDS::NDS* nds)
 {
     if (!nds || !nds->MainRAM)
@@ -811,7 +642,8 @@ const NetplaySession::Hooks& NetplaySessionHooks()
 {
     static const NetplaySession::Hooks hooks {
         [](const char* direction, melonDS::u32 localFrame, melonDS::u32 remoteFrame) {
-            EmitStartReadyEventLocked(direction, localFrame, remoteFrame);
+            GameplayDiagnostics::EmitStartReadyEventLocked(
+                GameplayDiagnosticsContext(), direction, localFrame, remoteFrame);
         },
         [](const void* data, std::size_t size, melonDS::NDS* nds, melonDS::u32 localFrame) {
             PacketBridge::ReceivePacketLocked(
@@ -842,7 +674,8 @@ const GameStateSync::Hooks& GameStateSyncHooks()
         },
         [] { return CurrentPacketBridgeLocalPlayer(); },
         [](const GameStateHashMismatch& mismatch) {
-            ReportGameStateMismatchLocked(mismatch);
+            GameplayDiagnostics::ReportGameStateMismatchLocked(
+                GameplayDiagnosticsContext(), mismatch);
         },
     };
     return hooks;
@@ -898,239 +731,6 @@ void AdvanceSerialRunTurn(int instanceID, melonDS::u32 frame)
         return;
 
     G.Coordinator.AdvanceSerialTurn(instanceID, frame, G.Bootstrap.TestInstanceCount);
-}
-
-void WriteDiagnosticEventLocked(const std::string& json)
-{
-    if (!G.Diagnostics.DiagnosticEventsEnabled || G.Diagnostics.DiagnosticEventsPath.empty())
-        return;
-    if (!G.DiagnosticsRuntime.WriteDiagnosticEvent(G.Diagnostics.DiagnosticEventsPath, json))
-        G.Diagnostics.DiagnosticEventsEnabled = false;
-}
-
-void EmitStartReadyEventLocked(const char* direction, melonDS::u32 localFrame, melonDS::u32 remoteFrame)
-{
-    if (!G.Diagnostics.DiagnosticEventsEnabled)
-        return;
-
-    WriteDiagnosticEventLocked(Diagnostics::FormatStartReadyEvent(
-        G.NetRole == Role::Host ? "host" : "client", direction, localFrame,
-        remoteFrame, kNoFrameLimit, G.Connection.StartFrame,
-        G.InputRuntime.LastSentInputFrame, G.InputRuntime.LastReceivedInputFrame,
-        G.InputRuntime.LocalInputs.size(), G.InputRuntime.RemoteInputs.size(),
-        G.NetplaySession.Delivery.PendingCount()));
-}
-
-void EmitDiagnosticStartupEvent()
-{
-    if (!G.Diagnostics.DiagnosticEventsEnabled)
-        return;
-
-    WriteDiagnosticEventLocked(Diagnostics::FormatDiagnosticStartupEvent(
-        G.NetRole == Role::Host ? "host" : "client",
-        G.Diagnostics.DiagnosticRingFrames, G.StateSync.GameEnabled,
-        G.StateSync.GameExtended, G.StateSync.GameInterval,
-        G.Diagnostics.DiagnosticsPath, G.Diagnostics.DiagnosticEventsPath));
-}
-
-std::vector<DiagnosticFrameSnapshot> DiagnosticRingWindow(int instanceID)
-{
-    if (instanceID < 0 || instanceID >= 16)
-        return {};
-    const std::size_t ringFrames = static_cast<std::size_t>(
-        std::clamp(G.Diagnostics.DiagnosticRingFrames, 1,
-            static_cast<int>(Diagnostics::kDiagnosticRingCapacity)));
-    return G.DiagnosticsRuntime.DiagnosticSnapshotWindow(instanceID, ringFrames);
-}
-
-void EmitDiagnosticPitTransitionEvent(
-    int instanceID,
-    const DiagnosticFrameSnapshot& snap,
-    const DiagnosticFrameSnapshot* previous,
-    int player)
-{
-    if (!G.Diagnostics.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
-        return;
-    if (snap.Player[player].TransitFunc != kPlayerPitDeathTransitStateAddr)
-        return;
-    if (previous && previous->Valid && previous->Player[player].TransitFunc == kPlayerPitDeathTransitStateAddr)
-        return;
-    if (!G.DiagnosticsRuntime.ShouldEmitDiagnosticPitTransition(
-            instanceID, player, snap.Frame, kDiagnosticRepeatedAnomalyFrames))
-        return;
-
-    G.DiagnosticsRuntime.ScheduleDiagnosticPostTrigger(
-        instanceID, snap.Frame + kDiagnosticPostTriggerFrames);
-
-    const std::string json = Diagnostics::FormatDiagnosticPlayerSnapshotEvent(
-        "player_pit_transition", G.NetRole == Role::Host ? "host" : "client",
-        instanceID, snap, previous, player, DiagnosticRingWindow(instanceID));
-
-    std::lock_guard<std::mutex> lock(G.Mutex);
-    WriteDiagnosticEventLocked(json);
-}
-
-void EmitDiagnosticPositionAnomalyEvent(
-    int instanceID,
-    const DiagnosticFrameSnapshot& snap,
-    const DiagnosticFrameSnapshot* previous,
-    int player)
-{
-    if (!G.Diagnostics.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
-        return;
-    if (!IsPlayerScreenPositionAnomalous(snap, previous, player))
-        return;
-    if (!G.DiagnosticsRuntime.ShouldEmitDiagnosticPositionAnomaly(
-            instanceID, player, snap.Frame, kDiagnosticRepeatedAnomalyFrames))
-        return;
-
-    const std::string json = Diagnostics::FormatDiagnosticPlayerSnapshotEvent(
-        "player_position_anomaly", G.NetRole == Role::Host ? "host" : "client",
-        instanceID, snap, previous, player, DiagnosticRingWindow(instanceID));
-
-    std::lock_guard<std::mutex> lock(G.Mutex);
-    WriteDiagnosticEventLocked(json);
-}
-
-void RecordDiagnosticSnapshotIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!G.Diagnostics.DiagnosticEventsEnabled || !nds || !nds->MainRAM)
-        return;
-    if (instanceID < 0 || instanceID >= 16)
-        return;
-    if (frame < G.Connection.StartFrame)
-        return;
-
-    DiagnosticFrameSnapshot snap;
-    snap.Valid = true;
-    snap.Frame = frame;
-    snap.Instance = static_cast<melonDS::u32>(instanceID);
-    GameStateReader::ReadDiagnosticFrameSnapshot(nds, snap);
-    snap.LastSentInputFrame = G.InputRuntime.LastSentInputFrame;
-    snap.LastReceivedInputFrame = G.InputRuntime.LastReceivedInputFrame;
-    GameStateReader::ReadDiagnosticPlayerSnapshot(
-        instanceID, frame, nds, 0, G.GameSync, snap.Player[0]);
-    GameStateReader::ReadDiagnosticPlayerSnapshot(
-        instanceID, frame, nds, 1, G.GameSync, snap.Player[1]);
-    if (snap.Player[0].Found && RollbackRuntime::IsValidMainRAMRange(nds, snap.Player[0].Base, 0xC00))
-        snap.PlayerActorHash0 = HashMainRAMRange(nds, snap.Player[0].Base, 0xC00);
-    if (snap.Player[1].Found && RollbackRuntime::IsValidMainRAMRange(nds, snap.Player[1].Base, 0xC00))
-        snap.PlayerActorHash1 = HashMainRAMRange(nds, snap.Player[1].Base, 0xC00);
-
-    const std::optional<DiagnosticFrameSnapshot> previousSnapshot =
-        G.DiagnosticsRuntime.LatestDiagnosticSnapshot(instanceID);
-    const DiagnosticFrameSnapshot* previous = previousSnapshot
-        ? &previousSnapshot.value()
-        : nullptr;
-    for (int player = 0; player < 2; player++)
-    {
-        EmitDiagnosticPositionAnomalyEvent(instanceID, snap, previous, player);
-        EmitDiagnosticPitTransitionEvent(instanceID, snap, previous, player);
-    }
-
-    G.DiagnosticsRuntime.RecordDiagnosticSnapshot(instanceID, snap);
-
-    const std::optional<melonDS::u32> triggerFrame =
-        G.DiagnosticsRuntime.TakeDueDiagnosticPostTrigger(instanceID, frame);
-    if (triggerFrame)
-    {
-        const std::string json = Diagnostics::FormatDiagnosticPostWindowEvent(
-            G.NetRole == Role::Host ? "host" : "client", instanceID, frame,
-            triggerFrame.value(), DiagnosticRingWindow(instanceID));
-        std::lock_guard<std::mutex> lock(G.Mutex);
-        WriteDiagnosticEventLocked(json);
-    }
-}
-
-void EmitGameStateMismatchEventLocked(
-    int instanceID,
-    melonDS::u32 frame,
-    const GameStateSyncHashes& local,
-    const GameStateSyncHashes& remote)
-{
-    if (!G.Diagnostics.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16)
-        return;
-    if (local.PlayerGlobal == remote.PlayerGlobal)
-        return;
-    if (!G.DiagnosticsRuntime.ShouldEmitDiagnosticMismatch(instanceID, frame, 300))
-        return;
-
-    G.DiagnosticsRuntime.ScheduleDiagnosticPostTrigger(
-        instanceID, frame + kDiagnosticPostTriggerFrames);
-
-    GameStateSample remoteSample;
-    const GameStateSample* remoteSamplePtr = nullptr;
-    if (const GameStateSample* stored = G.GameSync.RemoteState.FindGameState(instanceID, frame))
-    {
-        remoteSample = *stored;
-        remoteSamplePtr = &remoteSample;
-    }
-
-    const std::optional<DiagnosticFrameSnapshot> latestSnapshot =
-        G.DiagnosticsRuntime.LatestDiagnosticSnapshot(instanceID);
-    const DiagnosticFrameSnapshot* latest = latestSnapshot
-        ? &latestSnapshot.value()
-        : nullptr;
-    WriteDiagnosticEventLocked(Diagnostics::FormatPlayerGlobalMismatchEvent(
-        G.NetRole == Role::Host ? "host" : "client", instanceID, frame, local,
-        remote, latest, remoteSamplePtr, DiagnosticRingWindow(instanceID)));
-}
-
-std::vector<Diagnostics::DiagnosticMovingHazardSnapshot>
-ReadNearbyDiagnosticHazards(melonDS::NDS* nds)
-{
-    const std::vector<ObjectScanSample> actors =
-        FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
-    const std::size_t count = std::min<std::size_t>(
-        actors.size(), kTrackedWorldMovingHazardCount);
-    std::vector<Diagnostics::DiagnosticMovingHazardSnapshot> hazards;
-    hazards.reserve(count);
-    for (std::size_t i = 0; i < count; i++)
-    {
-        Diagnostics::DiagnosticMovingHazardSnapshot hazard;
-        hazard.GUID = actors[i].GUID;
-        hazard.Base = actors[i].Base;
-        hazard.PosX = actors[i].PosX;
-        hazard.PosY = actors[i].PosY;
-        hazard.VelX = actors[i].VelX;
-        hazard.VelY = actors[i].VelY;
-        hazard.StateType = actors[i].StateType;
-        hazard.Flags = actors[i].Flags;
-        hazards.push_back(hazard);
-    }
-    return hazards;
-}
-
-void EmitPlayerLifeEvent(
-    int instanceID,
-    melonDS::u32 frame,
-    int player,
-    const char* reason,
-    const GameStateSample& sample,
-    melonDS::NDS* nds)
-{
-    if (!G.Diagnostics.DiagnosticEventsEnabled || instanceID < 0 || instanceID >= 16 || player < 0 || player > 1)
-        return;
-    const bool transitionOnly = reason && std::strcmp(reason, "death-transition") == 0;
-    if (!G.DiagnosticsRuntime.ShouldEmitDiagnosticLifeEvent(
-            instanceID, player, frame, transitionOnly, 300))
-        return;
-
-    if (!transitionOnly)
-        G.DiagnosticsRuntime.ScheduleDiagnosticPostTrigger(
-            instanceID, frame + kDiagnosticPostTriggerFrames);
-
-    const std::vector<Diagnostics::DiagnosticMovingHazardSnapshot> hazards =
-        ReadNearbyDiagnosticHazards(nds);
-    const std::vector<DiagnosticFrameSnapshot> ring =
-        transitionOnly ? std::vector<DiagnosticFrameSnapshot>{}
-                       : DiagnosticRingWindow(instanceID);
-    const std::string json = Diagnostics::FormatPlayerLifeEvent(
-        G.NetRole == Role::Host ? "host" : "client", reason, instanceID, frame,
-        player, sample, hazards, !transitionOnly, ring);
-
-    std::lock_guard<std::mutex> lock(G.Mutex);
-    WriteDiagnosticEventLocked(json);
 }
 
 int CurrentPacketBridgeLocalPlayer()
@@ -1643,10 +1243,10 @@ void InitFromEnvironment()
     }
 
     G.Ready = true;
-    EmitDiagnosticStartupEvent();
+    GameplayDiagnostics::EmitStartupEvent(GameplayDiagnosticsContext());
     NetplaySession::StartNetworkPumpThreadIfNeeded(
         NetplaySessionContext(), NetplaySessionHooks());
-    StartHangWatchdogIfNeeded();
+    GameplayDiagnostics::StartHangWatchdog(GameplayDiagnosticsContext());
     TraceHangPhase("startup", "enabled", G.Connection.LocalInstance, 0, 0, 0);
     const std::string startupReport = Diagnostics::FormatNetplayStartupReport(
         NowUnixMs(), G.NetRole == Role::Host ? "host" : "client",
@@ -2009,197 +1609,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     return ConvertStockXToTouch(remoteInput);
 }
 
-void TracePlayerLifeChanges(int instanceID, melonDS::u32 frame,
-                            melonDS::NDS *nds) {
-  if ((!G.RuntimePatch.TracePlayerLifeChanges &&
-       !G.Diagnostics.DiagnosticEventsEnabled) ||
-      !nds || !nds->MainRAM)
-    return;
-  if (instanceID < 0 || instanceID >= 16)
-    return;
 
-  Diagnostics::PlayerLifeState current;
-  current.Lives[0] = nds->ARM9Read32(kGamePlayerLivesAddr);
-  current.Lives[1] =
-      nds->ARM9Read32(kGamePlayerLivesAddr + sizeof(melonDS::u32));
-  current.Deaths[0] = nds->ARM9Read32(kGamePlayerDeathsAddr);
-  current.Deaths[1] =
-      nds->ARM9Read32(kGamePlayerDeathsAddr + sizeof(melonDS::u32));
-  current.Dead[0] = nds->ARM9Read8(kGamePlayerDeadAddr);
-  current.Dead[1] = nds->ARM9Read8(kGamePlayerDeadAddr + 1);
-  current.Transition[0] = nds->ARM9Read32(kGamePlayerTransitionStatusAddr);
-  current.Transition[1] =
-      nds->ARM9Read32(kGamePlayerTransitionStatusAddr + sizeof(melonDS::u32));
-  const Diagnostics::PlayerLifeObservation observation =
-      G.DiagnosticsRuntime.ObservePlayerLifeState(instanceID, current);
-  if (!observation.Accepted || !observation.Changed)
-    return;
-
-  const bool valid = observation.HadPrevious;
-  const Diagnostics::PlayerLifeState &last = observation.Previous;
-  const melonDS::u32 player0Lives = current.Lives[0];
-  const melonDS::u32 player1Lives = current.Lives[1];
-  const melonDS::u32 player0Deaths = current.Deaths[0];
-  const melonDS::u32 player1Deaths = current.Deaths[1];
-  const melonDS::u32 player0Dead = current.Dead[0];
-  const melonDS::u32 player1Dead = current.Dead[1];
-  const melonDS::u32 transition0 = current.Transition[0];
-  const melonDS::u32 transition1 = current.Transition[1];
-
-  if (!IsMarioVsLuigiGameplay(nds) && frame < 800)
-    return;
-
-  const GameStateSample sample = ReadGameStateSample(nds);
-  if (G.RuntimePatch.TracePlayerLifeChanges) {
-    std::printf(
-        "NSMB LifeDelta: inst=%d frame=%u lives=%u/%u deaths=%u/%u dead=%u/%u "
-        "trans=%u/%u "
-        "cam={x=%08X/%08X y=%08X/%08X w=%08X/%08X h=%08X/%08X} "
-        "p0={found=%u base=%08X pid11E=%u pid7B4=%u def=%u tring=%u updLock=%u "
-        "vis=%u x=%08X y=%08X vel=%08X/%08X flags=%08X act=%08X sub=%08X "
-        "phy=%08X transFlag=%08X coll=%08X env=%08X linked=%08X "
-        "transitFunc=%08X transitArg=%08X} "
-        "p1={found=%u base=%08X pid11E=%u pid7B4=%u def=%u tring=%u updLock=%u "
-        "vis=%u x=%08X y=%08X vel=%08X/%08X flags=%08X act=%08X sub=%08X "
-        "phy=%08X transFlag=%08X coll=%08X env=%08X linked=%08X "
-        "transitFunc=%08X transitArg=%08X}\n",
-        instanceID, frame, sample.Player0Lives, sample.Player1Lives,
-        sample.Player0Deaths, sample.Player1Deaths, sample.Player0Dead,
-        sample.Player1Dead, sample.PlayerTransitionStatus0,
-        sample.PlayerTransitionStatus1, sample.StageCameraGlobalX0,
-        sample.StageCameraGlobalX1, sample.StageCameraGlobalY0,
-        sample.StageCameraGlobalY1, sample.StageCameraGlobalWidth0,
-        sample.StageCameraGlobalWidth1, sample.StageCameraGlobalHeight0,
-        sample.StageCameraGlobalHeight1, sample.PlayerActor0Found,
-        sample.PlayerActor0Base, sample.PlayerActor0PlayerID,
-        sample.PlayerActor0PlayerBaseID, sample.PlayerActor0DefeatedFlag,
-        sample.PlayerActor0TransitioningFlag, sample.PlayerActor0UpdateLocked,
-        sample.PlayerActor0VisibleFlag, sample.PlayerActor0PosX,
-        sample.PlayerActor0PosY, sample.PlayerActor0VelX,
-        sample.PlayerActor0VelY, sample.PlayerActor0Flags,
-        sample.PlayerActor0ActionFlag, sample.PlayerActor0SubActionFlag,
-        sample.PlayerActor0PhysicsFlag, sample.PlayerActor0TransitionFlag,
-        sample.PlayerActor0CollisionFlag, sample.PlayerActor0EnvironmentFlag,
-        sample.PlayerActor0LinkedActor, sample.PlayerActor0TransitFunc,
-        sample.PlayerActor0TransitArg, sample.PlayerActor1Found,
-        sample.PlayerActor1Base, sample.PlayerActor1PlayerID,
-        sample.PlayerActor1PlayerBaseID, sample.PlayerActor1DefeatedFlag,
-        sample.PlayerActor1TransitioningFlag, sample.PlayerActor1UpdateLocked,
-        sample.PlayerActor1VisibleFlag, sample.PlayerActor1PosX,
-        sample.PlayerActor1PosY, sample.PlayerActor1VelX,
-        sample.PlayerActor1VelY, sample.PlayerActor1Flags,
-        sample.PlayerActor1ActionFlag, sample.PlayerActor1SubActionFlag,
-        sample.PlayerActor1PhysicsFlag, sample.PlayerActor1TransitionFlag,
-        sample.PlayerActor1CollisionFlag, sample.PlayerActor1EnvironmentFlag,
-        sample.PlayerActor1LinkedActor, sample.PlayerActor1TransitFunc,
-        sample.PlayerActor1TransitArg);
-  }
-
-  if (valid) {
-    const bool player0DeathEvent =
-        (sample.PlayerActor0Found != 0 || player0Deaths != 0 ||
-         player0Dead != 0) &&
-        (player0Deaths > last.Deaths[0] || player0Lives < last.Lives[0] ||
-         (player0Dead != last.Dead[0] && player0Dead != 0));
-    const bool player1DeathEvent =
-        (sample.PlayerActor1Found != 0 || player1Deaths != 0 ||
-         player1Dead != 0) &&
-        (player1Deaths > last.Deaths[1] || player1Lives < last.Lives[1] ||
-         (player1Dead != last.Dead[1] && player1Dead != 0));
-    const bool player0TransitionEvent =
-        !player0DeathEvent && transition0 != last.Transition[0] &&
-        (sample.PlayerActor0DefeatedFlag != 0 ||
-         sample.PlayerActor0TransitioningFlag != 0);
-    const bool player1TransitionEvent =
-        !player1DeathEvent && transition1 != last.Transition[1] &&
-        (sample.PlayerActor1DefeatedFlag != 0 ||
-         sample.PlayerActor1TransitioningFlag != 0);
-    if (player0DeathEvent)
-      EmitPlayerLifeEvent(instanceID, frame, 0, "death", sample, nds);
-    else if (player0TransitionEvent)
-      EmitPlayerLifeEvent(instanceID, frame, 0, "death-transition", sample,
-                          nds);
-    if (player1DeathEvent)
-      EmitPlayerLifeEvent(instanceID, frame, 1, "death", sample, nds);
-    else if (player1TransitionEvent)
-      EmitPlayerLifeEvent(instanceID, frame, 1, "death-transition", sample,
-                          nds);
-  }
-}
-
-void TraceGameplayHeartbeatIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
-{
-    if (!nds || !nds->MainRAM ||
-        !G.DiagnosticsRuntime.ShouldTraceGameplayHeartbeat(
-            instanceID,
-            frame,
-            G.Connection.StartFrame,
-            G.Diagnostics.GameplayHeartbeatInterval))
-        return;
-    const GameStateObjectScanCache cache = BuildGameStateObjectScanCache(nds);
-    const ScopedGameStateObjectScanCache scopedCache(cache);
-    const PlayerActorScanSample players = FindPlayerActors(nds);
-    const ObjectLifecycleSummary objects = SummarizeObjectLifecycle(nds);
-    std::printf(
-        "NSMB GameplayHeartbeat: role=%s inst=%d frame=%u "
-        "p0=%u/%08X/%08X/%08X/%08X/%08X "
-        "p1=%u/%08X/%08X/%08X/%08X/%08X "
-        "objects=%u/%u/%u/%u/%u/%u",
-        G.NetRole == Role::Host ? "host" : "client",
-        instanceID,
-        frame,
-        players.Actor0.Found,
-        players.Actor0.PosX,
-        players.Actor0.PosY,
-        players.Actor0.VelX,
-        players.Actor0.VelY,
-        players.Actor0.Flags,
-        players.Actor1.Found,
-        players.Actor1.PosX,
-        players.Actor1.PosY,
-        players.Actor1.VelX,
-        players.Actor1.VelY,
-        players.Actor1.Flags,
-        objects.Total,
-        objects.Active,
-        objects.Dead,
-        objects.NotCreated,
-        objects.SkipUpdate,
-        objects.SkipRender);
-    std::printf(" activeIds=");
-    for (std::size_t i = 0; i < kObjectTraceSlots; i++)
-    {
-        if (i != 0)
-            std::printf(",");
-        std::printf("%03X:%08X", objects.ActiveID[i], objects.ActiveSettings[i]);
-    }
-    const std::vector<ObjectScanSample> hazards =
-        FindActiveObjectsByIDAndSettings(nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
-    std::printf(" hazards=");
-    const std::size_t hazardCount =
-        std::min(hazards.size(), kTrackedWorldMovingHazardCount);
-    for (std::size_t i = 0; i < kTrackedWorldMovingHazardCount; i++)
-    {
-        if (i != 0)
-            std::printf(",");
-        if (i >= hazardCount)
-        {
-            std::printf("-");
-            continue;
-        }
-        const ObjectScanSample& hazard = hazards[i];
-        std::printf(
-            "%u:%08X:%08X:%08X:%u:%08X",
-            hazard.GUID,
-            hazard.PosX,
-            hazard.PosY,
-            hazard.VelX,
-            hazard.StateType,
-            hazard.Flags);
-    }
-    std::printf("\n");
-    std::fflush(stdout);
-}
 
 melonDS::u32 PrepareAfterFrameLogFrame(int instanceID, melonDS::u32 frame)
 {
@@ -2217,7 +1627,8 @@ melonDS::u32 PrepareAfterFrameLogFrame(int instanceID, melonDS::u32 frame)
     if (logFrame >= activeStartFrame)
         G.DiagnosticsRuntime.StartActiveTimer(
             instanceID, logFrame, std::chrono::steady_clock::now());
-    RecordActiveFrameTiming(instanceID, logFrame);
+    GameplayDiagnostics::RecordActiveFrameTiming(
+        GameplayDiagnosticsContext(), instanceID, logFrame);
     const bool heartbeatActive =
         G.DiagnosticsRuntime.IsActiveTimerStarted(instanceID) ||
         logFrame >= activeStartFrame;
@@ -2265,36 +1676,6 @@ void RunAfterFrameRuntimePatchPhase(int instanceID, melonDS::u32 logFrame, melon
         MvlLifecycleContext(), MvlLifecycleHooks(), instanceID, logFrame, nds);
 }
 
-void CaptureScreenshotIfNeeded(int instanceID, melonDS::u32 frame,
-    melonDS::NDS* nds)
-{
-    if (!nds ||
-        !Diagnostics::ShouldCaptureScreenshotFrame(G.Diagnostics, frame))
-        return;
-
-    void* topBuffer = nullptr;
-    void* bottomBuffer = nullptr;
-    Diagnostics::ScreenshotFrame screenshot;
-    screenshot.FramebufferAvailable =
-        nds->GPU.GetFramebuffers(&topBuffer, &bottomBuffer);
-    screenshot.TopBuffer = topBuffer;
-    screenshot.BottomBuffer = bottomBuffer;
-    if (screenshot.FramebufferAvailable && topBuffer && bottomBuffer)
-    {
-        screenshot.DisplayControlA = nds->ARM9Read32(0x04000000);
-        screenshot.DisplayControlB = nds->ARM9Read32(0x04001000);
-        screenshot.DisplayStatus = nds->ARM9Read16(0x04000004);
-        screenshot.PowerControl = nds->ARM9Read16(0x04000304);
-        screenshot.BlendControlA = nds->ARM9Read16(0x04000050);
-        screenshot.BlendY_A = nds->ARM9Read16(0x04000054);
-        screenshot.BlendControlB = nds->ARM9Read16(0x04001050);
-        screenshot.BlendY_B = nds->ARM9Read16(0x04001054);
-        screenshot.NetState = nds->ARM9Read8(0x02088804);
-        screenshot.NetFlags = nds->ARM9Read16(0x0208883C);
-    }
-    Diagnostics::CaptureScreenshot(
-        G.Diagnostics, instanceID, frame, screenshot);
-}
 
 void SaveAfterFrameArtifacts(int instanceID, melonDS::u32 logFrame, melonDS::NDS* nds)
 {
@@ -2302,7 +1683,8 @@ void SaveAfterFrameArtifacts(int instanceID, melonDS::u32 logFrame, melonDS::NDS
         G.Harness, G.Bootstrap, G.Coordinator, G.Mutex};
     TestStateHarness::SaveState(stateHarness, instanceID, logFrame, nds);
     TestStateHarness::SaveLocalMPState(stateHarness, logFrame);
-    CaptureScreenshotIfNeeded(instanceID, logFrame, nds);
+    GameplayDiagnostics::CaptureScreenshotIfNeeded(
+        GameplayDiagnosticsContext(), instanceID, logFrame, nds);
     Diagnostics::CaptureRamDumpIfNeeded(
         G.Diagnostics, G.RamDumpRanges, instanceID, logFrame,
         nds ? nds->MainRAM : nullptr,
@@ -2326,7 +1708,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     TraceHangPhase("begin", "gameplay-heartbeat", instanceID, logFrame, logFrame, logFrame);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        TraceGameplayHeartbeatIfNeeded(instanceID, logFrame, nds);
+        GameplayDiagnostics::TraceGameplayHeartbeatIfNeeded(
+            GameplayDiagnosticsContext(), instanceID, logFrame, nds);
 
     TraceHangPhase("begin", "after-frame-barriers", instanceID, logFrame, logFrame, logFrame);
     WaitAtFrameBarrier(Coordination::FrameBarrierKind::After, instanceID, logFrame, "after");
@@ -2346,12 +1729,15 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
 
     TraceHangPhase("begin", "life-trace", instanceID, logFrame, logFrame, logFrame);
     if (CanRunFrameHooks(instanceID, nds))
-        TracePlayerLifeChanges(instanceID, logFrame, nds);
+        GameplayDiagnostics::TracePlayerLifeChanges(
+            GameplayDiagnosticsContext(), GameplayDiagnosticsHooks(),
+            instanceID, logFrame, nds);
     const auto afterLifeTrace = std::chrono::steady_clock::now();
 
     TraceHangPhase("begin", "diagnostic-snapshot", instanceID, logFrame, logFrame, logFrame);
     if (CanRunFrameHooks(instanceID, nds))
-        RecordDiagnosticSnapshotIfNeeded(instanceID, logFrame, nds);
+        GameplayDiagnostics::RecordSnapshotIfNeeded(
+            GameplayDiagnosticsContext(), instanceID, logFrame, nds);
     const auto afterDiagnosticSnapshot = std::chrono::steady_clock::now();
 
     TraceHangPhase("begin", "rollback-trace", instanceID, logFrame, logFrame, logFrame);
@@ -2518,7 +1904,7 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
 
 void Shutdown()
 {
-    StopDiagnostics();
+    GameplayDiagnostics::Stop(GameplayDiagnosticsContext());
     NetplaySession::StopNetworkPumpThread(NetplaySessionContext());
 
     G.InputRecorder.Close();
