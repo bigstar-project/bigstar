@@ -72,59 +72,19 @@ namespace NsmbNetplayPoC
 namespace
 {
 
-using WireProtocol::WireGameState;
-using WireProtocol::kWireKindState;
-using GameStateModel::AITerrainDerivedSummary;
-using GameStateModel::AITileGridSample;
-using GameStateModel::AITileProbeSample;
-using GameStateModel::AIPlayerTileProbeSample;
 using GameStateModel::GameStateHashMismatch;
 using GameStateModel::GameStateSample;
-using GameStateModel::GameStateTraceHashes;
 using GameStateModel::GameStateTraceWriter;
-using GameStateModel::ComputeBasicGameStateHash;
-using GameStateModel::DecodedGameState;
-using GameStateModel::DecodeWireGameState;
-using GameStateModel::EncodeWireGameState;
 using GameStateModel::StateSyncRuntime;
-using GameStateModel::PlayerCollisionMgrSample;
-using GameStateModel::PlayerHitboxSample;
-using GameStateModel::kAITileGridCount;
-using GameStateModel::kAITileGridHeight;
-using GameStateModel::kAITileGridMinRelX;
-using GameStateModel::kAITileGridMinRelY;
-using GameStateModel::kAITileGridWidth;
-using GameStateModel::kAITileProbeCount;
-using GameStateModel::kAIFireballSlotCount;
-using GameStateModel::kAIFireballSlotDebugWordCount;
-using GameStateModel::kAIFireballSlotStateByteCount;
-using GameStateModel::kAISpecialHandlerWordCount;
-using GameStateReader::ObjectPairScanSample;
 using GameStateReader::ObjectScanSample;
 using GameStateReader::PlayerActorScanSample;
-using GameStateReader::ObjectLifecycleSummary;
 using GameStateReader::GameStateObjectScanCache;
-using GameStateReader::GameStateObjectScanEntry;
-using GameStateReader::ScopedGameStateObjectScanCache;
 using GameStateReader::BuildGameStateObjectScanCache;
-using GameStateReader::FindActiveObjectsByIDAndSettings;
-using GameStateReader::FindCachedObjectBaseByID;
-using GameStateReader::FindNewestActiveObjectByIDAndSettings;
 using GameStateReader::FindObjectByID;
-using GameStateReader::FindObjectBaseByID;
-using GameStateReader::FindObjectByIDAndSettings;
 using GameStateReader::FindObjectByIDAndSettingsLoose;
-using GameStateReader::FindObjectPairByIDSortedX;
 using GameStateReader::FindPlayerActors;
-using GameStateReader::FindVsBattleStarCandidate;
-using GameStateReader::HasActiveObjectScanCache;
 using GameStateReader::HashFramebuffers;
 using GameStateReader::HashNDS;
-using GameStateReader::ReadObjectByBase;
-using GameStateReader::ReadAIPlayerTileProbeSample;
-using GameStateReader::ReadPlayerCollisionMgrSample;
-using GameStateReader::ReadPlayerHitboxSample;
-using GameStateReader::SummarizeObjectLifecycle;
 constexpr melonDS::u32 kNoFrameLimit = 0;
 constexpr melonDS::u32 kGameStageGroupAddr = 0x02085A18;
 constexpr melonDS::u32 kGameVsModeAddr = 0x02085A84;
@@ -138,62 +98,9 @@ unsigned long long NowUnixMs()
 constexpr melonDS::u32 kInputKeyXMask = 1u << 10;
 constexpr melonDS::u16 kMvlStockItemTouchX = 217;
 constexpr melonDS::u16 kMvlStockItemTouchY = 153;
-constexpr melonDS::u16 kPlayerObjectID = 0x0015;
-constexpr melonDS::u16 kVsBattleStarActorObjectID = 0x0022;
-constexpr melonDS::u32 kVsBattleStarActorSettings = 0x00000001;
-constexpr melonDS::u16 kVsBattleStarRelatedObjectID = 0x0021;
-constexpr melonDS::u16 kVsBattleStarCandidateObjectID = 0x010C;
-constexpr melonDS::u16 kVsMovingHazardObjectID = 0x0053;
-constexpr melonDS::u32 kVsMovingHazardSettings = 0x00000000;
-constexpr melonDS::u16 kVsKoopaTroopaObjectID = 0x005E;
-constexpr melonDS::u16 kVsWorldItemObjectID = 0x001F;
-constexpr melonDS::u32 kVsNeutralWorldItemSettings = 0x00080000;
-constexpr melonDS::u32 kVsWorldItemSettings = 0x00080002;
-constexpr melonDS::u32 kVsDroppedStarItemSettings = 0x00090002;
-constexpr melonDS::u32 kFireballsHandlerAddr = 0x02129484;
-constexpr melonDS::u32 kProjectilesHandlerAddr = 0x0212A680;
-
-bool IsVsDroppedStarActorSettings(melonDS::u32 settings)
-{
-    const melonDS::u32 normalized = settings & 0x7FFFFFFFu;
-    return normalized == 0x00001002u ||
-        normalized == 0x00001012u ||
-        normalized == 0x00001102u ||
-        normalized == 0x00001112u;
-}
-constexpr melonDS::u32 kAIFireballSlotActiveOffset = 0x80;
-// Fireball::create stores the spawn kind at +0x81. For player fireballs, kind 0/1 is the owner player id.
-constexpr melonDS::u32 kAIFireballSlotDebugWordOffset = 0x40;
 constexpr melonDS::u16 kStageSceneObjectID = 0x0003;
 constexpr melonDS::u32 kMvlStageSceneDefaultSettings = 0x00B4FF00;
-constexpr melonDS::u16 kStageFXObjectID = 0x0012;
-constexpr melonDS::u16 kStageActorManagerObjectID = 0x012F;
 constexpr melonDS::u16 kStageControllerObjectID = 0x0130;
-constexpr melonDS::u16 kMvlObject267ID = 0x010B;
-constexpr melonDS::u16 kVsConnectObjectID = 0x0006;
-constexpr melonDS::u16 kCourseSelectObjectID = 0x0005;
-constexpr melonDS::u16 kStageCameraObjectID = 0x013C;
-constexpr melonDS::u16 kStageLayoutObjectID = 0x0145;
-constexpr melonDS::u16 kCoinObjectID = 0x0042;
-constexpr melonDS::u16 kGoombaObjectID = 0x0053;
-constexpr melonDS::u16 kGoombaBigObjectID = 0x0054;
-constexpr melonDS::u16 kGoombaMegaObjectID = 0x0055;
-constexpr melonDS::u16 kKoopaTroopaAltObjectID = 0x005F;
-constexpr melonDS::u16 kWarpEntranceObjectID = 0x0057;
-constexpr melonDS::u16 kDonutLiftObjectID = 0x0047;
-constexpr melonDS::u16 kTrampolineObjectID = 0x00ED;
-constexpr melonDS::u16 kSpinBlockObjectID = 0x00FE;
-constexpr melonDS::u16 kSpinBlockAltObjectID = 0x00FF;
-constexpr melonDS::u16 kSpinBlockFinalObjectID = 0x0100;
-constexpr melonDS::u16 kBulletBillObjectID = 0x001B;
-constexpr melonDS::u16 kBulletBillAltObjectID = 0x00EE;
-constexpr melonDS::u16 kBulletBillBlasterObjectID = 0x00F8;
-constexpr melonDS::u16 kBulletBillBlasterAltObjectID = 0x00F9;
-constexpr melonDS::u16 kThwompObjectID = 0x0025;
-constexpr melonDS::u16 kThwompAltObjectID = 0x0026;
-constexpr melonDS::u16 kFirebarObjectID = 0x0041;
-constexpr melonDS::u16 kBobOmbObjectID = 0x0023;
-constexpr melonDS::u16 kItemSpawnEffectObjectID = 0x00F0;
 bool IsMarioVsLuigiGameplay(melonDS::NDS* nds)
 {
     if (!nds) return false;
@@ -206,22 +113,6 @@ enum class Role
     Host,
     Client,
 };
-
-AITerrainDerivedSummary DeriveAITerrainSummaryFromGrid(
-    const AIPlayerTileProbeSample& probe,
-    bool contactGround,
-    bool contactWallLeft,
-    bool contactWallRight);
-
-bool AITerrainTargetHasFloorBelow(
-    const AIPlayerTileProbeSample& probe,
-    melonDS::u32 selfX,
-    melonDS::u32 selfY,
-    melonDS::u32 targetX,
-    melonDS::u32 targetY);
-
-const char* AIObjectCategory(melonDS::u16 objectID, melonDS::u32 settings);
-
 
 GameStateSample ReadGameStateSample(melonDS::NDS* nds);
 using Diagnostics::BeforeHookPhaseTrace;
@@ -407,6 +298,29 @@ const GameplayDiagnostics::Hooks& GameplayDiagnosticsHooks()
     return hooks;
 }
 
+AIObservation::Context AIObservationContext()
+{
+    return {
+        G.AI,
+        G.Diagnostics,
+        G.ImitationAI,
+        G.AIObservationRuntime,
+        G.NetRole == Role::Host
+            ? AIObservation::Role::Host
+            : AIObservation::Role::Client,
+        CurrentPacketBridgeLocalPlayer(),
+    };
+}
+
+const AIObservation::Hooks& AIObservationHooks()
+{
+    static const AIObservation::Hooks hooks {
+        [](melonDS::NDS* nds) { return ReadGameStateSample(nds); },
+        [](melonDS::NDS* nds) { return IsMarioVsLuigiGameplay(nds); },
+    };
+    return hooks;
+}
+
 void TraceHangPhase(const char* event, const char* phase, int instanceID = -1,
     melonDS::u32 frame = 0, melonDS::u32 logicalFrame = 0, melonDS::u32 sendFrame = 0);
 
@@ -543,24 +457,6 @@ bool RuleAIProvidesInputForPlayer(int player)
         CurrentPacketBridgeLocalPlayer());
 }
 
-bool ImitationAIProvidesInputForPlayer(int player)
-{
-    if (!G.ImitationAI.IsEnabled() || !G.ImitationAI.HasModel())
-        return false;
-    if (G.AI.Imitation.HostOnly && G.NetRole != Role::Host)
-        return false;
-    if (G.AI.Imitation.ClientOnly && G.NetRole != Role::Client)
-        return false;
-
-    NsmbRuleAI::Config config {};
-    config.Enabled = true;
-    config.PlayerSpec = G.AI.Imitation.PlayerSpec;
-    return NsmbRuleAI::ControlsPlayer(
-        config,
-        player,
-        CurrentPacketBridgeLocalPlayer());
-}
-
 void RecordAIPlayLogAppliedInput(int instanceID, melonDS::u32 frame, int player, const InputState& input)
 {
     G.AIObservationRuntime.RecordAppliedInput(instanceID, frame, player, input);
@@ -589,9 +485,9 @@ InputState ApplyRuleBasedAIInput(
     const GameStateSample sample = ReadGameStateSample(nds);
     const GameStateObjectScanCache objectScanCache = BuildGameStateObjectScanCache(nds);
     NsmbRuleAI::FrameStateServices frameStateServices {};
-    frameStateServices.ObjectCategory = AIObjectCategory;
-    frameStateServices.DeriveTerrainSummary = DeriveAITerrainSummaryFromGrid;
-    frameStateServices.TargetHasFloorBelow = AITerrainTargetHasFloorBelow;
+    frameStateServices.ObjectCategory = AIObservation::ObjectCategory;
+    frameStateServices.DeriveTerrainSummary = AIObservation::DeriveTerrainSummary;
+    frameStateServices.TargetHasFloorBelow = AIObservation::TargetHasFloorBelow;
     return NsmbRuleAI::DecideInput(
         config,
         NsmbRuleAI::BuildFrameState(
@@ -740,13 +636,6 @@ int CurrentPacketBridgeLocalPlayer()
     return 0;
 }
 
-InputState ApplyImitationAIInput(
-    int instanceID,
-    melonDS::u32 frame,
-    melonDS::NDS* nds,
-    int player,
-    const InputState& fallback);
-
 const PacketBridge::IntegrationHooks& PacketBridgeHooks()
 {
     static const PacketBridge::IntegrationHooks hooks {
@@ -763,7 +652,8 @@ const PacketBridge::IntegrationHooks& PacketBridgeHooks()
             const InputState& input) {
             const InputState ruleInput =
                 ApplyRuleBasedAIInput(instanceID, frame, nds, player, input);
-            return ApplyImitationAIInput(
+            return AIObservation::ApplyImitationInput(
+                AIObservationContext(), AIObservationHooks(),
                 instanceID, frame, nds, player, ruleInput);
         },
         [](int instanceID,
@@ -875,7 +765,8 @@ void WritePacketBridgeJitScratchIfNeeded(
     const int localPlayer = CurrentPacketBridgeLocalPlayer();
     if (G.Input.NetplayOnly && G.Harness.WaitForPeerBeforeStart && G.Connection.StartFrame > 0
         && !RuleAIProvidesInputForPlayer(localPlayer ^ 1)
-        && !ImitationAIProvidesInputForPlayer(localPlayer ^ 1))
+        && !AIObservation::ProvidesImitationInput(
+            AIObservationContext(), localPlayer ^ 1))
     {
         const melonDS::u32 delay = static_cast<melonDS::u32>(std::max(0, G.Connection.Delay));
         const melonDS::u32 sendStartFrame = (G.Connection.StartFrame > delay)
@@ -953,7 +844,8 @@ void WritePacketBridgeJitScratchIfNeeded(
 
         const bool aiProvidesRemoteInput =
             RuleAIProvidesInputForPlayer(localPlayer ^ 1) ||
-            ImitationAIProvidesInputForPlayer(localPlayer ^ 1);
+            AIObservation::ProvidesImitationInput(
+                AIObservationContext(), localPlayer ^ 1);
         if (!hasRemoteInput
             && !G.Rollback.Enabled
             && G.Connection.LocalWaitsForRemote
@@ -1040,23 +932,6 @@ GameStateSample ReadGameStateSample(melonDS::NDS* nds)
 {
     return GameStateSync::ReadSample(nds, G.MvlCurrentStageSceneSettings);
 }
-void WriteJsonHex(std::ostream& out, melonDS::u32 value, int width = 8)
-{
-    const std::ios::fmtflags flags = out.flags();
-    const char fill = out.fill();
-    out << "\"0x" << std::uppercase << std::hex << std::setw(width) << std::setfill('0') << value << "\"";
-    out.flags(flags);
-    out.fill(fill);
-}
-
-std::int32_t SignedU32(melonDS::u32 value)
-{
-    return static_cast<std::int32_t>(value);
-}
-
-#include "NsmbAiObservation.cpp"
-
-
 }
 
 bool IsEnabled()
@@ -1328,7 +1203,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if (G.Enabled && G.Input.NetplayOnly && G.Harness.WaitForPeerBeforeStart && inputFrame == 0
         && !RuleAIProvidesInputForPlayer(CurrentPacketBridgeLocalPlayer() ^ 1)
-        && !ImitationAIProvidesInputForPlayer(CurrentPacketBridgeLocalPlayer() ^ 1))
+        && !AIObservation::ProvidesImitationInput(
+            AIObservationContext(), CurrentPacketBridgeLocalPlayer() ^ 1))
     {
         if (!G.Harness.WaitForPeerAtNetplayStart)
             NetplaySession::WaitForPeer(
@@ -1409,12 +1285,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             CurrentPacketBridgeLocalPlayer(),
             testInput);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
-        testInput = ApplyImitationAIInput(
-            instanceID,
-            inputFrame,
-            nds,
-            CurrentPacketBridgeLocalPlayer(),
-            testInput);
+        testInput = AIObservation::ApplyImitationInput(
+            AIObservationContext(), AIObservationHooks(), instanceID,
+            inputFrame, nds, CurrentPacketBridgeLocalPlayer(), testInput);
     RecordAIPlayLogAppliedInput(
         instanceID,
         inputFrame,
@@ -1758,7 +1631,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     const auto afterWorldTrace = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "game-state-trace", instanceID, logFrame, logFrame, logFrame);
     GameStateSync::Trace(GameStateSyncContext(), instanceID, logFrame, nds);
-    TraceAIPlayLog(instanceID, logFrame, nds);
+    AIObservation::TracePlayLog(
+        AIObservationContext(), AIObservationHooks(), instanceID, logFrame, nds);
     const auto afterTrace = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "sync-game", instanceID, logFrame, logFrame, logFrame);
     GameStateSync::Sync(

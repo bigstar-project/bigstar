@@ -10,7 +10,16 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <string>
+
+namespace melonDS {
+class NDS;
+}
+
+namespace NsmbImitationAI {
+class Runtime;
+}
 
 namespace NsmbNetplayPoC::AIObservation {
 
@@ -72,7 +81,8 @@ public:
                     config.AIPlayLogPath.c_str());
       } else {
         std::printf(
-            "NSMB AIPlayLog: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d gameplayOnly=%d\n",
+            "NSMB AIPlayLog: enabled path=%s interval=%d flushInterval=%d "
+            "start=%u end=%u maxObjects=%d gameplayOnly=%d\n",
             config.AIPlayLogPath.c_str(), config.AIPlayLogInterval,
             config.AIPlayLogFlushInterval, config.AIPlayLogStartFrame,
             config.AIPlayLogEndFrame, config.AIPlayLogMaxObjects,
@@ -84,13 +94,15 @@ public:
         std::printf("NSMB AIObservationV2: failed to open path=%s\n",
                     config.AIObservationV2Path.c_str());
       } else {
-        std::printf(
-            "NSMB AIObservationV2: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d stageFilter=%d gameplayOnly=%d\n",
-            config.AIObservationV2Path.c_str(), config.AIPlayLogInterval,
-            config.AIPlayLogFlushInterval, config.AIPlayLogStartFrame,
-            config.AIPlayLogEndFrame, config.AIPlayLogMaxObjects,
-            config.AIObservationV2StageFilter,
-            config.AIPlayLogGameplayOnly ? 1 : 0);
+        std::printf("NSMB AIObservationV2: enabled path=%s interval=%d "
+                    "flushInterval=%d start=%u end=%u maxObjects=%d "
+                    "stageFilter=%d gameplayOnly=%d\n",
+                    config.AIObservationV2Path.c_str(),
+                    config.AIPlayLogInterval, config.AIPlayLogFlushInterval,
+                    config.AIPlayLogStartFrame, config.AIPlayLogEndFrame,
+                    config.AIPlayLogMaxObjects,
+                    config.AIObservationV2StageFilter,
+                    config.AIPlayLogGameplayOnly ? 1 : 0);
       }
     }
     if (!config.AIObservationV3Path.empty()) {
@@ -98,13 +110,15 @@ public:
         std::printf("NSMB AIObservationV3: failed to open path=%s\n",
                     config.AIObservationV3Path.c_str());
       } else {
-        std::printf(
-            "NSMB AIObservationV3: enabled path=%s interval=%d flushInterval=%d start=%u end=%u maxObjects=%d stageFilter=%d gameplayOnly=%d\n",
-            config.AIObservationV3Path.c_str(), config.AIPlayLogInterval,
-            config.AIPlayLogFlushInterval, config.AIPlayLogStartFrame,
-            config.AIPlayLogEndFrame, config.AIPlayLogMaxObjects,
-            config.AIObservationV3StageFilter,
-            config.AIPlayLogGameplayOnly ? 1 : 0);
+        std::printf("NSMB AIObservationV3: enabled path=%s interval=%d "
+                    "flushInterval=%d start=%u end=%u maxObjects=%d "
+                    "stageFilter=%d gameplayOnly=%d\n",
+                    config.AIObservationV3Path.c_str(),
+                    config.AIPlayLogInterval, config.AIPlayLogFlushInterval,
+                    config.AIPlayLogStartFrame, config.AIPlayLogEndFrame,
+                    config.AIPlayLogMaxObjects,
+                    config.AIObservationV3StageFilter,
+                    config.AIPlayLogGameplayOnly ? 1 : 0);
       }
     }
   }
@@ -214,10 +228,44 @@ private:
   std::array<std::array<AppliedInputRecord, 2>, 16> AppliedInputs{};
   std::array<std::array<bool, 2>, 16> AppliedInputValid{};
   std::array<melonDS::u32, 16> FireballHandler{};
-  std::array<std::array<FireballOwnerRecord,
-                        GameStateModel::kAIFireballSlotCount>,
-             16>
+  std::array<
+      std::array<FireballOwnerRecord, GameStateModel::kAIFireballSlotCount>, 16>
       FireballOwners{};
 };
+
+enum class Role {
+  Host,
+  Client,
+};
+
+struct Context {
+  const Config::AIConfig &AI;
+  const Config::DiagnosticsConfig &Diagnostics;
+  NsmbImitationAI::Runtime &ImitationAI;
+  Runtime &AIObservationRuntime;
+  Role NetRole = Role::Host;
+  int LocalPlayer = 0;
+};
+
+struct Hooks {
+  std::function<GameStateModel::GameStateSample(melonDS::NDS *)> ReadGameState;
+  std::function<bool(melonDS::NDS *)> IsGameplay;
+};
+
+const char *ObjectCategory(melonDS::u16 objectID, melonDS::u32 settings);
+GameStateModel::AITerrainDerivedSummary
+DeriveTerrainSummary(const GameStateModel::AIPlayerTileProbeSample &probe,
+                     bool contactGround, bool contactWallLeft,
+                     bool contactWallRight);
+bool TargetHasFloorBelow(const GameStateModel::AIPlayerTileProbeSample &probe,
+                         melonDS::u32 selfX, melonDS::u32 selfY,
+                         melonDS::u32 targetX, melonDS::u32 targetY);
+bool ProvidesImitationInput(const Context &context, int player);
+InputState ApplyImitationInput(Context context, const Hooks &hooks,
+                               int instanceID, melonDS::u32 frame,
+                               melonDS::NDS *nds, int player,
+                               const InputState &fallback);
+void TracePlayLog(Context context, const Hooks &hooks, int instanceID,
+                  melonDS::u32 frame, melonDS::NDS *nds);
 
 } // namespace NsmbNetplayPoC::AIObservation

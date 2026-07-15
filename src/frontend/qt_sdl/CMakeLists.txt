@@ -113,8 +113,6 @@ set(SOURCES_QT_SDL
     NetplayDialog.cpp
 )
 
-set_source_files_properties(NsmbAiObservation.cpp PROPERTIES HEADER_FILE_ONLY ON)
-
 option(USE_QT6 "Use Qt 6 instead of Qt 5" ON)
 
 if (USE_QT6)
