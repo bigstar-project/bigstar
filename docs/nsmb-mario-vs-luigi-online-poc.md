@@ -1009,6 +1009,15 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 こちらの確認:
 
+- 2026-07-17 stage 2・software renderer・1PC 2process再調査:
+  - GUI実行と同じhost/client ROM、match seed `0xACED4A23`、stage 2を固定できるよう、専用ベンチへ `Exe` / `HostRom` / `ClientRom` / `MvlStage` / `MvlMatchSeed` / process・thread priority/affinity指定を追加した。`-PerformanceLog` はpeer別JSONL、`-SystemTelemetry` はCPU/DPC/割り込み/実クロックをCSVへ保存する。
+  - コントローラーを開く処理そのものは `input_ms=0.004-0.019ms/frame` で、57fps級低下の直接原因ではなかった。ただし8kHz USB入力がOSのDPC/interruptを増やす可能性は残るため、実機で1kHz/8kHzの同条件A/Bは継続する。計測回では平均約3.7万interrupt/s、約8千DPC/s、最大約7.1万interrupt/sだった。
+  - stage 2のsoftware 3D rasterizerは平均`0.2-0.5ms/frame`、2D合成と3D scanline待ちを含むsoftware GPU全体も約`1.1ms/frame`だった。キラー等の敵ポリゴン描画は、`RunFrame=14-16ms`の主因ではない。大半はARM9/ARM7 JITと周辺機器を実行する単一emulation threadである。
+  - process priority変更、process affinity分割、単一threaded renderer、描画転送停止、emulation threadのhard affinityは、改善なしまたはコア個体差で悪化した。固定frame limiterのhybrid sleepも59.97fpsから59.64fpsへ悪化したため不採用。
+  - Windows上でinput-netplay emulation threadだけを`THREAD_PRIORITY_HIGHEST`へ上げると、6000-frame比較で平均`RunFrame`はhost `14.59 -> 13.59ms`、client `14.29 -> 13.49ms`へ短縮した。active FPSはhost/client `59.97/59.96fps`、120-frame窓の最低値は`59.35fps`で、通常priorityの最低`58.95fps`より改善した。これはreal-time priorityではなく、通常priority class内の最高値である。
+  - `MELONDS_NSML_INPUT_NETPLAY_ONLY=1` のWindows起動だけ上記thread priorityを自動適用する。通常のmelonDS起動には適用しない。`MELONDS_NSML_EMU_THREAD_PRIORITY=normal|abovenormal|highest` で診断上書きできる。
+  - stage 2固有負荷を確認するため、同じROM/seed、normal thread priority、frame `960-1919`完全無操作で`stage 2 -> 0 -> 3 -> 4 -> 1 -> 2`の順に比較した。両peer平均`RunFrame`はstage 0=`14.31ms`、1=`14.32ms`、2初回=`14.08ms`、2再測定=`14.06ms`、3=`13.59ms`、4=`15.30ms`だった。stage 2は再測定でも同値で、固有に最も重いstageではない。software GPU時間もstage 2=`1.10ms`、stage 4=`1.09ms`であり、stage 4の差は描画ではなくemulated CPU/JIT側だった。以前stage 2で見えた57-59fps区間は、その時点のscheduler/外部負荷、またはカメラ位置によりactive actor/game logicが異なる実ゲーム状態との複合と判断する。
+  - 現在のblockerはなし。次の実機確認は、GUI配布用melonDSをこの変更込みでbuildし、stage 2無操作を含む数分間を1kHz/8kHzで各1回以上測ること。8kHzだけ低下する場合は、同時収集CSVのDPC/interrupt差からUSB driver側を追加調査する。
 - 2026-05-30 software renderer追加調査:
   - 根本原因の一つは Windows clang Release build cache の `CMAKE_C_FLAGS_RELEASE` / `CMAKE_CXX_FLAGS_RELEASE` が空で、software renderer が実質的に最適化なしでビルドされていたこと。重いMvL gameplay中に `RunFrame()` が16.67msを超え、50-55fps級の低下につながっていた。
   - `cmake/DefaultBuildFlags.cmake` と `CMakeLists.txt` で Windows clang Release に `-O3 -DNDEBUG` を明示し、既存buildも同フラグで再configure/rebuild済み。
@@ -1040,8 +1049,8 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
 
 結論:
 
-- melonDS本体、フォーク全体、通常LocalMPが52fps程度に落ちているわけではない。
-- 以前の52fps問題は、Release最適化フラグ欠落、手動起動scriptの表示設定、1PC 2プロセスのscheduler競合が主因。
+- melonDS本体、フォーク全体、通常LocalMPが恒常的に52fps程度へ落ちているわけではない。
+- 以前の52fps問題はRelease最適化フラグ欠落と手動起動scriptの表示設定が主因だった。2026-07-17に再現したstage 2の間欠的57-59fpsは、1PC 2processで長いemulation threadがGUI/背景処理にpreemptされる影響が主で、input-netplay時のthread priority調整で改善した。
 - `scripts/run-nsmb-mvl-manual-peer.ps1` は、デフォルトを滑らかさ優先に変更した:
   - `SwapBuffersInterval=1`
   - frame limit有効

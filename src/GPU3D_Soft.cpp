@@ -19,6 +19,8 @@
 #include "GPU3D_Soft.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
 #include <stdio.h>
 #include <string.h>
 #include "NDS.h"
@@ -1773,6 +1775,13 @@ void SoftRenderer3D::RestartFrame()
 
 void SoftRenderer3D::RenderThreadFunc()
 {
+    static const bool nsmlPerfEnabled = std::getenv("MELONDS_NSML_SOFT3D_PERF") != nullptr;
+    u64 nsmlPerfFrames = 0;
+    u64 nsmlPerfIdenticalFrames = 0;
+    u64 nsmlPerfTotalUs = 0;
+    u64 nsmlPerfMaxUs = 0;
+    u64 nsmlPerfTotalPolygons = 0;
+
     for (;;)
     {
         // Wait for a notice from the main thread to start rendering (or to stop entirely).
@@ -1786,6 +1795,11 @@ void SoftRenderer3D::RenderThreadFunc()
         // the ensuing race conditions may cause a crash
         // (since some of the GPU state includes pointers).
         RenderThreadRendering = true;
+        const auto nsmlPerfStart = nsmlPerfEnabled
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
+        const bool nsmlPerfFrameIdentical = FrameIdentical;
+        const int nsmlPerfPolygons = GPU3D.RenderNumPolygons;
         if (FrameIdentical)
         { // If no rendering is needed, just say we're done.
             Platform::Semaphore_Post(Sema_ScanlineCount, 192);
@@ -1801,6 +1815,32 @@ void SoftRenderer3D::RenderThreadFunc()
         Platform::Semaphore_Post(Sema_RenderDone);
 
         RenderThreadRendering = false;
+
+        if (nsmlPerfEnabled)
+        {
+            const auto elapsedUs = static_cast<u64>(std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - nsmlPerfStart).count());
+            nsmlPerfFrames++;
+            nsmlPerfIdenticalFrames += nsmlPerfFrameIdentical ? 1 : 0;
+            nsmlPerfTotalUs += elapsedUs;
+            nsmlPerfMaxUs = std::max(nsmlPerfMaxUs, elapsedUs);
+            nsmlPerfTotalPolygons += static_cast<u64>(std::max(0, nsmlPerfPolygons));
+            if (nsmlPerfFrames == 120)
+            {
+                std::printf(
+                    "NSMB Soft3DPerf: avgMs=%.3f maxMs=%.3f avgPolygons=%.1f identicalFrames=%llu\n",
+                    static_cast<double>(nsmlPerfTotalUs) / (120.0 * 1000.0),
+                    static_cast<double>(nsmlPerfMaxUs) / 1000.0,
+                    static_cast<double>(nsmlPerfTotalPolygons) / 120.0,
+                    static_cast<unsigned long long>(nsmlPerfIdenticalFrames));
+                std::fflush(stdout);
+                nsmlPerfFrames = 0;
+                nsmlPerfIdenticalFrames = 0;
+                nsmlPerfTotalUs = 0;
+                nsmlPerfMaxUs = 0;
+                nsmlPerfTotalPolygons = 0;
+            }
+        }
     }
 }
 

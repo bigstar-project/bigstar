@@ -82,6 +82,7 @@ param(
     [switch]$RollbackResimulate,
     [switch]$RollbackRestoreProbe,
     [string]$ProcessPriority = "AboveNormal",
+    [UInt64]$ProcessAffinityMask = 0,
     [switch]$PacketBridge,
     [switch]$PacketBridgeAllowJit,
     [switch]$PacketBridgeAllowPreGame,
@@ -1760,6 +1761,13 @@ function Start-MelonLANProcess {
             $process.PriorityClass = $ProcessPriority
         } catch {
             Write-Warning "Failed to set melonDS process priority to ${ProcessPriority}: $($_.Exception.Message)"
+        }
+    }
+    if ($ProcessAffinityMask -ne 0) {
+        try {
+            $process.ProcessorAffinity = [IntPtr][Int64]$ProcessAffinityMask
+        } catch {
+            Write-Warning "Failed to set melonDS process affinity to 0x$($ProcessAffinityMask.ToString('X')): $($_.Exception.Message)"
         }
     }
     return [pscustomobject]@{

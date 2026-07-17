@@ -3,10 +3,25 @@ param(
     [int]$InputMaxFrameLead = 4,
     [int]$InputSendDelayFrames = 0,
     [int]$InputSendJitterFrames = 0,
+    [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
+    [string]$HostRom = "",
+    [string]$ClientRom = "",
     [string]$InputScript = "tests\nsmb_us_direct_mvl_both_different.inputs",
     [string]$LogDir = "logs\nsmb-mvl-software-fps-benchmark",
+    [ValidateRange(0, 4)] [int]$MvlStage = 2,
+    [string]$MvlMatchSeed = "",
+    [ValidateSet("Normal", "AboveNormal", "High")]
+    [string]$ProcessPriority = "AboveNormal",
+    [UInt64]$HostProcessAffinityMask = 0,
+    [UInt64]$ClientProcessAffinityMask = 0,
+    [UInt64]$HostEmulationThreadAffinityMask = 0,
+    [UInt64]$ClientEmulationThreadAffinityMask = 0,
+    [ValidateSet("Auto", "Normal", "AboveNormal", "Highest")]
+    [string]$EmulationThreadPriority = "Auto",
     [switch]$Visible,
     [switch]$PerfBreakdown,
+    [switch]$PerformanceLog,
+    [switch]$SystemTelemetry,
     [switch]$NoJit
 )
 
@@ -63,11 +78,18 @@ try {
             "-File", $peerScript,
             "-Role", "host",
             "-SoftwareRenderer",
+            "-Exe", $Exe,
             "-Frames", "$Frames",
             "-InputMaxFrameLead", "$InputMaxFrameLead",
             "-InputSendDelayFrames", "$InputSendDelayFrames",
             "-InputSendJitterFrames", "$InputSendJitterFrames",
             "-InputScript", $InputScript,
+            "-MvlStage", "$MvlStage",
+            "-MvlCourseMode", "fixed",
+            "-ProcessPriority", $ProcessPriority,
+            "-ProcessAffinityMask", "$HostProcessAffinityMask",
+            "-EmulationThreadAffinityMask", "$HostEmulationThreadAffinityMask",
+            "-EmulationThreadPriority", $EmulationThreadPriority,
             "-LogDir", $hostLog
         )
         $clientArgs = @(
@@ -77,13 +99,37 @@ try {
             "-Role", "client",
             "-Peer", "127.0.0.1",
             "-SoftwareRenderer",
+            "-Exe", $Exe,
             "-Frames", "$Frames",
             "-InputMaxFrameLead", "$InputMaxFrameLead",
             "-InputSendDelayFrames", "$InputSendDelayFrames",
             "-InputSendJitterFrames", "$InputSendJitterFrames",
             "-InputScript", $InputScript,
+            "-MvlStage", "$MvlStage",
+            "-MvlCourseMode", "fixed",
+            "-ProcessPriority", $ProcessPriority,
+            "-ProcessAffinityMask", "$ClientProcessAffinityMask",
+            "-EmulationThreadAffinityMask", "$ClientEmulationThreadAffinityMask",
+            "-EmulationThreadPriority", $EmulationThreadPriority,
             "-LogDir", $clientLog
         )
+        if (-not [string]::IsNullOrWhiteSpace($MvlMatchSeed)) {
+            $hostArgs += @("-MvlMatchSeed", $MvlMatchSeed)
+            $clientArgs += @("-MvlMatchSeed", $MvlMatchSeed)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($HostRom) -or
+            -not [string]::IsNullOrWhiteSpace($ClientRom)) {
+            if ([string]::IsNullOrWhiteSpace($HostRom) -or
+                [string]::IsNullOrWhiteSpace($ClientRom)) {
+                throw "HostRom and ClientRom must be specified together"
+            }
+            $hostArgs += @("-HostRom", $HostRom, "-ClientRom", $ClientRom, "-SkipRomEnsure")
+            $clientArgs += @("-HostRom", $HostRom, "-ClientRom", $ClientRom, "-SkipRomEnsure")
+        }
+        if ($PerformanceLog) {
+            $hostArgs += "-PerformanceLog"
+            $clientArgs += "-PerformanceLog"
+        }
         if ($NoJit) {
             $hostArgs += "-NoJit"
             $clientArgs += "-NoJit"
@@ -98,7 +144,52 @@ try {
             -ArgumentList $clientArgs `
             -WorkingDirectory $repoRoot `
             -PassThru
-        Wait-Process -Id $hostProc.Id, $clientProc.Id
+        if ($SystemTelemetry) {
+            $counterPaths = @(
+                "\Processor(_Total)\% Processor Time",
+                "\Processor(_Total)\% DPC Time",
+                "\Processor(_Total)\% Interrupt Time",
+                "\Processor(_Total)\Interrupts/sec",
+                "\Processor(_Total)\DPCs Queued/sec",
+                "\Processor Information(_Total)\Actual Frequency",
+                "\Processor Information(_Total)\% Processor Performance",
+                "\Processor Information(_Total)\% Performance Limit",
+                "\Process(melonDS*)\% Processor Time",
+                "\Process(melonDS*)\ID Process"
+            )
+            $telemetry = [System.Collections.Generic.List[object]]::new()
+            while (-not $hostProc.HasExited -or -not $clientProc.HasExited) {
+                try {
+                    $sample = Get-Counter -Counter $counterPaths -MaxSamples 1 -ErrorAction Stop
+                } catch {
+                    $hostProc.Refresh()
+                    $clientProc.Refresh()
+                    if ($hostProc.HasExited -and $clientProc.HasExited) {
+                        break
+                    }
+                    Write-Warning "Skipping invalid system telemetry sample: $($_.Exception.Message)"
+                    Start-Sleep -Seconds 1
+                    continue
+                }
+                foreach ($counterSample in $sample.CounterSamples) {
+                    if ($counterSample.Status -ne 0) {
+                        continue
+                    }
+                    $telemetry.Add([pscustomobject]@{
+                        Timestamp = $counterSample.Timestamp.ToString("o")
+                        Path = $counterSample.Path
+                        Instance = $counterSample.InstanceName
+                        CookedValue = $counterSample.CookedValue
+                    })
+                }
+                Start-Sleep -Seconds 1
+                $hostProc.Refresh()
+                $clientProc.Refresh()
+            }
+            $telemetry | Export-Csv -LiteralPath "$LogDir-system-telemetry.csv" -NoTypeInformation -Encoding UTF8
+        } else {
+            Wait-Process -Id $hostProc.Id, $clientProc.Id
+        }
 
         Write-Host "host log: $hostLog\host.stdout.txt"
         Write-Host "client log: $clientLog\client.stdout.txt"
@@ -108,12 +199,32 @@ try {
         $argsForRun = @{
             LowDelayWan = $true
             SoftwareRenderer = $true
+            Exe = $Exe
             Frames = $Frames
             InputMaxFrameLead = $InputMaxFrameLead
             InputSendDelayFrames = $InputSendDelayFrames
             InputSendJitterFrames = $InputSendJitterFrames
             InputScript = $InputScript
             LogDir = $LogDir
+            MvlStage = $MvlStage
+            MvlCourseMode = "fixed"
+            ProcessPriority = $ProcessPriority
+        }
+        if (-not [string]::IsNullOrWhiteSpace($MvlMatchSeed)) {
+            $argsForRun.MvlMatchSeed = $MvlMatchSeed
+        }
+        if (-not [string]::IsNullOrWhiteSpace($HostRom) -or
+            -not [string]::IsNullOrWhiteSpace($ClientRom)) {
+            if ([string]::IsNullOrWhiteSpace($HostRom) -or
+                [string]::IsNullOrWhiteSpace($ClientRom)) {
+                throw "HostRom and ClientRom must be specified together"
+            }
+            $argsForRun.HostRom = $HostRom
+            $argsForRun.ClientRom = $ClientRom
+            $argsForRun.SkipRomEnsure = $true
+        }
+        if ($PerformanceLog) {
+            throw "PerformanceLog currently requires -Visible so each peer gets a separate JSONL file"
         }
         if (-not $NoJit) {
             $argsForRun.AllowJit = $true
