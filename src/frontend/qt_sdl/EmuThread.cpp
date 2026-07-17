@@ -508,6 +508,38 @@ void EmuThread::detachWindow(MainWindow* window)
 
 void EmuThread::run()
 {
+#ifdef _WIN32
+    const char* priorityText = getenv("MELONDS_NSML_EMU_THREAD_PRIORITY");
+    if (!priorityText && getenv("MELONDS_NSML_INPUT_NETPLAY_ONLY"))
+        priorityText = "highest";
+    if (priorityText && strcmp(priorityText, "normal") != 0)
+    {
+        const int priority = strcmp(priorityText, "highest") == 0
+            ? THREAD_PRIORITY_HIGHEST
+            : THREAD_PRIORITY_ABOVE_NORMAL;
+        if (SetThreadPriority(GetCurrentThread(), priority))
+            std::printf("NSMB Test: emulation thread priority=%s\n", priorityText);
+        else
+            std::printf("NSMB Test: failed to set emulation thread priority=%s error=%lu\n",
+                priorityText, GetLastError());
+        std::fflush(stdout);
+    }
+    if (const char* affinityText = getenv("MELONDS_NSML_EMU_THREAD_AFFINITY_MASK"))
+    {
+        const auto affinityMask = static_cast<DWORD_PTR>(strtoull(affinityText, nullptr, 0));
+        if (affinityMask != 0)
+        {
+            if (SetThreadAffinityMask(GetCurrentThread(), affinityMask) != 0)
+                std::printf("NSMB Test: emulation thread affinity mask=0x%llX\n",
+                    static_cast<unsigned long long>(affinityMask));
+            else
+                std::printf("NSMB Test: failed to set emulation thread affinity mask=0x%llX error=%lu\n",
+                    static_cast<unsigned long long>(affinityMask), GetLastError());
+            std::fflush(stdout);
+        }
+    }
+#endif
+
     Config::Table& globalCfg = emuInstance->getGlobalConfig();
     u32 mainScreenPos[3];
 

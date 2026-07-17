@@ -16,6 +16,8 @@
     with melonDS. If not, see http://www.gnu.org/licenses/.
 */
 
+#include <chrono>
+#include <cstdlib>
 #include <string.h>
 #include "NDS.h"
 #include "GPU.h"
@@ -1340,6 +1342,14 @@ void GPU::StartFrame() noexcept
 
 void GPU::StartHBlank(u32 line) noexcept
 {
+    static const bool nsmlSoftGpuPerfEnabled = std::getenv("MELONDS_NSML_SOFT_GPU_PERF") != nullptr;
+    static thread_local u64 nsmlSoftGpuFrameUs = 0;
+    static thread_local u64 nsmlSoftGpuFrames = 0;
+    static thread_local u64 nsmlSoftGpuTotalUs = 0;
+    static thread_local u64 nsmlSoftGpuMaxUs = 0;
+    if (nsmlSoftGpuPerfEnabled && line == 0)
+        nsmlSoftGpuFrameUs = 0;
+
     DispStat[0] |= (1<<1);
     DispStat[1] |= (1<<1);
 
@@ -1351,12 +1361,38 @@ void GPU::StartHBlank(u32 line) noexcept
 
     if (VCount < 192)
     {
+        const auto nsmlSoftGpuStart = nsmlSoftGpuPerfEnabled
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
         // draw
         // note: this should start 48 cycles after the scanline start
         if (!RollbackSkipRender && line < 192)
             Rend->DrawScanline(line);
         if (!RollbackSkipRender && line < 191)
             Rend->DrawSprites(line+1);
+
+        if (nsmlSoftGpuPerfEnabled)
+        {
+            nsmlSoftGpuFrameUs += static_cast<u64>(std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - nsmlSoftGpuStart).count());
+            if (line == 191)
+            {
+                nsmlSoftGpuFrames++;
+                nsmlSoftGpuTotalUs += nsmlSoftGpuFrameUs;
+                nsmlSoftGpuMaxUs = std::max(nsmlSoftGpuMaxUs, nsmlSoftGpuFrameUs);
+                if (nsmlSoftGpuFrames == 120)
+                {
+                    std::printf(
+                        "NSMB SoftGPUPerf: avgMs=%.3f maxMs=%.3f\n",
+                        static_cast<double>(nsmlSoftGpuTotalUs) / (120.0 * 1000.0),
+                        static_cast<double>(nsmlSoftGpuMaxUs) / 1000.0);
+                    std::fflush(stdout);
+                    nsmlSoftGpuFrames = 0;
+                    nsmlSoftGpuTotalUs = 0;
+                    nsmlSoftGpuMaxUs = 0;
+                }
+            }
+        }
 
         NDS.CheckDMAs(0, 0x02);
     }

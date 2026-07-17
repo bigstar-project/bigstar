@@ -40,6 +40,13 @@ param(
     [switch]$NoDynamicCameraLead,
     [switch]$RuntimeDynamicCameraLead,
     [switch]$SoftwareRenderer,
+    [switch]$PerformanceLog,
+    [ValidateSet("Normal", "AboveNormal", "High")]
+    [string]$ProcessPriority = "AboveNormal",
+    [UInt64]$ProcessAffinityMask = 0,
+    [UInt64]$EmulationThreadAffinityMask = 0,
+    [ValidateSet("Auto", "Normal", "AboveNormal", "Highest")]
+    [string]$EmulationThreadPriority = "Auto",
     [switch]$DesyncLog,
     [ValidateRange(1, 3600)]
     [int]$DesyncLogInterval = 60,
@@ -144,6 +151,8 @@ $params = @{
     MvlWins = $MvlWins
     MvlBigStars = $MvlBigStars
     MvlLives = $MvlLives
+    ProcessPriority = $ProcessPriority
+    ProcessAffinityMask = $ProcessAffinityMask
 }
 
 if ($MvlStage -ge 0) {
@@ -213,10 +222,29 @@ Write-Host "Host controls Mario. Client controls Luigi."
 Push-Location $repoRoot
 try {
     $oldSwapBuffersInterval = $env:MELONDS_NSML_SWAPBUFFERS_INTERVAL
+    $oldPerformanceLog = $env:MELONDS_NSML_PERFORMANCE_LOG
+    $oldEmulationThreadAffinityMask = $env:MELONDS_NSML_EMU_THREAD_AFFINITY_MASK
+    $oldEmulationThreadPriority = $env:MELONDS_NSML_EMU_THREAD_PRIORITY
     if ($SwapBuffersInterval -gt 1) {
         $env:MELONDS_NSML_SWAPBUFFERS_INTERVAL = "$SwapBuffersInterval"
     } else {
         Remove-Item Env:\MELONDS_NSML_SWAPBUFFERS_INTERVAL -ErrorAction SilentlyContinue
+    }
+    if ($PerformanceLog) {
+        $env:MELONDS_NSML_PERFORMANCE_LOG = [System.IO.Path]::GetFullPath(
+            (Join-Path $LogDir "melonds-performance.jsonl"))
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PERFORMANCE_LOG -ErrorAction SilentlyContinue
+    }
+    if ($EmulationThreadAffinityMask -ne 0) {
+        $env:MELONDS_NSML_EMU_THREAD_AFFINITY_MASK = "$EmulationThreadAffinityMask"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_EMU_THREAD_AFFINITY_MASK -ErrorAction SilentlyContinue
+    }
+    if ($EmulationThreadPriority -ne "Auto") {
+        $env:MELONDS_NSML_EMU_THREAD_PRIORITY = $EmulationThreadPriority.ToLowerInvariant()
+    } else {
+        Remove-Item Env:\MELONDS_NSML_EMU_THREAD_PRIORITY -ErrorAction SilentlyContinue
     }
 
     $cfgPath = Join-Path $repoRoot "build\release-windows-x86_64\melonDS.toml"
@@ -250,6 +278,21 @@ try {
         $env:MELONDS_NSML_SWAPBUFFERS_INTERVAL = $oldSwapBuffersInterval
     } else {
         Remove-Item Env:\MELONDS_NSML_SWAPBUFFERS_INTERVAL -ErrorAction SilentlyContinue
+    }
+    if ($null -ne $oldPerformanceLog) {
+        $env:MELONDS_NSML_PERFORMANCE_LOG = $oldPerformanceLog
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PERFORMANCE_LOG -ErrorAction SilentlyContinue
+    }
+    if ($null -ne $oldEmulationThreadAffinityMask) {
+        $env:MELONDS_NSML_EMU_THREAD_AFFINITY_MASK = $oldEmulationThreadAffinityMask
+    } else {
+        Remove-Item Env:\MELONDS_NSML_EMU_THREAD_AFFINITY_MASK -ErrorAction SilentlyContinue
+    }
+    if ($null -ne $oldEmulationThreadPriority) {
+        $env:MELONDS_NSML_EMU_THREAD_PRIORITY = $oldEmulationThreadPriority
+    } else {
+        Remove-Item Env:\MELONDS_NSML_EMU_THREAD_PRIORITY -ErrorAction SilentlyContinue
     }
     Pop-Location
 }
