@@ -61,6 +61,24 @@ export function validateEditionConfig(config, expectedEdition) {
   ) {
     throw new Error(`${expectedEdition}.updater.pubkey は空にできません`);
   }
+  if (config.windows !== undefined) {
+    if (
+      typeof config.windows?.installerHooks !== 'string' ||
+      config.windows.installerHooks.trim() === ''
+    ) {
+      throw new Error(
+        `${expectedEdition}.windows.installerHooks は空にできません`,
+      );
+    }
+    if (
+      config.windows.installerHooks.includes('..') ||
+      !/^\.\/windows\/[^/\\]+\.nsh$/.test(config.windows.installerHooks)
+    ) {
+      throw new Error(
+        `${expectedEdition}.windows.installerHooks は windows 配下の .nsh ファイルを指定してください`,
+      );
+    }
+  }
   for (const capability of [
     'automaticUnresolvedSessionReport',
     'manualLogUpload',
@@ -85,6 +103,15 @@ export function tauriEditionOverlay(config, version) {
       },
     },
   };
+  if (config.windows?.installerHooks) {
+    overlay.bundle = {
+      windows: {
+        nsis: {
+          installerHooks: config.windows.installerHooks,
+        },
+      },
+    };
+  }
   if (version) {
     overlay.version = version;
   }

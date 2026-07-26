@@ -51,6 +51,9 @@ function parseBuildArgs(args) {
   const extraConfigs = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    if (arg === '--') {
+      continue;
+    }
     if (arg === '--build-profile') {
       buildProfile = args[i + 1] ?? null;
       i++;

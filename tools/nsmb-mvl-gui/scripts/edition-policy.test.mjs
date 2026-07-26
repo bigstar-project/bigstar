@@ -36,6 +36,13 @@ test('Tauri overlayへ版固有値と指定バージョンを反映する', () =
   assert.deepEqual(overlay.plugins.updater.endpoints, [
     publicEdition.updater.endpoint,
   ]);
+  assert.equal(overlay.bundle, undefined);
+
+  const insidersOverlay = tauriEditionOverlay(insiders, '1.2.3');
+  assert.equal(
+    insidersOverlay.bundle.windows.nsis.installerHooks,
+    './windows/legacy-install-migration.nsh',
+  );
 });
 
 test('Bigstarの版名・識別子・保存先を使用する', () => {
@@ -48,6 +55,69 @@ test('Bigstarの版名・識別子・保存先を使用する', () => {
     'io.github.bigstar-project.bigstar.insiders',
   );
   assert.equal(insiders.dataDirectoryName, 'Bigstar Insiders');
+  assert.equal(
+    publicEdition.updater.endpoint,
+    'https://github.com/bigstar-project/bigstar/releases/download/public-latest/latest.json',
+  );
+  assert.equal(
+    insiders.updater.endpoint,
+    'https://github.com/bigstar-project/bigstar/releases/download/insiders-latest/latest.json',
+  );
+});
+
+test('旧版の移行インストーラーをInsidersだけへ組み込む', () => {
+  const migrationHooks = readFileSync(
+    new URL(
+      '../src-tauri/windows/legacy-install-migration.nsh',
+      import.meta.url,
+    ),
+    'utf8',
+  );
+  assert.match(
+    migrationHooks,
+    /NSMB Mario vs Luigi Online/,
+  );
+  assert.match(migrationHooks, /NSIS_HOOK_PREINSTALL/);
+  assert.match(migrationHooks, /NSIS_HOOK_POSTINSTALL/);
+  assert.match(migrationHooks, /\/UPDATE \/P/);
+  assert.match(migrationHooks, /UninstallString/);
+  assert.match(
+    migrationHooks,
+    /FileExists.*\$INSTDIR\\nsmb-mvl-gui\.exe/,
+  );
+  assert.match(migrationHooks, /BIGSTAR_REMOVE_LEGACY_SHORTCUT/);
+  assert.match(migrationHooks, /DeleteRegValue HKCU/);
+  assert.match(migrationHooks, /DeleteRegKey SHCTX/);
+  assert.doesNotMatch(migrationHooks, /RMDir\s+\/r/i);
+  assert.doesNotMatch(
+    JSON.stringify(publicEdition),
+    /legacy-install-migration/,
+  );
+});
+
+test('旧LatestをInsiders移行チャンネルへ固定する', () => {
+  const workflow = readFileSync(
+    new URL(
+      '../../../.github/workflows/nsmb-mvl-tauri.yml',
+      import.meta.url,
+    ),
+    'utf8',
+  );
+  assert.match(workflow, /make_latest: "false"/);
+  assert.match(workflow, /\$legacyChannelTag = "legacy-latest"/);
+  assert.match(workflow, /make_latest=true/);
+});
+
+test('通常のInsidersビルドは専用更新チャンネルだけを参照する', () => {
+  const tauriConfig = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/tauri.conf.json', import.meta.url),
+      'utf8',
+    ),
+  );
+  assert.deepEqual(tauriConfig.plugins.updater.endpoints, [
+    insiders.updater.endpoint,
+  ]);
 });
 
 test('通常ビルドのバージョンをNode・Tauri・Cargoで統一する', () => {

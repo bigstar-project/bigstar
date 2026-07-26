@@ -38,6 +38,22 @@ Build a bundle:
 corepack pnpm build
 ```
 
+## Legacy updater bridge
+
+Released `0.9.x` installations read updater metadata from GitHub's
+`releases/latest/download/latest.json`. Insiders publishing therefore keeps the
+mutable `legacy-latest` release marked as GitHub Latest and uploads the same
+metadata used by `insiders-latest`. Public and versioned releases must remain
+non-latest until the legacy bridge is retired.
+
+The Insiders NSIS bundle includes
+`src-tauri/windows/legacy-install-migration.nsh`. It installs Bigstar Insiders
+first and only then runs the old per-user NSIS uninstaller with `/UPDATE`, which
+preserves `%APPDATA%\dev.melonds.nsmb-mvl`. The application copies that data to
+`%APPDATA%\Bigstar Insiders` on first launch without deleting the source. After
+the old uninstaller succeeds, the hook removes only shortcuts, autostart, and
+install-location registry entries that belong to the old product.
+
 ## Bundled binaries
 
 The Tauri bundle includes sidecar copies of:

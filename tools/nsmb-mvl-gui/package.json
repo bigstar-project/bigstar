@@ -18,6 +18,7 @@
     "format-and-lint:fix": "biome check . --write",
     "test:unit": "vitest --config vitest.config.ts run",
     "test:editions": "node --test scripts/edition-policy.test.mjs",
+    "verify:nsis-migration": "node scripts/verify-nsis-migration.mjs",
     "test:browser": "vitest --config vitest.browser.config.ts run",
     "test:e2e": "playwright test",
     "ci": "tsc --noEmit && biome check . && node --test scripts/edition-policy.test.mjs && vitest --config vitest.config.ts run && vitest --config vitest.browser.config.ts run && playwright test",

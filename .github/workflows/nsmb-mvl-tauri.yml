@@ -393,6 +393,9 @@ jobs:
         if: matrix.edition == 'public'
         working-directory: tools/nsmb-mvl-gui
         run: node scripts/verify-public-artifact.mjs src-tauri/target/release/nsmb-mvl-gui.exe
+      - name: Verify NSIS migration policy
+        working-directory: tools/nsmb-mvl-gui
+        run: node scripts/verify-nsis-migration.mjs "${{ matrix.edition }}" src-tauri/target/release/nsis/x64/installer.nsi
       - name: Run packaged app preflight
         shell: pwsh
         run: .\tools\nsmb-mvl-gui\src-tauri\target\release\nsmb-mvl-gui.exe --preflight
@@ -462,16 +465,75 @@ jobs:
           name: Bigstar ${{ matrix.edition }} ${{ steps.release-meta.outputs.version }}
           files: tools/nsmb-mvl-gui/release-assets/*
           fail_on_unmatched_files: true
+          make_latest: "false"
       - name: Publish updater channel
         if: steps.release-meta.outputs.publish == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $repo = "${{ github.repository }}"
+
+          function Get-ReleaseId([string] $tag) {
+            $releaseId = gh api "repos/$repo/releases/tags/$tag" --jq ".id" 2> $null
+            if ($LASTEXITCODE -ne 0) {
+              return $null
+            }
+            return $releaseId
+          }
+
+          function Ensure-NonLatestRelease([string] $tag, [string] $title, [string] $notes) {
+            $releaseId = Get-ReleaseId $tag
+            if (-not $releaseId) {
+              $release = gh api --method POST "repos/$repo/releases" `
+                -f "tag_name=$tag" `
+                -f "target_commitish=${{ needs.prepare-release.outputs.checkout_sha }}" `
+                -f "name=$title" `
+                -f "body=$notes" `
+                -f "make_latest=false" | ConvertFrom-Json
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to create updater release: $tag"
+              }
+              $releaseId = [string]$release.id
+            } else {
+              gh api --method PATCH "repos/$repo/releases/$releaseId" -f "make_latest=false" *> $null
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to keep updater release non-latest: $tag"
+              }
+            }
+            return $releaseId
+          }
+
           $channelTag = "${{ matrix.edition }}-latest"
           $title = "Bigstar ${{ matrix.edition }} updater channel"
-          gh release view $channelTag *> $null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $channelTag --target "${{ needs.prepare-release.outputs.checkout_sha }}" --title $title --notes "Mutable updater metadata channel."
-          }
+          Ensure-NonLatestRelease $channelTag $title "Mutable updater metadata channel." | Out-Null
           gh release upload $channelTag tools/nsmb-mvl-gui/release-assets/latest.json --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to upload updater metadata: $channelTag"
+          }
+
+          if ("${{ matrix.edition }}" -eq "insiders") {
+            $legacyChannelTag = "legacy-latest"
+            $legacyTitle = "Bigstar legacy updater bridge"
+            $legacyReleaseId = Get-ReleaseId $legacyChannelTag
+            if (-not $legacyReleaseId) {
+              $legacyRelease = gh api --method POST "repos/$repo/releases" `
+                -f "tag_name=$legacyChannelTag" `
+                -f "target_commitish=${{ needs.prepare-release.outputs.checkout_sha }}" `
+                -f "name=$legacyTitle" `
+                -f "body=Updater bridge for NSMB Mario vs Luigi Online 0.9.x installations." `
+                -f "make_latest=false" | ConvertFrom-Json
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to create legacy updater bridge"
+              }
+              $legacyReleaseId = [string]$legacyRelease.id
+            }
+            gh release upload $legacyChannelTag tools/nsmb-mvl-gui/release-assets/latest.json --clobber
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to upload legacy updater metadata"
+            }
+            gh api --method PATCH "repos/$repo/releases/$legacyReleaseId" -f "make_latest=true" *> $null
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to mark legacy updater bridge as latest"
+            }
+          }
