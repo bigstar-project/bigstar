@@ -3,7 +3,7 @@ use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
-use crate::config::REUSABLE_ROM_FORMAT;
+use crate::config::{app_version, REUSABLE_ROM_FORMAT};
 use crate::models::{GenerateRomRequest, GenerateRomResponse, RomIdentity};
 use crate::paths::{
     absolutize_existing, ensure_parent_dir, find_bridge_binary, find_symbols_file,
@@ -224,7 +224,7 @@ fn sha256_text(parts: &[&str]) -> String {
 }
 
 fn rom_generator_id() -> String {
-    let mut parts = vec![env!("CARGO_PKG_VERSION"), REUSABLE_ROM_FORMAT];
+    let mut parts = vec![app_version(), REUSABLE_ROM_FORMAT];
     parts.extend_from_slice(ROM_GENERATOR_SOURCES);
     sha256_text(&parts)
 }

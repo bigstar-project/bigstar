@@ -7,6 +7,11 @@ use tauri::{AppHandle, Manager};
 use crate::models::{LauncherSettings, MatchHistoryRecord, MvlStageResult};
 use crate::processes::hide_child_console_window;
 
+#[cfg(feature = "insiders-edition")]
+const LEGACY_INSIDERS_APP_DATA_DIR_NAME: &str = "dev.melonds.nsmb-mvl";
+#[cfg(feature = "insiders-edition")]
+const LEGACY_INSIDERS_MIGRATION_MARKER: &str = ".legacy-dev.melonds.nsmb-mvl-imported";
+
 pub(crate) fn create_log_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let root = app_data_dir(app)?;
     let logs_root = root.join("logs");
@@ -405,11 +410,98 @@ fn corrected_stage_winner(
 pub(crate) fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let path = app
         .path()
-        .app_data_dir()
+        .data_dir()
         .map_err(|err| format!("アプリデータディレクトリを解決できません: {err}"))?;
+    let path = path.join(crate::config::app_data_dir_name());
     fs::create_dir_all(&path)
         .map_err(|err| format!("アプリデータディレクトリを作成できません: {err}"))?;
     Ok(path)
+}
+
+pub(crate) fn migrate_legacy_insiders_app_data(app: &AppHandle) -> Result<(), String> {
+    #[cfg(feature = "insiders-edition")]
+    {
+        let base = app
+            .path()
+            .data_dir()
+            .map_err(|err| format!("アプリデータディレクトリを解決できません: {err}"))?;
+        let current = base.join(crate::config::app_data_dir_name());
+        migrate_legacy_app_data(
+            &base.join(LEGACY_INSIDERS_APP_DATA_DIR_NAME),
+            &current,
+            LEGACY_INSIDERS_MIGRATION_MARKER,
+        )
+    }
+
+    #[cfg(not(feature = "insiders-edition"))]
+    {
+        let _ = app;
+        Ok(())
+    }
+}
+
+#[cfg(any(feature = "insiders-edition", test))]
+pub(crate) fn migrate_legacy_app_data(
+    legacy: &Path,
+    current: &Path,
+    marker_name: &str,
+) -> Result<(), String> {
+    if !legacy.is_dir() || current.join(marker_name).is_file() {
+        return Ok(());
+    }
+    if legacy == current {
+        return Err("旧アプリデータと新アプリデータの保存先が同一です".to_owned());
+    }
+
+    fs::create_dir_all(current)
+        .map_err(|err| format!("Bigstar Insiders の保存先を作成できません: {err}"))?;
+    copy_legacy_entries(legacy, current)?;
+    fs::write(
+        current.join(marker_name),
+        "Legacy Insiders data was imported. The source directory is kept as a backup.\n",
+    )
+    .map_err(|err| format!("旧アプリデータの移行完了を記録できません: {err}"))?;
+    Ok(())
+}
+
+#[cfg(any(feature = "insiders-edition", test))]
+fn copy_legacy_entries(source: &Path, destination: &Path) -> Result<(), String> {
+    for entry in
+        fs::read_dir(source).map_err(|err| format!("旧アプリデータを読み取れません: {err}"))?
+    {
+        let entry = entry.map_err(|err| format!("旧アプリデータを読み取れません: {err}"))?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        let file_type = entry
+            .file_type()
+            .map_err(|err| format!("旧アプリデータの種類を判定できません: {err}"))?;
+
+        if file_type.is_symlink() {
+            return Err(format!(
+                "旧アプリデータ内のシンボリックリンクは移行できません: {}",
+                source_path.display()
+            ));
+        }
+        if file_type.is_dir() {
+            fs::create_dir_all(&destination_path).map_err(|err| {
+                format!(
+                    "移行先ディレクトリを作成できません ({}): {err}",
+                    destination_path.display()
+                )
+            })?;
+            copy_legacy_entries(&source_path, &destination_path)?;
+            continue;
+        }
+        if file_type.is_file() && !destination_path.exists() {
+            fs::copy(&source_path, &destination_path).map_err(|err| {
+                format!(
+                    "旧アプリデータをコピーできません ({}): {err}",
+                    source_path.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn repo_root() -> Result<PathBuf, String> {

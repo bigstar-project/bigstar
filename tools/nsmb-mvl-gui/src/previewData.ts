@@ -4,9 +4,9 @@ export const previewDefaults: Defaults = {
   signal_url: 'wss://nsmb-mvl-signaling-prod.uniunntaro.workers.dev/session',
   room_code: 'test-room',
   host_rom_path:
-    'C:\\Users\\Sugiyama\\AppData\\Roaming\\dev.melonds.nsmb-mvl\\roms\\nsmb-mvl-host.nds',
+    'C:\\Users\\Sugiyama\\AppData\\Roaming\\Bigstar Insiders\\roms\\nsmb-mvl-host.nds',
   client_rom_path:
-    'C:\\Users\\Sugiyama\\AppData\\Roaming\\dev.melonds.nsmb-mvl\\roms\\nsmb-mvl-client.nds',
+    'C:\\Users\\Sugiyama\\AppData\\Roaming\\Bigstar Insiders\\roms\\nsmb-mvl-client.nds',
   base_rom_path: '',
   player_name: '',
   player_profile_id: 'preview-profile-player',
@@ -116,7 +116,7 @@ export function previewMatchHistory(): MatchHistoryRecord[] {
     {
       id: 'preview-history-1',
       logDir:
-        'C:\\Users\\Sugiyama\\AppData\\Roaming\\dev.melonds.nsmb-mvl\\logs\\preview-2026-06-21-1940',
+        'C:\\Users\\Sugiyama\\AppData\\Roaming\\Bigstar Insiders\\logs\\preview-2026-06-21-1940',
       playerNames: {
         mario: 'Preview Player',
         luigi: 'Rival',
@@ -184,7 +184,7 @@ export function previewMatchHistory(): MatchHistoryRecord[] {
     {
       id: 'preview-history-2',
       logDir:
-        'C:\\Users\\Sugiyama\\AppData\\Roaming\\dev.melonds.nsmb-mvl\\logs\\preview-2026-06-20-2318',
+        'C:\\Users\\Sugiyama\\AppData\\Roaming\\Bigstar Insiders\\logs\\preview-2026-06-20-2318',
       playerNames: {
         mario: 'Alice',
         luigi: 'Preview Player',
@@ -237,7 +237,7 @@ export function previewMatchHistory(): MatchHistoryRecord[] {
     {
       id: 'preview-history-3',
       logDir:
-        'C:\\Users\\Sugiyama\\AppData\\Roaming\\dev.melonds.nsmb-mvl\\logs\\preview-2026-06-21-1203',
+        'C:\\Users\\Sugiyama\\AppData\\Roaming\\Bigstar Insiders\\logs\\preview-2026-06-21-1203',
       playerNames: {
         mario: 'Preview Player',
         luigi: 'KoopaKid',
@@ -290,7 +290,7 @@ export function previewMatchHistory(): MatchHistoryRecord[] {
     {
       id: 'preview-history-4',
       logDir:
-        'C:\\Users\\Sugiyama\\AppData\\Roaming\\dev.melonds.nsmb-mvl\\logs\\preview-2026-06-18-2005',
+        'C:\\Users\\Sugiyama\\AppData\\Roaming\\Bigstar Insiders\\logs\\preview-2026-06-18-2005',
       playerNames: {
         mario: 'TestUser',
         luigi: 'Preview Player',

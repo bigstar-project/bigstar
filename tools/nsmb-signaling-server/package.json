@@ -9,9 +9,9 @@
     "pnpm": ">=10.26.2"
   },
   "scripts": {
-    "dev": "alchemy dev --app nsmb-mvl-signaling",
-    "deploy": "alchemy deploy --app nsmb-mvl-signaling",
-    "destroy": "alchemy destroy --app nsmb-mvl-signaling",
+    "dev": "alchemy dev",
+    "deploy": "alchemy deploy",
+    "destroy": "alchemy destroy",
     "typecheck": "tsc --noEmit",
     "format-and-lint": "biome check .",
     "format-and-lint:fix": "biome check . --write",

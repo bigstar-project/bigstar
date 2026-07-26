@@ -12,7 +12,8 @@ use flate2::Compression;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use crate::config::{DEFAULT_FRAMES, NETPLAY_START_FRAME};
+use crate::config::{app_version, DEFAULT_FRAMES, NETPLAY_START_FRAME};
+#[cfg(feature = "insiders-edition")]
 use crate::crash_report::{match_result_decided, send_crash_report_async};
 use crate::models::{
     BridgeDiagnostics, CourseMode, GameStateMismatch, LaunchRequest, LaunchResponse,
@@ -99,7 +100,9 @@ pub(crate) fn start_match_resolved(
         bridge: bridge_child,
         _process_job: process_job,
         log_dir: paths.log_dir,
+        #[cfg(feature = "insiders-edition")]
         player_names: request.player_names,
+        #[cfg(feature = "insiders-edition")]
         crash_report_sent: false,
     });
 
@@ -156,6 +159,8 @@ pub(crate) fn stop_existing_with_unresolved_report(state: &AppState) -> Result<(
 }
 
 fn stop_existing_inner(state: &AppState, report_unresolved: bool) -> Result<(), String> {
+    #[cfg(not(feature = "insiders-edition"))]
+    let _ = report_unresolved;
     let mut guard = state
         .session
         .lock()
@@ -164,16 +169,22 @@ fn stop_existing_inner(state: &AppState, report_unresolved: bool) -> Result<(), 
         terminate_child(&mut session.melon);
         terminate_child(&mut session.bridge);
         let compression_result = finalize_ai_observation_v3_log(&session.log_dir);
-        let mvl_results = read_mvl_results(&session.log_dir);
-        if report_unresolved && !session.crash_report_sent && !match_result_decided(&mvl_results) {
-            session.crash_report_sent = true;
-            send_crash_report_async(
-                session.log_dir,
-                "stopped_by_user".to_owned(),
-                "stopped_by_user".to_owned(),
-                session.player_names,
-                "user_stop",
-            );
+        #[cfg(feature = "insiders-edition")]
+        {
+            let mvl_results = read_mvl_results(&session.log_dir);
+            if report_unresolved
+                && !session.crash_report_sent
+                && !match_result_decided(&mvl_results)
+            {
+                session.crash_report_sent = true;
+                send_crash_report_async(
+                    session.log_dir,
+                    "stopped_by_user".to_owned(),
+                    "stopped_by_user".to_owned(),
+                    session.player_names,
+                    "user_stop",
+                );
+            }
         }
         compression_result?;
     }
@@ -249,18 +260,21 @@ fn refresh_session_processes(
         Ok(false)
     };
     let mvl_results = read_mvl_results(&session.log_dir);
-    if !session.crash_report_sent
-        && (melon != "running" || bridge != "running")
-        && !match_result_decided(&mvl_results)
+    #[cfg(feature = "insiders-edition")]
     {
-        session.crash_report_sent = true;
-        send_crash_report_async(
-            session.log_dir.clone(),
-            melon.clone(),
-            bridge.clone(),
-            session.player_names.clone(),
-            "process_exit",
-        );
+        if !session.crash_report_sent
+            && (melon != "running" || bridge != "running")
+            && !match_result_decided(&mvl_results)
+        {
+            session.crash_report_sent = true;
+            send_crash_report_async(
+                session.log_dir.clone(),
+                melon.clone(),
+                bridge.clone(),
+                session.player_names.clone(),
+                "process_exit",
+            );
+        }
     }
     compression_result?;
 
@@ -763,7 +777,7 @@ fn write_launch_manifest(paths: &LaunchPaths, request: &LaunchRequest) -> Result
     let current_exe = std::env::current_exe().ok();
     let value = serde_json::json!({
         "gui": {
-            "version": env!("CARGO_PKG_VERSION"),
+            "version": app_version(),
             "package": env!("CARGO_PKG_NAME"),
             "exe": current_exe
                 .as_deref()

@@ -21,6 +21,11 @@ export default defineConfig({
   test: {
     include: ['src/**/*.browser.test.{ts,tsx}'],
     browser: {
+      api: {
+        host: '127.0.0.1',
+        port: 1422,
+        strictPort: true,
+      },
       enabled: true,
       headless: true,
       provider: playwright(),

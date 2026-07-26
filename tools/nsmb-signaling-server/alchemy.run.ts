@@ -8,7 +8,16 @@ const shouldUseStateStore =
   process.env.GITHUB_ACTIONS === 'true' ||
   Boolean(process.env.ALCHEMY_STATE_TOKEN);
 
-const app = await alchemy('nsmb-mvl-signaling', {
+const edition = process.env.NSMB_MVL_EDITION ?? 'insiders';
+if (edition !== 'insiders' && edition !== 'public') {
+  throw new Error(`Unsupported NSMB_MVL_EDITION: ${edition}`);
+}
+
+const appName =
+  edition === 'insiders'
+    ? 'nsmb-mvl-signaling-insiders'
+    : 'nsmb-mvl-signaling-public';
+const app = await alchemy(appName, {
   password: process.env.ALCHEMY_PASSWORD,
   stateStore: shouldUseStateStore
     ? (scope) => new CloudflareStateStore(scope)
@@ -57,6 +66,7 @@ export const signaling = await Worker('signaling', {
       process.env.DEFAULT_ICE_SERVERS ?? 'stun:stun.l.google.com:19302',
     CORS_ORIGINS: process.env.CORS_ORIGINS ?? defaultCorsOrigins,
     LOG_UPLOAD_TOKEN: process.env.LOG_UPLOAD_TOKEN ?? '',
+    APP_EDITION: edition,
   },
   bundle: {
     minify: true,

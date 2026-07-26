@@ -3,8 +3,16 @@ name: NSMB MvL Tauri
 on:
   workflow_dispatch:
     inputs:
+      edition:
+        description: Edition to publish (non-publish checks always build both)
+        required: true
+        default: insiders
+        type: choice
+        options:
+          - insiders
+          - public
       release_bump:
-        description: Version bump to commit, tag, build, and publish
+        description: Version bump to build and publish without mutating main
         required: true
         default: none
         type: choice
@@ -19,7 +27,7 @@ on:
         default: false
         type: boolean
       release_tag:
-        description: Release tag to create when publishing manually; defaults to nsmb-mvl-gui-v<version>
+        description: Release tag; defaults to <edition>-v<version>
         required: false
         type: string
   push:
@@ -27,7 +35,8 @@ on:
       - main
       - master
     tags:
-      - "nsmb-mvl-gui-v*"
+      - "insiders-v*"
+      - "public-v*"
     paths:
       - ".github/workflows/nsmb-mvl-tauri.yml"
       - "scripts/prepare-nsmb-mvl-tauri-sidecars.ps1"
@@ -71,6 +80,7 @@ jobs:
       publish: ${{ steps.release.outputs.publish }}
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
+      editions: ${{ steps.release.outputs.editions }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -79,15 +89,17 @@ jobs:
         id: release
         shell: pwsh
         run: |
-          $configPath = "tools/nsmb-mvl-gui/src-tauri/tauri.conf.json"
           $packagePath = "tools/nsmb-mvl-gui/package.json"
-          $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
           $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
-          $version = [string]$config.version
+          $version = [string]$package.version
           $publish = "${{ github.ref_type }}" -eq "tag"
           $checkoutRef = "${{ github.sha }}"
           $checkoutSha = "${{ github.sha }}"
           $tag = "${{ github.ref_name }}"
+          $edition = "${{ inputs.edition }}"
+          if (-not $edition) {
+            $edition = "insiders"
+          }
           $bump = "${{ inputs.release_bump }}"
           if (-not $bump) {
             $bump = "none"
@@ -101,11 +113,8 @@ jobs:
             if ("${{ github.event_name }}" -ne "workflow_dispatch") {
               throw "release_bump can only be used from workflow_dispatch"
             }
-            if ("${{ github.ref_type }}" -ne "branch") {
-              throw "release_bump must be dispatched from a branch"
-            }
-            if ($version -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
-              throw "Unsupported Tauri version format: $version"
+            if ($version -notmatch '^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$') {
+              throw "Unsupported package version format: $version"
             }
 
             $major = [int]$Matches[1]
@@ -130,44 +139,35 @@ jobs:
             }
 
             $version = "$major.$minor.$patch"
-            $tag = "nsmb-mvl-gui-v$version"
+            $tag = "${edition}-v${version}"
             $existingTag = git tag --list $tag
             if ($existingTag) {
               throw "Tag already exists: $tag"
             }
-
-            $config.version = $version
-            $package.version = $version
-            $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $configPath -Encoding UTF8
-            $package | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $packagePath -Encoding UTF8
-
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add $configPath $packagePath
-            git commit -m "chore: Tauri GUIを${version}に更新"
-            git tag $tag
-            git push origin HEAD:refs/heads/${{ github.ref_name }}
-            git push origin $tag
-
-            $checkoutRef = $tag
-            $checkoutSha = git rev-parse HEAD
             $publish = $true
           } elseif ("${{ github.event_name }}" -eq "workflow_dispatch") {
             $inputTag = "${{ inputs.release_tag }}"
             if ($inputTag) {
               $tag = $inputTag
             } else {
-              $tag = "nsmb-mvl-gui-v$version"
+              $tag = "${edition}-v${version}"
             }
           } elseif ("${{ github.ref_type }}" -eq "tag") {
             $checkoutRef = "${{ github.ref_name }}"
+            if ($tag -notmatch '^(insiders|public)-v(.+)$') {
+              throw "Unsupported release tag: $tag"
+            }
+            $edition = $Matches[1]
+            $version = $Matches[2]
           }
 
+          $editions = if ($publish) { "[`"$edition`"]" } else { '["insiders","public"]' }
           "checkout_ref=$checkoutRef" >> $env:GITHUB_OUTPUT
           "checkout_sha=$checkoutSha" >> $env:GITHUB_OUTPUT
           "publish=$($publish.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
+          "editions=$editions" >> $env:GITHUB_OUTPUT
 
   gui-check:
     name: GUI check
@@ -192,8 +192,20 @@ jobs:
       - name: Typecheck GUI
         working-directory: tools/nsmb-mvl-gui
         run: pnpm typecheck
-      - name: Build frontend
+      - name: Check edition policies
         working-directory: tools/nsmb-mvl-gui
+        run: pnpm test:editions
+      - name: Build Insiders frontend
+        working-directory: tools/nsmb-mvl-gui
+        env:
+          NSMB_MVL_BUILD_PROFILE: distribution
+          NSMB_MVL_EDITION: insiders
+        run: pnpm vite:build
+      - name: Build Public frontend
+        working-directory: tools/nsmb-mvl-gui
+        env:
+          NSMB_MVL_BUILD_PROFILE: distribution
+          NSMB_MVL_EDITION: public
         run: pnpm vite:build
       - uses: dtolnay/rust-toolchain@stable
       - name: Check ROM generator
@@ -287,8 +299,13 @@ jobs:
           path: tools/nsmb-net-bridge/target/release/nsmb-net-bridge.exe
 
   tauri-windows:
-    name: Tauri Windows x86_64
+    name: Tauri ${{ matrix.edition }} Windows x86_64
     runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        edition: ${{ fromJSON(needs.prepare-release.outputs.editions) }}
+    environment: ${{ needs.prepare-release.outputs.publish == 'true' && matrix.edition || 'ci' }}
     needs:
       - prepare-release
       - gui-check
@@ -306,7 +323,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: tools/nsmb-mvl-gui/src-tauri -> target
-          shared-key: nsmb-mvl-gui-tauri-windows
+          shared-key: nsmb-mvl-gui-tauri-${{ matrix.edition }}-windows
       - name: Restore Tauri bundler cache
         uses: actions/cache@v4
         with:
@@ -329,7 +346,13 @@ jobs:
         working-directory: tools/nsmb-mvl-gui
         run: pnpm install --frozen-lockfile
       - name: Test Tauri backend
-        run: cargo test --release --features single-instance --manifest-path tools/nsmb-mvl-gui/src-tauri/Cargo.toml
+        shell: pwsh
+        run: |
+          $features = "single-instance"
+          if ("${{ matrix.edition }}" -eq "insiders") {
+            $features = "$features,insiders-edition"
+          }
+          cargo test --release --features $features --manifest-path tools/nsmb-mvl-gui/src-tauri/Cargo.toml
       - name: Resolve release metadata
         id: release-meta
         shell: pwsh
@@ -337,11 +360,15 @@ jobs:
           "publish=${{ needs.prepare-release.outputs.publish }}" >> $env:GITHUB_OUTPUT
           "tag=${{ needs.prepare-release.outputs.tag }}" >> $env:GITHUB_OUTPUT
           "version=${{ needs.prepare-release.outputs.version }}" >> $env:GITHUB_OUTPUT
+          "edition=${{ matrix.edition }}" >> $env:GITHUB_OUTPUT
       - name: Build Tauri app
         working-directory: tools/nsmb-mvl-gui
         shell: pwsh
         env:
           NSMB_MVL_BUILD_PROFILE: distribution
+          NSMB_MVL_EDITION: ${{ matrix.edition }}
+          NSMB_MVL_INSIDERS_REPORT_URL: ${{ vars.INSIDERS_REPORT_URL }}
+          NSMB_MVL_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
@@ -349,13 +376,23 @@ jobs:
             if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
               throw "TAURI_SIGNING_PRIVATE_KEY secret is required to publish a signed updater release"
             }
+            if ("${{ matrix.edition }}" -eq "public" -and -not $env:NSMB_MVL_UPDATER_PUBKEY) {
+              throw "Public environment variable TAURI_UPDATER_PUBLIC_KEY is required"
+            }
+            if ("${{ matrix.edition }}" -eq "insiders" -and -not $env:NSMB_MVL_INSIDERS_REPORT_URL) {
+              throw "Insiders environment variable INSIDERS_REPORT_URL is required"
+            }
             if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
               $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
             }
-            pnpm tauri build --ci --features single-instance --config src-tauri/tauri.release.conf.json
+            pnpm build:distribution -- --edition "${{ matrix.edition }}" --app-version "${{ steps.release-meta.outputs.version }}" --ci --config src-tauri/tauri.release.conf.json
           } else {
-            pnpm tauri build --features single-instance
+            pnpm build:distribution -- --edition "${{ matrix.edition }}" --app-version "${{ steps.release-meta.outputs.version }}"
           }
+      - name: Verify Public artifact policy
+        if: matrix.edition == 'public'
+        working-directory: tools/nsmb-mvl-gui
+        run: node scripts/verify-public-artifact.mjs src-tauri/target/release/nsmb-mvl-gui.exe
       - name: Run packaged app preflight
         shell: pwsh
         run: .\tools\nsmb-mvl-gui\src-tauri\target\release\nsmb-mvl-gui.exe --preflight
@@ -403,7 +440,7 @@ jobs:
           $url = "https://github.com/$repo/releases/download/$tag/$encodedArtifactName"
           $metadata = [ordered]@{
             version = "${{ steps.release-meta.outputs.version }}"
-            notes = "NSMB Mario vs Luigi Online ${{ steps.release-meta.outputs.version }}"
+            notes = "Bigstar ${{ matrix.edition }} ${{ steps.release-meta.outputs.version }}"
             pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
             platforms = [ordered]@{
               "windows-x86_64" = [ordered]@{
@@ -415,13 +452,26 @@ jobs:
           $metadata | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $assetDir "latest.json") -Encoding UTF8
       - uses: actions/upload-artifact@v7
         with:
-          name: nsmb-mvl-tauri-windows-x86_64
+          name: nsmb-mvl-tauri-${{ matrix.edition }}-windows-x86_64
           path: tools/nsmb-mvl-gui/src-tauri/target/release/bundle/**
       - name: Publish GitHub Release
         if: steps.release-meta.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release-meta.outputs.tag }}
-          name: NSMB MvL GUI ${{ steps.release-meta.outputs.version }}
+          name: Bigstar ${{ matrix.edition }} ${{ steps.release-meta.outputs.version }}
           files: tools/nsmb-mvl-gui/release-assets/*
           fail_on_unmatched_files: true
+      - name: Publish updater channel
+        if: steps.release-meta.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $channelTag = "${{ matrix.edition }}-latest"
+          $title = "Bigstar ${{ matrix.edition }} updater channel"
+          gh release view $channelTag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $channelTag --target "${{ needs.prepare-release.outputs.checkout_sha }}" --title $title --notes "Mutable updater metadata channel."
+          }
+          gh release upload $channelTag tools/nsmb-mvl-gui/release-assets/latest.json --clobber

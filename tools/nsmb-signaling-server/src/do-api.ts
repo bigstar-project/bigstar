@@ -62,6 +62,7 @@ export type MatchmakingEnv = {
   DEFAULT_ICE_SERVERS?: AlchemyEnv['DEFAULT_ICE_SERVERS'];
   CORS_ORIGINS?: AlchemyEnv['CORS_ORIGINS'];
   LOG_UPLOAD_TOKEN?: AlchemyEnv['LOG_UPLOAD_TOKEN'];
+  APP_EDITION?: AlchemyEnv['APP_EDITION'];
 };
 
 export function publicRoom(record: RoomRecord, peerCount = 0): RoomSummary {

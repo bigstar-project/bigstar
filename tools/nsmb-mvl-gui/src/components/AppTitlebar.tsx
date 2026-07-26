@@ -2,6 +2,7 @@ import { ArrowLeft, ArrowRight } from '@phosphor-icons/react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { type ReactNode, useEffect, useState } from 'react';
 import { css } from 'styled-system/css';
+import { currentEditionConfig } from '../buildProfile';
 
 type NavigationController = EventTarget & {
   back: () => unknown;
@@ -19,6 +20,7 @@ function isTauriRuntime() {
 }
 
 export function AppTitlebar() {
+  const edition = currentEditionConfig();
   const navigation = browserNavigation();
   const [canGoBack, setCanGoBack] = useState(
     navigation?.canGoBack ?? window.history.length > 1,
@@ -88,7 +90,50 @@ export function AppTitlebar() {
         </TitlebarButton>
       </div>
 
-      <div className={css({ h: 'full', minW: '0' })} data-tauri-drag-region />
+      <div
+        className={css({
+          alignItems: 'center',
+          display: 'flex',
+          gap: '2',
+          h: 'full',
+          justifyContent: 'center',
+          minW: '0',
+        })}
+        data-tauri-drag-region
+      >
+        <span
+          className={css({
+            color: 'fg.muted',
+            fontSize: 'xs',
+            fontWeight: 'semibold',
+            pointerEvents: 'none',
+          })}
+          data-tauri-drag-region
+        >
+          {edition.displayName}
+        </span>
+        <span
+          className={css({
+            bg:
+              edition.edition === 'insiders'
+                ? 'yellow.subtle.bg'
+                : 'blue.subtle.bg',
+            borderRadius: 'full',
+            color:
+              edition.edition === 'insiders'
+                ? 'yellow.subtle.fg'
+                : 'blue.subtle.fg',
+            fontSize: '2xs',
+            fontWeight: 'bold',
+            px: '2',
+            py: '0.5',
+            pointerEvents: 'none',
+          })}
+          data-tauri-drag-region
+        >
+          {edition.badge}
+        </span>
+      </div>
 
       <div
         className={css({ alignItems: 'stretch', display: 'flex', h: 'full' })}

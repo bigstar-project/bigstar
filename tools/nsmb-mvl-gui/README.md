@@ -1,4 +1,4 @@
-# NSMB Mario vs Luigi Online GUI
+# Bigstar GUI
 
 Tauri launcher for starting a two-peer NSMB Mario vs Luigi session with the
 forked melonDS build and `nsmb-net-bridge`.

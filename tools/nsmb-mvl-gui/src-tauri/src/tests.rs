@@ -9,8 +9,7 @@ use crate::crash_report::{create_log_archive, create_user_log_archive, match_res
 use crate::models::{
     CourseMode, GameSettings, GameStateMismatch, LaunchRequest, Lives, Role, RomIdentity,
 };
-use crate::paths::allowed_log_dir;
-use crate::paths::load_match_history_document_content;
+use crate::paths::{allowed_log_dir, load_match_history_document_content, migrate_legacy_app_data};
 use crate::processes::{
     build_bridge_command, build_melon_command, finalize_ai_observation_v3_log, melon_env,
     read_bridge_diagnostics, read_melon_diagnostics, read_mvl_results,
@@ -61,6 +60,56 @@ fn temp_log_dir(name: &str) -> PathBuf {
     let _ = fs::remove_dir_all(&path);
     fs::create_dir_all(&path).expect("create temp log dir");
     path
+}
+
+#[test]
+fn legacy_insiders_app_data_is_imported_without_overwriting_current_data() {
+    let root = temp_log_dir("legacy-app-data-migration");
+    let legacy = root.join("dev.melonds.nsmb-mvl");
+    let current = root.join("Bigstar Insiders");
+    fs::create_dir_all(legacy.join("logs/session-1")).expect("create legacy logs");
+    fs::create_dir_all(&current).expect("create current data");
+    fs::write(legacy.join("launcher-settings.json"), "legacy").expect("write legacy settings");
+    fs::write(current.join("launcher-settings.json"), "current").expect("write current settings");
+    fs::write(legacy.join("logs/session-1/melon.log"), "log").expect("write legacy log");
+
+    migrate_legacy_app_data(&legacy, &current, ".legacy-dev.melonds.nsmb-mvl-imported")
+        .expect("migrate legacy app data");
+
+    assert_eq!(
+        fs::read_to_string(current.join("launcher-settings.json")).expect("read current settings"),
+        "current"
+    );
+    assert_eq!(
+        fs::read_to_string(current.join("logs/session-1/melon.log")).expect("read migrated log"),
+        "log"
+    );
+    assert!(legacy.join("logs/session-1/melon.log").is_file());
+    assert!(current
+        .join(".legacy-dev.melonds.nsmb-mvl-imported")
+        .is_file());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn completed_legacy_insiders_migration_is_not_reimported() {
+    let root = temp_log_dir("legacy-app-data-migration-marker");
+    let legacy = root.join("dev.melonds.nsmb-mvl");
+    let current = root.join("Bigstar Insiders");
+    fs::create_dir_all(&legacy).expect("create legacy data");
+    fs::write(legacy.join("first.log"), "first").expect("write first legacy file");
+
+    migrate_legacy_app_data(&legacy, &current, ".legacy-dev.melonds.nsmb-mvl-imported")
+        .expect("migrate legacy app data");
+    fs::write(legacy.join("later.log"), "later").expect("write later legacy file");
+    migrate_legacy_app_data(&legacy, &current, ".legacy-dev.melonds.nsmb-mvl-imported")
+        .expect("skip completed migration");
+
+    assert!(current.join("first.log").is_file());
+    assert!(!current.join("later.log").exists());
+
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -1042,7 +1091,7 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
         fs::read_to_string(dir.join("logs").join("launcher.json")).expect("launcher manifest");
     let launcher: serde_json::Value =
         serde_json::from_str(&launcher_json).expect("parse launcher manifest");
-    assert_eq!(launcher["gui"]["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(launcher["gui"]["version"], crate::config::app_version());
     assert_eq!(launcher["rom_identity"]["host_rom_sha256"], "host_hash");
     assert_eq!(
         launcher["request"]["rom_identity"]["client_rom_sha256"],

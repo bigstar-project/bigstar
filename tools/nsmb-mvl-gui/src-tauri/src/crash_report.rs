@@ -2,13 +2,20 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
-use crate::models::{MatchPlayerNames, MvlStageResult};
+#[cfg(feature = "insiders-edition")]
+use crate::models::MatchPlayerNames;
+#[cfg(any(feature = "insiders-edition", test))]
+use crate::models::MvlStageResult;
 
-const DISCORD_WEBHOOK_URL: &str = "https://discord.com/api/webhooks/1520085291006689542/VP_H4C_dYDabMW0PQf35y0iz238Q4CYLgDU5AscdUkVoeT4VxtLiJ3qGYeQiGUtvWMzX";
+#[cfg(any(feature = "insiders-edition", test))]
 const DIAGNOSTIC_EVENT_LOG: &str = "melonds-events.jsonl";
-const REPORT_STATUS_FILE: &str = "discord-crash-report.txt";
+#[cfg(feature = "insiders-edition")]
+const INSIDERS_REPORT_URL: Option<&str> = option_env!("NSMB_MVL_INSIDERS_REPORT_URL");
+#[cfg(feature = "insiders-edition")]
+const REPORT_STATUS_FILE: &str = "insiders-session-report.txt";
 const USER_LOG_ARCHIVE_PREFIX: &str = "nsmb-mvl-logs";
 
+#[cfg(any(feature = "insiders-edition", test))]
 pub(crate) fn match_result_decided(results: &[MvlStageResult]) -> bool {
     results.iter().any(|result| {
         result.resolved
@@ -18,6 +25,7 @@ pub(crate) fn match_result_decided(results: &[MvlStageResult]) -> bool {
     })
 }
 
+#[cfg(feature = "insiders-edition")]
 pub(crate) fn send_crash_report_async(
     log_dir: PathBuf,
     melon_state: String,
@@ -34,13 +42,14 @@ pub(crate) fn send_crash_report_async(
             reason,
         );
         let message = match result {
-            Ok(()) => "Discord unresolved session report sent".to_owned(),
-            Err(err) => format!("Discord unresolved session report failed: {err}"),
+            Ok(()) => "Insiders unresolved session report sent".to_owned(),
+            Err(err) => format!("Insiders unresolved session report failed: {err}"),
         };
         let _ = fs::write(log_dir.join(REPORT_STATUS_FILE), message);
     });
 }
 
+#[cfg(feature = "insiders-edition")]
 fn send_crash_report(
     log_dir: &Path,
     melon_state: &str,
@@ -48,6 +57,9 @@ fn send_crash_report(
     player_names: Option<&MatchPlayerNames>,
     reason: &str,
 ) -> Result<(), String> {
+    let report_url = INSIDERS_REPORT_URL
+        .filter(|url| !url.trim().is_empty())
+        .ok_or_else(|| "Insiders report endpoint が設定されていません".to_owned())?;
     let archive_path = create_log_archive(log_dir)?;
     let archive_name = archive_path
         .file_name()
@@ -73,13 +85,13 @@ fn send_crash_report(
         .text("payload_json", payload.to_string())
         .part("files[0]", file_part);
     let response = reqwest::blocking::Client::new()
-        .post(DISCORD_WEBHOOK_URL)
+        .post(report_url)
         .multipart(form)
         .send()
-        .map_err(|err| format!("Discord webhook 送信に失敗しました: {err}"))?;
+        .map_err(|err| format!("Insiders report 送信に失敗しました: {err}"))?;
     if !response.status().is_success() {
         return Err(format!(
-            "Discord webhook が失敗しました status={}",
+            "Insiders report が失敗しました status={}",
             response.status()
         ));
     }
@@ -88,6 +100,7 @@ fn send_crash_report(
     Ok(())
 }
 
+#[cfg(any(feature = "insiders-edition", test))]
 pub(crate) fn create_log_archive(log_dir: &Path) -> Result<PathBuf, String> {
     let archive_path = std::env::temp_dir().join(format!(
         "nsmb-mvl-crash-logs-{}-{}.zip",
@@ -133,6 +146,7 @@ fn create_log_archive_at(
 
 #[derive(Clone, Copy)]
 enum ArchiveMode {
+    #[cfg(any(feature = "insiders-edition", test))]
     Crash,
     User,
 }
@@ -173,15 +187,18 @@ fn add_dir_to_zip<W: Write + io::Seek>(
     Ok(())
 }
 
-fn should_exclude_log_file(path: &Path, archive_path: &Path, mode: ArchiveMode) -> bool {
+fn should_exclude_log_file(path: &Path, archive_path: &Path, _mode: ArchiveMode) -> bool {
     if same_path(path, archive_path) {
         return true;
     }
     let file_name = path.file_name().and_then(|name| name.to_str());
-    if matches!(mode, ArchiveMode::Crash)
-        && file_name.is_some_and(|name| name.eq_ignore_ascii_case(DIAGNOSTIC_EVENT_LOG))
+    #[cfg(any(feature = "insiders-edition", test))]
     {
-        return true;
+        if matches!(_mode, ArchiveMode::Crash)
+            && file_name.is_some_and(|name| name.eq_ignore_ascii_case(DIAGNOSTIC_EVENT_LOG))
+        {
+            return true;
+        }
     }
     file_name.is_some_and(|name| {
         name.starts_with(USER_LOG_ARCHIVE_PREFIX) && name.to_ascii_lowercase().ends_with(".zip")
