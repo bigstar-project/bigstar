@@ -107,7 +107,7 @@ export function tauriEditionOverlay(config, version, options = {}) {
     identifier: config.identifier,
     plugins: {
       updater: {
-        pubkey: process.env.NSMB_MVL_UPDATER_PUBKEY || config.updater.pubkey,
+        pubkey: config.updater.pubkey,
         endpoints: [config.updater.endpoint],
       },
     },

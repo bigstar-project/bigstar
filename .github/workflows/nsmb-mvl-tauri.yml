@@ -368,16 +368,12 @@ jobs:
           NSMB_MVL_BUILD_PROFILE: distribution
           NSMB_MVL_EDITION: ${{ matrix.edition }}
           NSMB_MVL_INSIDERS_REPORT_URL: ${{ vars.INSIDERS_REPORT_URL }}
-          NSMB_MVL_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           if ("${{ steps.release-meta.outputs.publish }}" -eq "true") {
             if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
               throw "TAURI_SIGNING_PRIVATE_KEY secret is required to publish a signed updater release"
-            }
-            if ("${{ matrix.edition }}" -eq "public" -and -not $env:NSMB_MVL_UPDATER_PUBKEY) {
-              throw "Public environment variable TAURI_UPDATER_PUBLIC_KEY is required"
             }
             if ("${{ matrix.edition }}" -eq "insiders" -and -not $env:NSMB_MVL_INSIDERS_REPORT_URL) {
               throw "Insiders environment variable INSIDERS_REPORT_URL is required"
