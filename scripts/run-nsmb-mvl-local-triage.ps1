@@ -1,7 +1,7 @@
 param(
     [ValidateSet("DirectUdp", "WebRtc")]
     [string]$Mode = "DirectUdp",
-    [string]$SignalUrl = "wss://nsmb-mvl-signaling-signaling-prod.uniunitaro.workers.dev/session",
+    [string]$SignalUrl = "wss://bigstar-signaling-signaling-prod.uniunitaro.workers.dev/session",
     [string]$RoomCode = "",
     [int]$HostPort = 8165,
     [int]$ClientPort = 8265,
@@ -336,7 +336,7 @@ if ($effectiveStage -lt 0 -or $effectiveStage -gt 4) {
 if ($Exe -eq "") {
     $Exe = Resolve-FirstExisting @(
         "build\release-windows-x86_64\melonDS.exe",
-        "tools\nsmb-mvl-gui\src-tauri\target\release\melonDS.exe"
+        "tools\bigstar\src-tauri\target\release\melonDS.exe"
     )
 } else {
     $Exe = Resolve-RepoPath $Exe -MustExist
@@ -390,9 +390,9 @@ if ($Mode -eq "DirectUdp") {
 
 if ($BridgeExe -eq "") {
     $BridgeExe = Resolve-FirstExisting @(
-        "tools\nsmb-net-bridge\target\release\nsmb-net-bridge.exe",
-        "tools\nsmb-mvl-gui\src-tauri\binaries\nsmb-net-bridge-x86_64-pc-windows-msvc.exe",
-        "tools\nsmb-net-bridge\target\debug\nsmb-net-bridge.exe"
+        "tools\bigstar-net-bridge\target\release\bigstar-net-bridge.exe",
+        "tools\bigstar\src-tauri\binaries\bigstar-net-bridge-x86_64-pc-windows-msvc.exe",
+        "tools\bigstar-net-bridge\target\debug\bigstar-net-bridge.exe"
     )
 } else {
     $BridgeExe = Resolve-RepoPath $BridgeExe -MustExist
@@ -540,11 +540,11 @@ function New-BridgeEnv {
     $effectiveDropBurstModulo = if ($RoleDropBurstModulo -ge 0) { $RoleDropBurstModulo } else { $BridgeDropBurstModulo }
     $effectiveDropBurstLen = if ($RoleDropBurstLen -ge 0) { $RoleDropBurstLen } else { $BridgeDropBurstLen }
     return @{
-        NSMB_NET_BRIDGE_DELAY_MS = "$effectiveDelayMs"
-        NSMB_NET_BRIDGE_JITTER_MS = "$effectiveJitterMs"
-        NSMB_NET_BRIDGE_DROP_MODULO = "$effectiveDropModulo"
-        NSMB_NET_BRIDGE_DROP_BURST_MODULO = "$effectiveDropBurstModulo"
-        NSMB_NET_BRIDGE_DROP_BURST_LEN = "$effectiveDropBurstLen"
+        BIGSTAR_NET_BRIDGE_DELAY_MS = "$effectiveDelayMs"
+        BIGSTAR_NET_BRIDGE_JITTER_MS = "$effectiveJitterMs"
+        BIGSTAR_NET_BRIDGE_DROP_MODULO = "$effectiveDropModulo"
+        BIGSTAR_NET_BRIDGE_DROP_BURST_MODULO = "$effectiveDropBurstModulo"
+        BIGSTAR_NET_BRIDGE_DROP_BURST_LEN = "$effectiveDropBurstLen"
     }
 }
 
@@ -598,7 +598,7 @@ if ($MelonLaunchOrder -eq "ClientFirst") {
     Start-ClientMelon
 }
 
-Write-Host "WebRtc: GUI is not involved, but nsmb-net-bridge WebRTC is involved."
+Write-Host "WebRtc: GUI is not involved, but bigstar-net-bridge WebRTC is involved."
 Write-Host "room=$RoomCode signal=$SignalUrl"
 Write-Host "host bridge pid=$($hostBridge.Id) melon pid=$($hostMelon.Id) log=$hostLog"
 Write-Host "client bridge pid=$($clientBridge.Id) melon pid=$($clientMelon.Id) log=$clientLog"

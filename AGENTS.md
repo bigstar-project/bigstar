@@ -46,12 +46,12 @@ Before the final response of any turn that requires a Markdown update under the 
 
 ## Tauri GUI UI Components
 
-When adding UI to the Tauri GUI in `tools/nsmb-mvl-gui`, reuse the existing Park UI setup before creating a new local component from scratch.
+When adding UI to the Tauri GUI in `tools/bigstar`, reuse the existing Park UI setup before creating a new local component from scratch.
 
 If a new UI component is needed, first check whether Park UI has the desired component in its docs/components list. If Park UI provides it, add it with the Park UI CLI from the GUI package directory:
 
 ```powershell
-cd tools/nsmb-mvl-gui
+cd tools/bigstar
 corepack pnpm dlx @park-ui/cli@latest add <component-name>
 ```
 

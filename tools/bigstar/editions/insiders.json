@@ -1,0 +1,21 @@
+{
+  "edition": "insiders",
+  "displayName": "Bigstar Insiders",
+  "badge": "Insiders",
+  "identifier": "io.github.bigstar-project.bigstar.insiders",
+  "dataDirectoryName": "Bigstar Insiders",
+  "devPort": 1420,
+  "defaultSignalUrl": "wss://bigstar-signaling-insiders-signaling-prod.uniunitaro.workers.dev/session",
+  "updater": {
+    "endpoint": "https://github.com/bigstar-project/bigstar/releases/download/insiders-latest/latest.json",
+    "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE2MkQwMjI0MkE0QTg3MTgKUldRWWgwb3FKQUl0RnFzVDRZUHZGMldCc2NwVTdsRlBpWit6bGxiak9DeGxiUTY4YU9hRFlkYW4K"
+  },
+  "windows": {
+    "installerHooks": "./windows/legacy-install-migration.nsh"
+  },
+  "capabilities": {
+    "automaticUnresolvedSessionReport": true,
+    "manualLogUpload": true,
+    "aiDevToolsInLocalBuilds": true
+  }
+}

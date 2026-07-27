@@ -67,7 +67,7 @@ function Get-StableRomGeneratorId {
     $paths = New-Object System.Collections.Generic.List[string]
     foreach ($relative in @(
         "Cargo.lock",
-        "tools\nsmb-mvl-rom\Cargo.toml",
+        "tools\bigstar-rom\Cargo.toml",
         "scripts\generate-nsmb-mvl-stable-roms.ps1"
     )) {
         $path = Join-Path $repoRoot $relative
@@ -76,7 +76,7 @@ function Get-StableRomGeneratorId {
         }
     }
 
-    $srcRoot = Join-Path $repoRoot "tools\nsmb-mvl-rom\src"
+    $srcRoot = Join-Path $repoRoot "tools\bigstar-rom\src"
     if (Test-Path -LiteralPath $srcRoot) {
         Get-ChildItem -LiteralPath $srcRoot -Recurse -File |
             Sort-Object FullName |
@@ -245,7 +245,7 @@ if (!$Force -and (Test-ReusableRoms -HostPath $hostRomPath -ClientPath $clientRo
     return
 }
 
-& cargo run --release --manifest-path (Join-Path $repoRoot "tools\nsmb-mvl-rom\Cargo.toml") -- `
+& cargo run --release --manifest-path (Join-Path $repoRoot "tools\bigstar-rom\Cargo.toml") -- `
     generate-stable `
     --source-rom $sourceRomPath `
     --host-rom $hostRomPath `

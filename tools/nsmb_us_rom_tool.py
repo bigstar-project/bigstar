@@ -143,7 +143,7 @@ def disasm(rom: bytes, seg: Segment, addr: int, size: int) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rom", default="roms/nsmb-us.nds")
-    ap.add_argument("--symbols", default="tools/nsmb-mvl-rom/resources/symbols9.x")
+    ap.add_argument("--symbols", default="tools/bigstar-rom/resources/symbols9.x")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("info")
     p_map = sub.add_parser("map")

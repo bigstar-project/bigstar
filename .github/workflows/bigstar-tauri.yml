@@ -1,0 +1,535 @@
+name: Bigstar Tauri
+
+on:
+  workflow_dispatch:
+    inputs:
+      edition:
+        description: Edition to publish (non-publish checks always build both)
+        required: true
+        default: insiders
+        type: choice
+        options:
+          - insiders
+          - public
+      release_bump:
+        description: Version bump to build and publish without mutating main
+        required: true
+        default: none
+        type: choice
+        options:
+          - none
+          - patch
+          - minor
+          - major
+      publish_release:
+        description: Publish a GitHub Release with Tauri updater metadata
+        required: false
+        default: false
+        type: boolean
+      release_tag:
+        description: Release tag; defaults to <edition>-v<version>
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "insiders-v*"
+      - "public-v*"
+    paths:
+      - ".github/workflows/bigstar-tauri.yml"
+      - "scripts/prepare-bigstar-tauri-sidecars.ps1"
+      - "tools/bigstar-signaling-server/**"
+      - "tools/bigstar/**"
+      - "tools/bigstar-rom/**"
+      - "tools/bigstar-net-bridge/**"
+      - "src/**"
+      - "CMakeLists.txt"
+      - "vcpkg.json"
+  pull_request:
+    branches:
+      - main
+      - master
+    paths:
+      - ".github/workflows/bigstar-tauri.yml"
+      - "scripts/prepare-bigstar-tauri-sidecars.ps1"
+      - "tools/bigstar-signaling-server/**"
+      - "tools/bigstar/**"
+      - "tools/bigstar-rom/**"
+      - "tools/bigstar-net-bridge/**"
+      - "src/**"
+      - "CMakeLists.txt"
+      - "vcpkg.json"
+
+permissions:
+  contents: write
+
+env:
+  MELONDS_GIT_BRANCH: ${{ github.ref }}
+  MELONDS_GIT_HASH: ${{ github.sha }}
+  MELONDS_BUILD_PROVIDER: GitHub Actions
+
+jobs:
+  prepare-release:
+    name: Prepare release
+    runs-on: ubuntu-latest
+    outputs:
+      checkout_ref: ${{ steps.release.outputs.checkout_ref }}
+      checkout_sha: ${{ steps.release.outputs.checkout_sha }}
+      publish: ${{ steps.release.outputs.publish }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      editions: ${{ steps.release.outputs.editions }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Resolve or create release ref
+        id: release
+        shell: pwsh
+        run: |
+          $packagePath = "tools/bigstar/package.json"
+          $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
+          $version = [string]$package.version
+          $publish = "${{ github.ref_type }}" -eq "tag"
+          $checkoutRef = "${{ github.sha }}"
+          $checkoutSha = "${{ github.sha }}"
+          $tag = "${{ github.ref_name }}"
+          $edition = "${{ inputs.edition }}"
+          if (-not $edition) {
+            $edition = "insiders"
+          }
+          $bump = "${{ inputs.release_bump }}"
+          if (-not $bump) {
+            $bump = "none"
+          }
+
+          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.publish_release }}" -eq "true") {
+            $publish = $true
+          }
+
+          if ($bump -ne "none") {
+            if ("${{ github.event_name }}" -ne "workflow_dispatch") {
+              throw "release_bump can only be used from workflow_dispatch"
+            }
+            if ($version -notmatch '^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$') {
+              throw "Unsupported package version format: $version"
+            }
+
+            $major = [int]$Matches[1]
+            $minor = [int]$Matches[2]
+            $patch = [int]$Matches[3]
+            switch ($bump) {
+              "major" {
+                $major += 1
+                $minor = 0
+                $patch = 0
+              }
+              "minor" {
+                $minor += 1
+                $patch = 0
+              }
+              "patch" {
+                $patch += 1
+              }
+              default {
+                throw "Unsupported release_bump: $bump"
+              }
+            }
+
+            $version = "$major.$minor.$patch"
+            $tag = "${edition}-v${version}"
+            $existingTag = git tag --list $tag
+            if ($existingTag) {
+              throw "Tag already exists: $tag"
+            }
+            $publish = $true
+          } elseif ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $inputTag = "${{ inputs.release_tag }}"
+            if ($inputTag) {
+              $tag = $inputTag
+            } else {
+              $tag = "${edition}-v${version}"
+            }
+          } elseif ("${{ github.ref_type }}" -eq "tag") {
+            $checkoutRef = "${{ github.ref_name }}"
+            if ($tag -notmatch '^(insiders|public)-v(.+)$') {
+              throw "Unsupported release tag: $tag"
+            }
+            $edition = $Matches[1]
+            $version = $Matches[2]
+          }
+
+          $editions = if ($publish) { "[`"$edition`"]" } else { '["insiders","public"]' }
+          "checkout_ref=$checkoutRef" >> $env:GITHUB_OUTPUT
+          "checkout_sha=$checkoutSha" >> $env:GITHUB_OUTPUT
+          "publish=$($publish.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "editions=$editions" >> $env:GITHUB_OUTPUT
+
+  gui-check:
+    name: GUI check
+    runs-on: ubuntu-latest
+    needs:
+      - prepare-release
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.checkout_ref }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Enable pnpm
+        run: corepack enable pnpm
+      - name: Install signaling dependencies for RPC types
+        working-directory: tools/bigstar-signaling-server
+        run: pnpm install --frozen-lockfile
+      - name: Install GUI dependencies
+        working-directory: tools/bigstar
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck GUI
+        working-directory: tools/bigstar
+        run: pnpm typecheck
+      - name: Check edition policies
+        working-directory: tools/bigstar
+        run: pnpm test:editions
+      - name: Build Insiders frontend
+        working-directory: tools/bigstar
+        env:
+          BIGSTAR_BUILD_PROFILE: distribution
+          BIGSTAR_EDITION: insiders
+        run: pnpm vite:build
+      - name: Build Public frontend
+        working-directory: tools/bigstar
+        env:
+          BIGSTAR_BUILD_PROFILE: distribution
+          BIGSTAR_EDITION: public
+        run: pnpm vite:build
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check ROM generator
+        run: cargo check --manifest-path tools/bigstar-rom/Cargo.toml
+
+  melon-windows:
+    name: melonDS Windows x86_64
+    runs-on: windows-2025
+    needs:
+      - prepare-release
+    env:
+      MELONDS_GIT_BRANCH: ${{ needs.prepare-release.outputs.checkout_ref }}
+      MELONDS_GIT_HASH: ${{ needs.prepare-release.outputs.checkout_sha }}
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/vcpkg_cache,readwrite
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.checkout_ref }}
+      - name: Restore cached melonDS exe
+        id: melonds-exe-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/release-windows-x86_64/melonDS.exe
+          key: melonds-exe-windows-x86_64-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**', 'src/**', 'vcpkg.json') }}
+      - uses: actions/cache/restore@v4
+        if: steps.melonds-exe-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-x86_64-windows-${{ hashFiles('vcpkg.json') }}
+          restore-keys: vcpkg-x86_64-windows-
+      - uses: lukka/run-vcpkg@v11
+        if: steps.melonds-exe-cache.outputs.cache-hit != 'true'
+        with:
+          vcpkgJsonGlob: vcpkg.json
+      - uses: lukka/run-cmake@v10
+        if: steps.melonds-exe-cache.outputs.cache-hit != 'true'
+        with:
+          configurePreset: release-windows-x86_64
+          configurePresetAdditionalArgs: "['-DENABLE_DEBUG_DEPS=OFF', '-DMELONDS_EMBED_BUILD_INFO=ON']"
+          buildPreset: release-windows-x86_64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: melonDS-windows-x86_64
+          path: build/release-windows-x86_64/melonDS.exe
+      - uses: actions/cache/save@v4
+        if: always() && steps.melonds-exe-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: vcpkg-x86_64-windows-${{ hashFiles('vcpkg.json') }}
+      - name: Save cached melonDS exe
+        if: steps.melonds-exe-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/release-windows-x86_64/melonDS.exe
+          key: melonds-exe-windows-x86_64-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**', 'src/**', 'vcpkg.json') }}
+
+  bridge-windows:
+    name: bridge Windows x86_64
+    runs-on: windows-2025
+    needs:
+      - prepare-release
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.checkout_ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore bridge Rust build cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/bigstar-net-bridge -> target
+          shared-key: bigstar-net-bridge-webrtc-windows
+      - name: Build bridge
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "C:\Program Files\LLVM\bin",
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\Llvm\x64\bin"
+          )
+          $libclangPath = $candidates | Where-Object { Test-Path (Join-Path $_ "libclang.dll") } | Select-Object -First 1
+          if (-not $libclangPath) {
+            throw "libclang.dll was not found"
+          }
+          $env:LIBCLANG_PATH = $libclangPath
+          cargo build --release --features webrtc --manifest-path tools/bigstar-net-bridge/Cargo.toml
+      - name: Run bridge signaling UDP pair smoke
+        shell: pwsh
+        run: .\tools\bigstar-net-bridge\target\release\bigstar-net-bridge.exe webrtc-signaling-udp-pair-smoke
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bigstar-net-bridge-windows-x86_64
+          path: tools/bigstar-net-bridge/target/release/bigstar-net-bridge.exe
+
+  tauri-windows:
+    name: Tauri ${{ matrix.edition }} Windows x86_64
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        edition: ${{ fromJSON(needs.prepare-release.outputs.editions) }}
+    environment: ${{ needs.prepare-release.outputs.publish == 'true' && matrix.edition || 'ci' }}
+    needs:
+      - prepare-release
+      - gui-check
+      - melon-windows
+      - bridge-windows
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.checkout_ref }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Restore Tauri Rust build cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/bigstar/src-tauri -> target
+          shared-key: bigstar-tauri-${{ matrix.edition }}-windows
+      - name: Restore Tauri bundler cache
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\tauri
+          key: tauri-bundlers-${{ runner.os }}
+      - name: Enable pnpm
+        run: corepack enable pnpm
+      - uses: actions/download-artifact@v7
+        with:
+          name: melonDS-windows-x86_64
+          path: build/release-windows-x86_64
+      - uses: actions/download-artifact@v7
+        with:
+          name: bigstar-net-bridge-windows-x86_64
+          path: tools/bigstar-net-bridge/target/release
+      - name: Prepare sidecars
+        shell: pwsh
+        run: .\scripts\prepare-bigstar-tauri-sidecars.ps1
+      - name: Install GUI dependencies
+        working-directory: tools/bigstar
+        run: pnpm install --frozen-lockfile
+      - name: Test Tauri backend
+        shell: pwsh
+        run: |
+          $features = "single-instance"
+          if ("${{ matrix.edition }}" -eq "insiders") {
+            $features = "$features,insiders-edition"
+          }
+          cargo test --release --features $features --manifest-path tools/bigstar/src-tauri/Cargo.toml
+      - name: Resolve release metadata
+        id: release-meta
+        shell: pwsh
+        run: |
+          "publish=${{ needs.prepare-release.outputs.publish }}" >> $env:GITHUB_OUTPUT
+          "tag=${{ needs.prepare-release.outputs.tag }}" >> $env:GITHUB_OUTPUT
+          "version=${{ needs.prepare-release.outputs.version }}" >> $env:GITHUB_OUTPUT
+          "edition=${{ matrix.edition }}" >> $env:GITHUB_OUTPUT
+      - name: Build Tauri app
+        working-directory: tools/bigstar
+        shell: pwsh
+        env:
+          BIGSTAR_BUILD_PROFILE: distribution
+          BIGSTAR_EDITION: ${{ matrix.edition }}
+          BIGSTAR_INSIDERS_REPORT_URL: ${{ vars.INSIDERS_REPORT_URL }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if ("${{ steps.release-meta.outputs.publish }}" -eq "true") {
+            if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+              throw "TAURI_SIGNING_PRIVATE_KEY secret is required to publish a signed updater release"
+            }
+            if ("${{ matrix.edition }}" -eq "insiders" -and -not $env:BIGSTAR_INSIDERS_REPORT_URL) {
+              throw "Insiders environment variable INSIDERS_REPORT_URL is required"
+            }
+            if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
+              $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
+            }
+            pnpm build:distribution -- --edition "${{ matrix.edition }}" --app-version "${{ steps.release-meta.outputs.version }}" --ci --config src-tauri/tauri.release.conf.json
+          } else {
+            pnpm build:distribution -- --edition "${{ matrix.edition }}" --app-version "${{ steps.release-meta.outputs.version }}"
+          }
+      - name: Verify Public artifact policy
+        if: matrix.edition == 'public'
+        working-directory: tools/bigstar
+        run: node scripts/verify-public-artifact.mjs src-tauri/target/release/bigstar.exe
+      - name: Verify NSIS migration policy
+        working-directory: tools/bigstar
+        run: node scripts/verify-nsis-migration.mjs "${{ matrix.edition }}" src-tauri/target/release/nsis/x64/installer.nsi
+      - name: Run packaged app preflight
+        shell: pwsh
+        run: .\tools\bigstar\src-tauri\target\release\bigstar.exe --preflight
+      - name: Generate updater metadata
+        if: steps.release-meta.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $bundleDir = "tools/bigstar/src-tauri/target/release/bundle"
+          $assetDir = "tools/bigstar/release-assets"
+          New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
+
+          function Get-ReleaseAssetName([string] $fileName) {
+            $fileName -replace "\s+", "."
+          }
+
+          Get-ChildItem -LiteralPath $bundleDir -Recurse -File |
+            Where-Object { $_.Extension -ne ".sig" } |
+            ForEach-Object {
+              Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $assetDir (Get-ReleaseAssetName $_.Name)) -Force
+            }
+
+          $pairs = Get-ChildItem -LiteralPath $bundleDir -Recurse -File -Filter "*.sig" | ForEach-Object {
+            $artifactPath = $_.FullName -replace "\.sig$", ""
+            if (Test-Path -LiteralPath $artifactPath) {
+              $artifactName = Get-ReleaseAssetName ([IO.Path]::GetFileName($artifactPath))
+              [pscustomobject]@{
+                ArtifactPath = $artifactPath
+                ArtifactName = $artifactName
+                SignaturePath = $_.FullName
+                SignatureName = "$artifactName.sig"
+                Priority = if ($artifactPath -like "*.exe") { 0 } elseif ($artifactPath -like "*.msi") { 1 } else { 2 }
+              }
+            }
+          }
+          $pair = $pairs | Sort-Object Priority, ArtifactName | Select-Object -First 1
+          if (-not $pair) {
+            throw "No signed updater artifact pair was found under $bundleDir"
+          }
+
+          Copy-Item -LiteralPath $pair.SignaturePath -Destination (Join-Path $assetDir $pair.SignatureName) -Force
+          $signature = (Get-Content -LiteralPath $pair.SignaturePath -Raw).Trim()
+          $tag = "${{ steps.release-meta.outputs.tag }}"
+          $repo = "${{ github.repository }}"
+          $encodedArtifactName = [uri]::EscapeDataString($pair.ArtifactName)
+          $url = "https://github.com/$repo/releases/download/$tag/$encodedArtifactName"
+          $metadata = [ordered]@{
+            version = "${{ steps.release-meta.outputs.version }}"
+            notes = "Bigstar ${{ matrix.edition }} ${{ steps.release-meta.outputs.version }}"
+            pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = $signature
+                url = $url
+              }
+            }
+          }
+          $metadata | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $assetDir "latest.json") -Encoding UTF8
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bigstar-tauri-${{ matrix.edition }}-windows-x86_64
+          path: tools/bigstar/src-tauri/target/release/bundle/**
+      - name: Publish GitHub Release
+        if: steps.release-meta.outputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release-meta.outputs.tag }}
+          name: Bigstar ${{ matrix.edition }} ${{ steps.release-meta.outputs.version }}
+          files: tools/bigstar/release-assets/*
+          fail_on_unmatched_files: true
+          make_latest: "false"
+      - name: Publish updater channel
+        if: steps.release-meta.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = "${{ github.repository }}"
+
+          function Get-ReleaseId([string] $tag) {
+            $releaseId = gh api "repos/$repo/releases/tags/$tag" --jq ".id" 2> $null
+            if ($LASTEXITCODE -ne 0) {
+              return $null
+            }
+            return $releaseId
+          }
+
+          function Ensure-NonLatestRelease([string] $tag, [string] $title, [string] $notes) {
+            $releaseId = Get-ReleaseId $tag
+            if (-not $releaseId) {
+              $release = gh api --method POST "repos/$repo/releases" `
+                -f "tag_name=$tag" `
+                -f "target_commitish=${{ needs.prepare-release.outputs.checkout_sha }}" `
+                -f "name=$title" `
+                -f "body=$notes" `
+                -f "make_latest=false" | ConvertFrom-Json
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to create updater release: $tag"
+              }
+              $releaseId = [string]$release.id
+            } else {
+              gh api --method PATCH "repos/$repo/releases/$releaseId" -f "make_latest=false" *> $null
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to keep updater release non-latest: $tag"
+              }
+            }
+            return $releaseId
+          }
+
+          $channelTag = "${{ matrix.edition }}-latest"
+          $title = "Bigstar ${{ matrix.edition }} updater channel"
+          Ensure-NonLatestRelease $channelTag $title "Mutable updater metadata channel." | Out-Null
+          gh release upload $channelTag tools/bigstar/release-assets/latest.json --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to upload updater metadata: $channelTag"
+          }
+
+          if ("${{ matrix.edition }}" -eq "insiders") {
+            $legacyChannelTag = "legacy-latest"
+            $legacyTitle = "Bigstar legacy updater bridge"
+            $legacyReleaseId = Get-ReleaseId $legacyChannelTag
+            if (-not $legacyReleaseId) {
+              $legacyRelease = gh api --method POST "repos/$repo/releases" `
+                -f "tag_name=$legacyChannelTag" `
+                -f "target_commitish=${{ needs.prepare-release.outputs.checkout_sha }}" `
+                -f "name=$legacyTitle" `
+                -f "body=Updater bridge for legacy Bigstar 0.9.x installations." `
+                -f "make_latest=false" | ConvertFrom-Json
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to create legacy updater bridge"
+              }
+              $legacyReleaseId = [string]$legacyRelease.id
+            }
+            gh release upload $legacyChannelTag tools/bigstar/release-assets/latest.json --clobber
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to upload legacy updater metadata"
+            }
+            gh api --method PATCH "repos/$repo/releases/$legacyReleaseId" -f "make_latest=true" *> $null
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to mark legacy updater bridge as latest"
+            }
+          }

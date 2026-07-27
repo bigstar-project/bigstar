@@ -1777,7 +1777,7 @@ def patch_fake_opponent(
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rom", default="roms/nsmb-us.nds")
-    ap.add_argument("--symbols", default="tools/nsmb-mvl-rom/resources/symbols9.x")
+    ap.add_argument("--symbols", default="tools/bigstar-rom/resources/symbols9.x")
     ap.add_argument("--out", required=True)
     sub = ap.add_subparsers(dest="cmd", required=True)
     p_rng = sub.add_parser("rng-constant")
