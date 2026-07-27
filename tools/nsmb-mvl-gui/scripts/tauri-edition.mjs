@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import process from 'node:process';
+import { normalizeBuildProfile } from './build-profile-config.mjs';
 import {
   loadEditionConfig,
   normalizeEdition,
@@ -93,13 +94,13 @@ function parseTauriArgs(args, command) {
     }
     forwardedArgs.push(arg);
   }
-  if (
-    buildProfile !== null &&
-    buildProfile !== 'local' &&
-    buildProfile !== 'distribution'
-  ) {
-    console.error('--build-profile は local または distribution を指定してください');
-    process.exit(1);
+  if (buildProfile !== null) {
+    try {
+      buildProfile = normalizeBuildProfile(buildProfile);
+    } catch (error) {
+      console.error(error.message);
+      process.exit(1);
+    }
   }
   if (command === 'dev' && buildProfile !== 'local') {
     console.error('dev コマンドでは distribution profile を使用できません');

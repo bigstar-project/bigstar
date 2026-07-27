@@ -206,6 +206,16 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function stubRuntimeCapabilities(notifyOwnRooms: boolean) {
+  vi.stubGlobal('__NSMB_MVL_RUNTIME_CAPABILITIES__', {
+    aiDevTools: true,
+    automaticUnresolvedSessionReport: true,
+    configurableSignalServer: true,
+    manualLogUpload: true,
+    notifyOwnRooms,
+  });
+}
+
 function roomSummary(
   roomId: string,
   hostProfileId = '33333333-3333-4333-8333-333333333333',
@@ -412,8 +422,8 @@ describe('useLauncherController', () => {
     expect(listRooms).not.toHaveBeenCalled();
   });
 
-  test('lobby websocket snapshot does not notify rooms hosted by the local player', async () => {
-    vi.stubGlobal('__NSMB_MVL_BUILD_PROFILE__', 'distribution');
+  test('distributionではローカルプレイヤーが作った部屋を通知しない', async () => {
+    stubRuntimeCapabilities(false);
 
     await render(
       <TestProviders>
@@ -441,8 +451,8 @@ describe('useLauncherController', () => {
     expect(notifyNewRoomAvailable).toHaveBeenCalledTimes(1);
   });
 
-  test('local build can notify rooms hosted by the local player for two-window debugging', async () => {
-    vi.stubGlobal('__NSMB_MVL_BUILD_PROFILE__', 'local');
+  test('localでは2ウィンドウ検証用に自分の部屋も通知できる', async () => {
+    stubRuntimeCapabilities(true);
 
     await render(
       <TestProviders>

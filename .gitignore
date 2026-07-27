@@ -1,4 +1,6 @@
 build*/
+!tools/nsmb-mvl-gui/build-profiles/
+!tools/nsmb-mvl-gui/build-profiles/*.json
 vcpkg/
 external/
 logs/

@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import { Tabs } from '../components/ui';
 import { initialForm } from '../form';
@@ -15,7 +15,18 @@ const summary: LauncherSummary = {
   updateRequired: false,
 };
 
-async function renderSettingsView() {
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+async function renderSettingsView(configurableSignalServer = true) {
+  vi.stubGlobal('__NSMB_MVL_RUNTIME_CAPABILITIES__', {
+    aiDevTools: true,
+    automaticUnresolvedSessionReport: true,
+    configurableSignalServer,
+    manualLogUpload: true,
+    notifyOwnRooms: true,
+  });
   const launcherActions = {
     checkForUpdate: vi.fn(async () => {}),
     cancelHostedRoom: vi.fn(async () => {}),
@@ -27,7 +38,6 @@ async function renderSettingsView() {
     openLogDir: vi.fn(async () => {}),
     openMelonds: vi.fn(async () => {}),
     openMelondsInputConfig: vi.fn(async () => {}),
-    pollStatus: vi.fn(async () => {}),
     preflightCheck: vi.fn(async () => {}),
     prepareRoms: vi.fn(async () => {}),
     refreshRooms: vi.fn(async () => {}),
@@ -90,21 +100,29 @@ describe('設定ビュー', () => {
     expect(launcherActions.savePlayerName).toHaveBeenCalledTimes(1);
   });
 
-  test('接続項目を更新してステータス確認を実行する', async () => {
-    const { launcherActions, screen, updateField } = await renderSettingsView();
+  test('localではシグナリングサーバーとUDPポートを更新する', async () => {
+    const { screen, updateField } = await renderSettingsView();
 
     await screen
       .getByLabelText('シグナリングサーバー')
       .fill('wss://match.test/session');
     await screen.getByLabelText('UDP ポート').fill('9000');
-    await screen.getByRole('button', { name: '接続確認' }).click();
-
     expect(updateField).toHaveBeenCalledWith(
       'signalUrl',
       'wss://match.test/session',
     );
     expect(updateField).toHaveBeenCalledWith('port', 9000);
-    expect(launcherActions.pollStatus).toHaveBeenCalledTimes(1);
+  });
+
+  test('distributionではシグナリングサーバー設定を表示しない', async () => {
+    const { screen } = await renderSettingsView(false);
+
+    expect(document.body.textContent).not.toContain('シグナリングサーバー');
+    expect(document.body.textContent).not.toContain('接続確認');
+    expect(document.body.textContent).not.toContain(
+      'ws://127.0.0.1:8787/session',
+    );
+    await expect.element(screen.getByLabelText('UDP ポート')).toBeVisible();
   });
 
   test('ロム、起動前チェック、melonDS 関連処理を実行する', async () => {

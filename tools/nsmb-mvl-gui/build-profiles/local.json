@@ -1,0 +1,8 @@
+{
+  "profile": "local",
+  "capabilities": {
+    "configurableSignalServer": true,
+    "developerTools": true,
+    "notifyOwnRooms": true
+  }
+}

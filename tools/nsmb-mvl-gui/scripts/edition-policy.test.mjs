@@ -10,6 +10,10 @@ import {
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
+import {
+  loadBuildProfileConfig,
+  resolveRuntimeCapabilities,
+} from './build-profile-config.mjs';
 import { loadEditionConfig, tauriEditionOverlay } from './edition-config.mjs';
 import {
   editionArtifactDirectory,
@@ -18,6 +22,8 @@ import {
 
 const insiders = loadEditionConfig('insiders');
 const publicEdition = loadEditionConfig('public');
+const localBuild = loadBuildProfileConfig('local');
+const distributionBuild = loadBuildProfileConfig('distribution');
 
 test('版ごとにインストール先・更新先・既定サーバーを分離する', () => {
   assert.notEqual(insiders.identifier, publicEdition.identifier);
@@ -40,6 +46,42 @@ test('Public版にInsiders限定機能を含めない', () => {
     false,
   );
   assert.equal(publicEdition.capabilities.aiDevToolsInLocalBuilds, false);
+});
+
+test('local版とdistribution版の機能差を能力一覧として定義する', () => {
+  assert.throws(
+    () => loadBuildProfileConfig('preview'),
+    /local または distribution/,
+  );
+  assert.deepEqual(localBuild.capabilities, {
+    configurableSignalServer: true,
+    developerTools: true,
+    notifyOwnRooms: true,
+  });
+  assert.deepEqual(distributionBuild.capabilities, {
+    configurableSignalServer: false,
+    developerTools: false,
+    notifyOwnRooms: false,
+  });
+
+  const localInsiders = resolveRuntimeCapabilities(insiders, localBuild);
+  const localPublic = resolveRuntimeCapabilities(publicEdition, localBuild);
+  const distributionInsiders = resolveRuntimeCapabilities(
+    insiders,
+    distributionBuild,
+  );
+
+  assert.equal(localInsiders.configurableSignalServer, true);
+  assert.equal(localInsiders.notifyOwnRooms, true);
+  assert.equal(localInsiders.aiDevTools, true);
+  assert.equal(localPublic.aiDevTools, false);
+  assert.equal(distributionInsiders.configurableSignalServer, false);
+  assert.equal(distributionInsiders.notifyOwnRooms, false);
+  assert.equal(distributionInsiders.aiDevTools, false);
+  assert.equal(
+    distributionInsiders.automaticUnresolvedSessionReport,
+    true,
+  );
 });
 
 test('Tauri overlayへ版固有値と指定バージョンを反映する', () => {

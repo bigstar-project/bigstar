@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   areAiDevToolsEnabled,
-  currentBuildProfile,
   currentEdition,
   currentEditionConfig,
-  editionCapabilities,
-  isDistributionBuild,
+  currentRuntimeCapabilities,
 } from './buildProfile';
 
 afterEach(() => {
@@ -13,45 +11,35 @@ afterEach(() => {
 });
 
 describe('build profile', () => {
-  test('未指定ならlocal buildとして扱う', () => {
-    expect(currentBuildProfile()).toBe('local');
-    expect(isDistributionBuild()).toBe(false);
-  });
-
-  test('distribution指定ならdistribution buildとして扱う', () => {
-    vi.stubGlobal('__NSMB_MVL_BUILD_PROFILE__', 'distribution');
-
-    expect(currentBuildProfile()).toBe('distribution');
-    expect(isDistributionBuild()).toBe(true);
-  });
-
-  test('AI開発機能は明示的にfalseのときだけ無効化する', () => {
+  test('未指定ならlocal Insiders向け能力を使用する', () => {
     expect(areAiDevToolsEnabled()).toBe(true);
-
-    vi.stubGlobal('__NSMB_MVL_AI_DEVTOOLS_ENABLED__', false);
-
-    expect(areAiDevToolsEnabled()).toBe(false);
-  });
-
-  test('未指定ならInsiders版として扱う', () => {
+    expect(currentRuntimeCapabilities()).toEqual({
+      aiDevTools: true,
+      automaticUnresolvedSessionReport: true,
+      configurableSignalServer: true,
+      manualLogUpload: true,
+      notifyOwnRooms: true,
+    });
     expect(currentEdition()).toBe('insiders');
     expect(currentEditionConfig().badge).toBe('Insiders');
-    expect(editionCapabilities().automaticUnresolvedSessionReport).toBe(true);
   });
 
-  test('生成されたPublic版設定を参照する', () => {
+  test('生成されたPublic distribution設定を参照する', () => {
     vi.stubGlobal('__NSMB_MVL_EDITION_CONFIG__', {
       badge: 'Public',
-      capabilities: {
-        aiDevToolsInLocalBuilds: false,
-        automaticUnresolvedSessionReport: false,
-        manualLogUpload: true,
-      },
       displayName: 'Bigstar',
       edition: 'public',
     });
+    vi.stubGlobal('__NSMB_MVL_RUNTIME_CAPABILITIES__', {
+      aiDevTools: false,
+      automaticUnresolvedSessionReport: false,
+      configurableSignalServer: false,
+      manualLogUpload: true,
+      notifyOwnRooms: false,
+    });
 
     expect(currentEdition()).toBe('public');
-    expect(editionCapabilities().automaticUnresolvedSessionReport).toBe(false);
+    expect(areAiDevToolsEnabled()).toBe(false);
+    expect(currentRuntimeCapabilities().configurableSignalServer).toBe(false);
   });
 });

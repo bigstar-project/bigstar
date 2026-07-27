@@ -57,7 +57,6 @@ export type LauncherActions = {
   openLogDir: (logDir?: string) => Promise<void>;
   openMelonds: () => Promise<void>;
   openMelondsInputConfig: () => Promise<void>;
-  pollStatus: () => Promise<void>;
   preflightCheck: () => Promise<void>;
   prepareRoms: () => Promise<void>;
   refreshRooms: () => Promise<void>;

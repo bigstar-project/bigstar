@@ -46,7 +46,6 @@ function actions(overrides: Partial<LauncherActions> = {}) {
     openLogDir: vi.fn(async () => {}),
     openMelonds: vi.fn(async () => {}),
     openMelondsInputConfig: vi.fn(async () => {}),
-    pollStatus: vi.fn(async () => {}),
     preflightCheck: vi.fn(async () => {}),
     prepareRoms: vi.fn(async () => {}),
     refreshRooms: vi.fn(async () => {}),

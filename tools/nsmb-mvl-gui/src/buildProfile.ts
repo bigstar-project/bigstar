@@ -1,29 +1,28 @@
-export type BuildProfile = 'distribution' | 'local';
 export type AppEdition = 'insiders' | 'public';
+export type RuntimeCapabilities = {
+  aiDevTools: boolean;
+  automaticUnresolvedSessionReport: boolean;
+  configurableSignalServer: boolean;
+  manualLogUpload: boolean;
+  notifyOwnRooms: boolean;
+};
 
 const insidersFallback = {
   badge: 'Insiders',
-  capabilities: {
-    aiDevToolsInLocalBuilds: true,
-    automaticUnresolvedSessionReport: true,
-    manualLogUpload: true,
-  },
   displayName: 'Bigstar Insiders',
   edition: 'insiders' as const,
 };
 
-export function currentBuildProfile(): BuildProfile {
-  return globalThis.__NSMB_MVL_BUILD_PROFILE__ === 'distribution'
-    ? 'distribution'
-    : 'local';
-}
-
-export function isDistributionBuild() {
-  return currentBuildProfile() === 'distribution';
-}
+const localInsidersCapabilities: RuntimeCapabilities = {
+  aiDevTools: true,
+  automaticUnresolvedSessionReport: true,
+  configurableSignalServer: true,
+  manualLogUpload: true,
+  notifyOwnRooms: true,
+};
 
 export function areAiDevToolsEnabled() {
-  return globalThis.__NSMB_MVL_AI_DEVTOOLS_ENABLED__ !== false;
+  return currentRuntimeCapabilities().aiDevTools;
 }
 
 export function currentEditionConfig() {
@@ -34,6 +33,8 @@ export function currentEdition(): AppEdition {
   return currentEditionConfig().edition;
 }
 
-export function editionCapabilities() {
-  return currentEditionConfig().capabilities;
+export function currentRuntimeCapabilities(): RuntimeCapabilities {
+  return (
+    globalThis.__NSMB_MVL_RUNTIME_CAPABILITIES__ ?? localInsidersCapabilities
+  );
 }

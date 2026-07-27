@@ -53,6 +53,17 @@ build are copied to `artifacts/<edition>/release`. The generated
 mutable executable directly under `src-tauri/target/release` when comparing
 editions.
 
+## Capability configuration
+
+Product differences are declared under `editions/`, while local/distribution
+build differences are declared under `build-profiles/`. Vite resolves both
+axes into one runtime capability set, so application code checks positive
+capability names instead of edition names or negated build-profile conditions.
+
+- `local` allows signaling-server configuration, developer tools when the
+  edition permits them, and notifications for rooms hosted by the local player.
+- `distribution` disables those development-oriented capabilities.
+
 ## Legacy updater bridge
 
 Released `0.9.x` installations read updater metadata from GitHub's

@@ -1,0 +1,8 @@
+{
+  "profile": "distribution",
+  "capabilities": {
+    "configurableSignalServer": false,
+    "developerTools": false,
+    "notifyOwnRooms": false
+  }
+}

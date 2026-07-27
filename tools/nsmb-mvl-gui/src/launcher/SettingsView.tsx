@@ -11,12 +11,12 @@ import {
   Trash,
   UserCircle,
   WarningCircle,
-  WifiHigh,
 } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { css, cx } from 'styled-system/css';
 import { surface } from 'styled-system/recipes';
 import { token } from 'styled-system/tokens';
+import { currentRuntimeCapabilities } from '../buildProfile';
 import {
   FilePathField,
   NumberField,
@@ -66,7 +66,6 @@ export function SettingsView({
     | 'openMelonds'
     | 'openMelondsInputConfig'
     | 'cleanupDetailedLogs'
-    | 'pollStatus'
     | 'preflightCheck'
     | 'prepareRoms'
     | 'savePlayerName'
@@ -80,6 +79,7 @@ export function SettingsView({
 }) {
   const [cleanupConfirmOpen, setCleanupConfirmOpen] = useState(false);
   const [cleanupBusy, setCleanupBusy] = useState(false);
+  const { configurableSignalServer } = currentRuntimeCapabilities();
 
   return (
     <Tabs.Content value="settings">
@@ -397,30 +397,13 @@ export function SettingsView({
             icon={<Broadcast size={24} weight="bold" />}
             title="接続設定"
           >
-            <div
-              className={css({
-                display: 'grid',
-                gap: '2',
-                gridTemplateColumns: {
-                  base: '1fr',
-                  md: 'minmax(0, 1fr) auto',
-                },
-              })}
-            >
+            {configurableSignalServer ? (
               <TextField
                 label="シグナリングサーバー"
                 value={form.signalUrl}
                 onChange={(value) => updateField('signalUrl', value)}
               />
-              <Button
-                className={css({ alignSelf: 'end' })}
-                variant="outline"
-                onClick={() => void actions.pollStatus()}
-              >
-                <WifiHigh size={18} weight="bold" />
-                接続確認
-              </Button>
-            </div>
+            ) : null}
             <NumberField
               label="UDP ポート"
               value={form.port}
@@ -524,7 +507,9 @@ export function SettingsView({
               value={shortPath(summary.currentRomPath)}
             />
             <SummaryItem label="共通 ROM" value={summary.romPreparation} />
-            <SummaryItem label="シグナリング" value={form.signalUrl || '-'} />
+            {configurableSignalServer ? (
+              <SummaryItem label="シグナリング" value={form.signalUrl || '-'} />
+            ) : null}
             <SummaryItem label="UDP ポート" value={String(form.port)} />
           </InfoPanel>
         </aside>

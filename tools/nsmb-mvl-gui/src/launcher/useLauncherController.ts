@@ -2,7 +2,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { parseAsStringLiteral, useQueryState } from 'nuqs';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { areAiDevToolsEnabled, isDistributionBuild } from '../buildProfile';
+import {
+  areAiDevToolsEnabled,
+  currentRuntimeCapabilities,
+} from '../buildProfile';
 import {
   currentSettings,
   defaultInputDelayFrames,
@@ -239,6 +242,7 @@ function defaultPlayerIds(
 
 export function useLauncherController() {
   const aiDevToolsEnabled = areAiDevToolsEnabled();
+  const runtimeCapabilities = currentRuntimeCapabilities();
   const queryClient = useQueryClient();
   const defaultsQuery = useQuery(defaultsQueryOptions());
   const startupEnabledQuery = useQuery(startupEnabledQueryOptions());
@@ -454,7 +458,7 @@ export function useLauncherController() {
       }
 
       const seen = lobbySeenRoomIdsRef.current ?? new Set<string>();
-      const excludeOwnRooms = isDistributionBuild();
+      const excludeOwnRooms = !runtimeCapabilities.notifyOwnRooms;
       for (const room of nextRooms) {
         const isOwnHostedRoom =
           excludeOwnRooms &&
@@ -475,7 +479,7 @@ export function useLauncherController() {
       }
       lobbySeenRoomIdsRef.current = seen;
     },
-    [form.signalUrl],
+    [form.signalUrl, runtimeCapabilities.notifyOwnRooms],
   );
 
   useEffect(() => {
@@ -740,10 +744,6 @@ export function useLauncherController() {
     sessionStatusQuery.error,
     startupEnabledQuery.error,
   ]);
-
-  const pollStatus = useCallback(async () => {
-    await sessionStatusQuery.refetch();
-  }, [sessionStatusQuery]);
 
   const selectRomPath = async (key: SelectRomKey) => {
     try {
@@ -1532,7 +1532,6 @@ export function useLauncherController() {
     openLogDir,
     openMelonds,
     openMelondsInputConfig,
-    pollStatus,
     preflightCheck,
     prepareRoms,
     refreshRooms,
