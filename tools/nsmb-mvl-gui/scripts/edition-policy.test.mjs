@@ -125,6 +125,34 @@ test('開発起動を共通ランナー経由で版別に構成する', () => {
     packageJson.scripts['build:public'],
     /tauri-edition\.mjs build/,
   );
+  assert.match(
+    packageJson.scripts.build,
+    /--edition insiders --build-profile local/,
+  );
+  assert.match(
+    packageJson.scripts['build:local:insiders'],
+    /--edition insiders --build-profile local/,
+  );
+  assert.match(
+    packageJson.scripts['build:local:public'],
+    /--edition public --build-profile local/,
+  );
+  assert.match(
+    packageJson.scripts['build:distribution:insiders'],
+    /--edition insiders --build-profile distribution/,
+  );
+  assert.match(
+    packageJson.scripts['build:distribution:public'],
+    /--edition public --build-profile distribution/,
+  );
+  assert.equal(
+    packageJson.scripts['build:insiders'],
+    packageJson.scripts['build:distribution:insiders'],
+  );
+  assert.equal(
+    packageJson.scripts['build:public'],
+    packageJson.scripts['build:distribution:public'],
+  );
 });
 
 test('共有Rustキャッシュから版別成果物だけを保存する', () => {

@@ -38,13 +38,24 @@ with onboarding completed and sample match history when no preview history has
 been stored. Open `http://127.0.0.1:1420/` to inspect the first-run onboarding
 flow.
 
-Build a bundle:
+Build a local bundle for development and manual verification:
+
+```powershell
+corepack pnpm build:local:insiders
+corepack pnpm build:local:public
+```
+
+Build a distribution bundle:
 
 ```powershell
 .\..\..\scripts\prepare-nsmb-mvl-tauri-sidecars.ps1
-corepack pnpm build:insiders
-corepack pnpm build:public
+corepack pnpm build:distribution:insiders
+corepack pnpm build:distribution:public
 ```
+
+`build` and `build:local` are aliases of `build:local:insiders`.
+`build:insiders` and `build:public` remain compatibility aliases for the
+corresponding distribution builds.
 
 Cargo dependencies stay in the shared `src-tauri/target` cache. After each
 successful build, the runnable payload and only the installers produced by that
