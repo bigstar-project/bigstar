@@ -4,6 +4,7 @@
   "badge": "Insiders",
   "identifier": "io.github.bigstar-project.bigstar.insiders",
   "dataDirectoryName": "Bigstar Insiders",
+  "devPort": 1420,
   "defaultSignalUrl": "wss://nsmb-mvl-signaling-insiders-signaling-prod.uniunitaro.workers.dev/session",
   "updater": {
     "endpoint": "https://github.com/bigstar-project/bigstar/releases/download/insiders-latest/latest.json",

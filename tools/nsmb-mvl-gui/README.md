@@ -17,8 +17,15 @@ cargo check
 Run the GUI during development:
 
 ```powershell
-corepack pnpm dev
+corepack pnpm dev:insiders
+corepack pnpm dev:public
 ```
+
+`dev` is an alias of `dev:insiders`. Both commands use the same Rust target
+cache, but apply the complete edition configuration before starting Tauri.
+Insiders uses Vite port `1420`; Public uses `1421`. Their identifiers, updater
+channels, signaling defaults, capabilities, and AppData directories remain
+separate.
 
 Run the React UI in a browser without Tauri or sidecars:
 
@@ -35,8 +42,16 @@ Build a bundle:
 
 ```powershell
 .\..\..\scripts\prepare-nsmb-mvl-tauri-sidecars.ps1
-corepack pnpm build
+corepack pnpm build:insiders
+corepack pnpm build:public
 ```
+
+Cargo dependencies stay in the shared `src-tauri/target` cache. After each
+successful build, the runnable payload and only the installers produced by that
+build are copied to `artifacts/<edition>/release`. The generated
+`artifact-manifest.json` records the edition and files, so do not use the
+mutable executable directly under `src-tauri/target/release` when comparing
+editions.
 
 ## Legacy updater bridge
 

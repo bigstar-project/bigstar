@@ -8,6 +8,7 @@ import {
   tauriEditionOverlay,
   writeTauriEditionOverlay,
 } from './edition-config.mjs';
+import { stageEditionArtifacts } from './stage-edition-artifacts.mjs';
 
 function parseEnvFile(content) {
   const entries = {};
@@ -43,9 +44,9 @@ function loadLocalBuildEnv() {
   return parseEnvFile(readFileSync(envPath, 'utf8'));
 }
 
-function parseBuildArgs(args) {
+function parseTauriArgs(args, command) {
   const forwardedArgs = [];
-  let buildProfile = null;
+  let buildProfile = command === 'dev' ? 'local' : null;
   let edition = process.env.NSMB_MVL_EDITION || 'insiders';
   let appVersion = process.env.NSMB_MVL_APP_VERSION || null;
   const extraConfigs = [];
@@ -92,8 +93,16 @@ function parseBuildArgs(args) {
     }
     forwardedArgs.push(arg);
   }
-  if (buildProfile !== null && buildProfile !== 'local' && buildProfile !== 'distribution') {
+  if (
+    buildProfile !== null &&
+    buildProfile !== 'local' &&
+    buildProfile !== 'distribution'
+  ) {
     console.error('--build-profile は local または distribution を指定してください');
+    process.exit(1);
+  }
+  if (command === 'dev' && buildProfile !== 'local') {
+    console.error('dev コマンドでは distribution profile を使用できません');
     process.exit(1);
   }
   try {
@@ -102,7 +111,10 @@ function parseBuildArgs(args) {
     console.error(error.message);
     process.exit(1);
   }
-  if (appVersion !== null && !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(appVersion)) {
+  if (
+    appVersion !== null &&
+    !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(appVersion)
+  ) {
     console.error('--app-version は SemVer 形式で指定してください');
     process.exit(1);
   }
@@ -175,7 +187,12 @@ function mergeObjects(base, override) {
   return override;
 }
 
-function mergeExtraConfigs(editionConfig, appVersion, extraConfigs) {
+function mergeExtraConfigs(
+  editionConfig,
+  appVersion,
+  extraConfigs,
+  development,
+) {
   let overlay = {};
   for (const configPath of extraConfigs) {
     const resolvedPath = resolve(process.cwd(), configPath);
@@ -184,12 +201,13 @@ function mergeExtraConfigs(editionConfig, appVersion, extraConfigs) {
   }
   overlay = mergeObjects(
     overlay,
-    tauriEditionOverlay(editionConfig, appVersion),
+    tauriEditionOverlay(editionConfig, appVersion, { development }),
   );
   const outputPath = writeTauriEditionOverlay(
     editionConfig,
     appVersion,
     process.cwd(),
+    { development },
   );
   if (extraConfigs.length > 0) {
     writeFileSync(outputPath, `${JSON.stringify(overlay, null, 2)}\n`, 'utf8');
@@ -199,7 +217,13 @@ function mergeExtraConfigs(editionConfig, appVersion, extraConfigs) {
 
 const pnpmCli = process.env.npm_execpath;
 if (!pnpmCli) {
-  console.error('pnpm から build script を実行してください');
+  console.error('pnpm から Tauri script を実行してください');
+  process.exit(1);
+}
+
+const [command, ...commandArgs] = process.argv.slice(2);
+if (command !== 'dev' && command !== 'build') {
+  console.error('Usage: tauri-edition.mjs <dev|build> [options]');
   process.exit(1);
 }
 
@@ -210,15 +234,15 @@ const {
   edition,
   extraConfigs,
   forwardedArgs,
-} = parseBuildArgs(process.argv.slice(2));
+} = parseTauriArgs(commandArgs, command);
 const editionConfig = loadEditionConfig(edition);
-let tauriBuildArgs =
-  buildProfile === 'distribution'
+let tauriArgs =
+  command === 'build' && buildProfile === 'distribution'
     ? ensureCargoFeature(forwardedArgs, 'single-instance')
     : forwardedArgs;
 if (edition === 'insiders') {
-  tauriBuildArgs = ensureCargoFeature(tauriBuildArgs, 'insiders-edition');
-} else if (hasCargoFeature(tauriBuildArgs, 'insiders-edition')) {
+  tauriArgs = ensureCargoFeature(tauriArgs, 'insiders-edition');
+} else if (hasCargoFeature(tauriArgs, 'insiders-edition')) {
   console.error('Public版へ insiders-edition feature は指定できません');
   process.exit(1);
 }
@@ -226,20 +250,28 @@ const editionOverlayPath = mergeExtraConfigs(
   editionConfig,
   appVersion,
   extraConfigs,
+  command === 'dev',
 );
-tauriBuildArgs = [...tauriBuildArgs, '--config', editionOverlayPath];
+tauriArgs = [...tauriArgs, '--config', editionOverlayPath];
+const buildStartedAt = Date.now();
+const resolvedAppVersion =
+  appVersion || process.env.npm_package_version || '0.0.0';
+const targetRoot = process.env.CARGO_TARGET_DIR
+  ? resolve(process.cwd(), process.env.CARGO_TARGET_DIR)
+  : resolve(process.cwd(), 'src-tauri', 'target');
 const child = spawn(
   process.execPath,
-  [pnpmCli, 'tauri', 'build', ...tauriBuildArgs],
+  [pnpmCli, 'tauri', command, ...tauriArgs],
   {
     cwd: process.cwd(),
     env: {
       ...process.env,
       ...localEnv,
       ...(buildProfile ? { NSMB_MVL_BUILD_PROFILE: buildProfile } : {}),
-      NSMB_MVL_APP_VERSION: appVersion || process.env.npm_package_version,
+      NSMB_MVL_APP_VERSION: resolvedAppVersion,
       NSMB_MVL_APP_DATA_DIR_NAME: editionConfig.dataDirectoryName,
       NSMB_MVL_DEFAULT_SIGNAL_URL: editionConfig.defaultSignalUrl,
+      NSMB_MVL_DEV_PORT: String(editionConfig.devPort),
       NSMB_MVL_EDITION: edition,
     },
     shell: false,
@@ -251,6 +283,29 @@ child.on('exit', (code, signal) => {
   if (signal) {
     process.kill(process.pid, signal);
     return;
+  }
+  if (code === 0 && command === 'build') {
+    try {
+      const profile =
+        tauriArgs.includes('--debug') || tauriArgs.includes('-d')
+          ? 'debug'
+          : 'release';
+      const destination = stageEditionArtifacts({
+        appVersion: resolvedAppVersion,
+        buildProfile: buildProfile || 'local',
+        buildStartedAt,
+        editionConfig,
+        guiRoot: process.cwd(),
+        includeBundles: !tauriArgs.includes('--no-bundle'),
+        profile,
+        targetRoot,
+      });
+      console.log(`staged ${edition} artifacts: ${destination}`);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : error);
+      process.exit(1);
+      return;
+    }
   }
   process.exit(code ?? 1);
 });

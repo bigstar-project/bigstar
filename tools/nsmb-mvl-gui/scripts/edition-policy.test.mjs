@@ -1,7 +1,20 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import test from 'node:test';
 import { loadEditionConfig, tauriEditionOverlay } from './edition-config.mjs';
+import {
+  editionArtifactDirectory,
+  stageEditionArtifacts,
+} from './stage-edition-artifacts.mjs';
 
 const insiders = loadEditionConfig('insiders');
 const publicEdition = loadEditionConfig('public');
@@ -14,6 +27,7 @@ test('版ごとにインストール先・更新先・既定サーバーを分�
   );
   assert.notEqual(insiders.updater.endpoint, publicEdition.updater.endpoint);
   assert.notEqual(insiders.defaultSignalUrl, publicEdition.defaultSignalUrl);
+  assert.notEqual(insiders.devPort, publicEdition.devPort);
 });
 
 test('Public版にInsiders限定機能を含めない', () => {
@@ -43,6 +57,108 @@ test('Tauri overlayへ版固有値と指定バージョンを反映する', () =
     insidersOverlay.bundle.windows.nsis.installerHooks,
     './windows/legacy-install-migration.nsh',
   );
+
+  const publicDevOverlay = tauriEditionOverlay(
+    publicEdition,
+    '1.2.3',
+    { development: true },
+  );
+  assert.equal(
+    publicDevOverlay.build.devUrl,
+    `http://127.0.0.1:${publicEdition.devPort}`,
+  );
+});
+
+test('開発起動を共通ランナー経由で版別に構成する', () => {
+  const packageJson = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+  );
+  assert.match(packageJson.scripts['dev:insiders'], /tauri-edition\.mjs dev/);
+  assert.match(packageJson.scripts['dev:public'], /tauri-edition\.mjs dev/);
+  assert.match(
+    packageJson.scripts['build:insiders'],
+    /tauri-edition\.mjs build/,
+  );
+  assert.match(
+    packageJson.scripts['build:public'],
+    /tauri-edition\.mjs build/,
+  );
+});
+
+test('共有Rustキャッシュから版別成果物だけを保存する', () => {
+  const root = mkdtempSync(resolve(tmpdir(), 'bigstar-artifacts-'));
+  try {
+    const targetRelease = resolve(root, 'src-tauri', 'target', 'release');
+    mkdirSync(resolve(targetRelease, 'bundle', 'nsis'), { recursive: true });
+    mkdirSync(resolve(targetRelease, 'resources'), { recursive: true });
+    for (const fileName of [
+      'nsmb-mvl-gui.exe',
+      'melonDS.exe',
+      'nsmb-net-bridge.exe',
+    ]) {
+      writeFileSync(resolve(targetRelease, fileName), fileName);
+    }
+    writeFileSync(resolve(targetRelease, 'resources', 'symbols9.x'), 'symbols');
+    writeFileSync(
+      resolve(
+        targetRelease,
+        'bundle',
+        'nsis',
+        'Bigstar Insiders_1.2.3_x64-setup.exe',
+      ),
+      'insiders',
+    );
+    writeFileSync(
+      resolve(
+        targetRelease,
+        'bundle',
+        'nsis',
+        'Bigstar_1.2.3_x64-setup.exe',
+      ),
+      'public',
+    );
+
+    const destination = stageEditionArtifacts({
+      appVersion: '1.2.3',
+      buildProfile: 'distribution',
+      buildStartedAt: Date.now(),
+      editionConfig: insiders,
+      guiRoot: root,
+      includeBundles: true,
+      profile: 'release',
+      targetRoot: resolve(root, 'src-tauri', 'target'),
+    });
+    assert.equal(
+      destination,
+      editionArtifactDirectory(root, 'insiders', 'release'),
+    );
+    assert.equal(
+      existsSync(
+        resolve(
+          destination,
+          'installers',
+          'Bigstar Insiders_1.2.3_x64-setup.exe',
+        ),
+      ),
+      true,
+    );
+    assert.equal(
+      existsSync(
+        resolve(destination, 'installers', 'Bigstar_1.2.3_x64-setup.exe'),
+      ),
+      false,
+    );
+    const manifest = JSON.parse(
+      readFileSync(
+        resolve(destination, 'artifact-manifest.json'),
+        'utf8',
+      ),
+    );
+    assert.equal(manifest.edition, 'insiders');
+    assert.equal(manifest.rustCache, 'shared');
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
 });
 
 test('Bigstarの版名・識別子・保存先を使用する', () => {
@@ -118,6 +234,7 @@ test('通常のInsidersビルドは専用更新チャンネルだけを参照す
   assert.deepEqual(tauriConfig.plugins.updater.endpoints, [
     insiders.updater.endpoint,
   ]);
+  assert.equal(tauriConfig.app.windows[0].title, 'Bigstar');
 });
 
 test('通常ビルドのバージョンをNode・Tauri・Cargoで統一する', () => {

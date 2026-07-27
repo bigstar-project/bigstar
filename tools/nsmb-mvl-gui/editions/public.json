@@ -4,6 +4,7 @@
   "badge": "Public",
   "identifier": "io.github.bigstar-project.bigstar",
   "dataDirectoryName": "Bigstar",
+  "devPort": 1421,
   "defaultSignalUrl": "wss://nsmb-mvl-signaling-public-signaling-prod.uniunitaro.workers.dev/session",
   "updater": {
     "endpoint": "https://github.com/bigstar-project/bigstar/releases/download/public-latest/latest.json",

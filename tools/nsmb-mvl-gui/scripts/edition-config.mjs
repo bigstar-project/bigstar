@@ -46,6 +46,15 @@ export function validateEditionConfig(config, expectedEdition) {
       `${expectedEdition}.dataDirectoryName にパス区切りは指定できません`,
     );
   }
+  if (
+    !Number.isInteger(config.devPort) ||
+    config.devPort < 1024 ||
+    config.devPort > 65535
+  ) {
+    throw new Error(
+      `${expectedEdition}.devPort は 1024 から 65535 の整数が必要です`,
+    );
+  }
   if (!/^wss?:\/\//.test(config.defaultSignalUrl)) {
     throw new Error(`${expectedEdition}.defaultSignalUrl は WebSocket URL が必要です`);
   }
@@ -92,7 +101,7 @@ export function validateEditionConfig(config, expectedEdition) {
   }
 }
 
-export function tauriEditionOverlay(config, version) {
+export function tauriEditionOverlay(config, version, options = {}) {
   const overlay = {
     productName: config.displayName,
     identifier: config.identifier,
@@ -115,10 +124,20 @@ export function tauriEditionOverlay(config, version) {
   if (version) {
     overlay.version = version;
   }
+  if (options.development) {
+    overlay.build = {
+      devUrl: `http://127.0.0.1:${config.devPort}`,
+    };
+  }
   return overlay;
 }
 
-export function writeTauriEditionOverlay(config, version, root = process.cwd()) {
+export function writeTauriEditionOverlay(
+  config,
+  version,
+  root = process.cwd(),
+  options = {},
+) {
   const path = resolve(
     root,
     'src-tauri',
@@ -129,7 +148,7 @@ export function writeTauriEditionOverlay(config, version, root = process.cwd()) 
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(
     path,
-    `${JSON.stringify(tauriEditionOverlay(config, version), null, 2)}\n`,
+    `${JSON.stringify(tauriEditionOverlay(config, version, options), null, 2)}\n`,
     'utf8',
   );
   return path;

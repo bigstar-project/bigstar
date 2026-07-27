@@ -11,6 +11,7 @@ const buildProfile =
     : 'local';
 const edition = process.env.NSMB_MVL_EDITION || 'insiders';
 const editionConfig = loadEditionConfig(edition);
+const devPort = Number(process.env.NSMB_MVL_DEV_PORT || editionConfig.devPort);
 const aiDevToolsEnabled =
   buildProfile === 'local' &&
   editionConfig.capabilities.aiDevToolsInLocalBuilds;
@@ -55,7 +56,7 @@ export default defineConfig({
   },
   server: {
     host: '127.0.0.1',
-    port: 1420,
+    port: devPort,
     strictPort: true,
     watch: {
       ignored: ['**/src-tauri/**'],
