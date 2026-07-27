@@ -13,7 +13,6 @@ mod processes;
 mod roms;
 mod settings;
 mod state;
-mod window_state;
 mod windowing;
 
 #[cfg(test)]
@@ -30,6 +29,7 @@ use tauri::{
 };
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_window_state::{StateFlags, WindowExt};
 use tauri_specta::{collect_commands, Builder as SpectaBuilder};
 use windowing::show_main_window;
 
@@ -109,6 +109,14 @@ fn main() {
     }));
 
     builder
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("app-data-migration")
+                .setup(|app, _api| {
+                    paths::migrate_legacy_insiders_app_data(app)
+                        .map_err(|err| std::io::Error::other(err).into())
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![STARTUP_ARG]),
@@ -116,6 +124,13 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(window_state_flags())
+                .with_state_directory(config::app_data_dir_name())
+                .skip_initial_state("main")
+                .build(),
+        )
         .manage(AppState::default())
         .invoke_handler(specta_builder.invoke_handler())
         .on_window_event(|window, event| {
@@ -128,7 +143,6 @@ fn main() {
             }
         })
         .setup(move |app| {
-            paths::migrate_legacy_insiders_app_data(app.handle()).map_err(std::io::Error::other)?;
             specta_builder.mount_events(app);
             setup_tray(app)?;
             start_session_supervisor(app.handle().clone());
@@ -137,9 +151,7 @@ fn main() {
             }
             if let Some(window) = app.get_webview_window("main") {
                 window.set_title(config::app_display_name())?;
-                if let Err(err) = window_state::restore_main_window_state(app.handle()) {
-                    eprintln!("{err}");
-                }
+                let _ = window.restore_state(window_state_flags());
                 if !startup_launch {
                     show_main_window(Some(window));
                 }
@@ -148,13 +160,11 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            if matches!(event, tauri::RunEvent::Exit) {
-                if let Err(err) = window_state::save_main_window_state(app) {
-                    eprintln!("{err}");
-                }
-            }
-        });
+        .run(|_, _| {});
+}
+
+fn window_state_flags() -> StateFlags {
+    StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED | StateFlags::FULLSCREEN
 }
 
 fn start_session_supervisor(app: tauri::AppHandle) {

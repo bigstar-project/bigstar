@@ -181,6 +181,36 @@ test('Bigstarの版名・識別子・保存先を使用する', () => {
   );
 });
 
+test('ウィンドウ状態を版別のアプリデータへ保存する', () => {
+  const cargoManifest = readFileSync(
+    new URL('../src-tauri/Cargo.toml', import.meta.url),
+    'utf8',
+  );
+  const mainSource = readFileSync(
+    new URL('../src-tauri/src/main.rs', import.meta.url),
+    'utf8',
+  );
+  const patchedPlugin = readFileSync(
+    new URL(
+      '../src-tauri/vendor/tauri-plugin-window-state/src/lib.rs',
+      import.meta.url,
+    ),
+    'utf8',
+  );
+
+  assert.match(
+    cargoManifest,
+    /tauri-plugin-window-state = \{ path = "vendor\/tauri-plugin-window-state" \}/,
+  );
+  assert.match(
+    mainSource,
+    /\.with_state_directory\(config::app_data_dir_name\(\)\)/,
+  );
+  assert.doesNotMatch(mainSource, /^mod window_state;/m);
+  assert.match(patchedPlugin, /pub fn with_state_directory/);
+  assert.match(patchedPlugin, /\.path\(\)\.data_dir\(\)/);
+});
+
 test('旧版の移行インストーラーをInsidersだけへ組み込む', () => {
   const migrationHooks = readFileSync(
     new URL(
