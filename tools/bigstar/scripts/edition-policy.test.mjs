@@ -239,6 +239,12 @@ test('Bigstarの版名・識別子・保存先を使用する', () => {
     new URL('../src-tauri/Cargo.toml', import.meta.url),
     'utf8',
   );
+  const tauriConfig = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/tauri.conf.json', import.meta.url),
+      'utf8',
+    ),
+  );
   const bridgeManifest = readFileSync(
     new URL('../../bigstar-net-bridge/Cargo.toml', import.meta.url),
     'utf8',
@@ -256,6 +262,7 @@ test('Bigstarの版名・識別子・保存先を使用する', () => {
   assert.match(cargoManifest, /^name = "bigstar"$/m);
   assert.match(bridgeManifest, /^name = "bigstar-net-bridge"$/m);
   assert.match(romManifest, /^name = "bigstar-rom"$/m);
+  assert.equal(tauriConfig.bundle.publisher, 'Bigstar Project');
   assert.equal(publicEdition.displayName, 'Bigstar');
   assert.equal(publicEdition.identifier, 'io.github.bigstar-project.bigstar');
   assert.equal(publicEdition.dataDirectoryName, 'Bigstar');
@@ -335,6 +342,16 @@ test('旧版の移行インストーラーをInsidersだけへ組み込む', () 
     /FileExists.*\$INSTDIR\\bigstar\.exe/,
   );
   assert.match(migrationHooks, /BIGSTAR_REMOVE_LEGACY_SHORTCUT/);
+  assert.match(migrationHooks, /BIGSTAR_DETECT_LEGACY_SHORTCUT/);
+  assert.match(migrationHooks, /BIGSTAR_CREATE_MIGRATED_SHORTCUT/);
+  assert.match(
+    migrationHooks,
+    /BigstarLegacyStartMenuShortcutFound/,
+  );
+  assert.match(migrationHooks, /BigstarLegacyDesktopShortcutFound/);
+  assert.match(migrationHooks, /\$SMPROGRAMS\\\$\{PRODUCTNAME\}\.lnk/);
+  assert.match(migrationHooks, /\$DESKTOP\\\$\{PRODUCTNAME\}\.lnk/);
+  assert.match(migrationHooks, /SetLnkAppUserModelId/);
   assert.match(migrationHooks, /DeleteRegValue HKCU/);
   assert.match(migrationHooks, /DeleteRegKey SHCTX/);
   assert.doesNotMatch(migrationHooks, /RMDir\s+\/r/i);

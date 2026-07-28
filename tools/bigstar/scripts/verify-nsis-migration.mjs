@@ -21,6 +21,7 @@ const migrationHooks = readFileSync(
 
 if (edition === 'insiders') {
   assert.match(installer, /!define PRODUCTNAME "Bigstar Insiders"/);
+  assert.match(installer, /!define MANUFACTURER "Bigstar Project"/);
   assert.match(
     installer,
     /!define BUNDLEID "io\.github\.bigstar-project\.bigstar\.insiders"/,
@@ -33,8 +34,25 @@ if (edition === 'insiders') {
   assert.match(migrationHooks, /!macro NSIS_HOOK_PREINSTALL/);
   assert.match(migrationHooks, /!macro NSIS_HOOK_POSTINSTALL/);
   assert.match(migrationHooks, /\/UPDATE \/P/);
+  assert.match(
+    migrationHooks,
+    /BIGSTAR_DETECT_LEGACY_SHORTCUT.*BigstarLegacyStartMenuShortcutFound/,
+  );
+  assert.match(
+    migrationHooks,
+    /BIGSTAR_DETECT_LEGACY_SHORTCUT.*BigstarLegacyDesktopShortcutFound/,
+  );
+  assert.match(
+    migrationHooks,
+    /BIGSTAR_CREATE_MIGRATED_SHORTCUT "\$SMPROGRAMS\\\$\{PRODUCTNAME\}\.lnk"/,
+  );
+  assert.match(
+    migrationHooks,
+    /BIGSTAR_CREATE_MIGRATED_SHORTCUT "\$DESKTOP\\\$\{PRODUCTNAME\}\.lnk"/,
+  );
 } else {
   assert.match(installer, /!define PRODUCTNAME "Bigstar"/);
+  assert.match(installer, /!define MANUFACTURER "Bigstar Project"/);
   assert.match(
     installer,
     /!define BUNDLEID "io\.github\.bigstar-project\.bigstar"/,

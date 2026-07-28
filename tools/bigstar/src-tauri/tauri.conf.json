@@ -28,6 +28,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Bigstar Project",
     "icon": [
       "icons/icon.ico"
     ],
