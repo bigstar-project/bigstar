@@ -19,6 +19,7 @@ import {
   editionArtifactDirectory,
   stageEditionArtifacts,
 } from './stage-edition-artifacts.mjs';
+import { setBigstarVersion } from './set-version.mjs';
 
 const insiders = loadEditionConfig('insiders');
 const publicEdition = loadEditionConfig('public');
@@ -374,6 +375,38 @@ test('旧LatestをInsiders移行チャンネルへ固定する', () => {
   assert.match(workflow, /make_latest=true/);
 });
 
+test('リリース時に共通バージョンをコミットしてタグと一括送信する', () => {
+  const workflow = readFileSync(
+    new URL(
+      '../../../.github/workflows/bigstar-tauri.yml',
+      import.meta.url,
+    ),
+    'utf8',
+  );
+
+  assert.match(workflow, /group:.*bigstar-release/);
+  assert.match(workflow, /cancel-in-progress: false/);
+  assert.match(
+    workflow,
+    /Release publishing must be dispatched from \$\{\{ github\.event\.repository\.default_branch \}\}/,
+  );
+  assert.match(workflow, /node \$versionScript \$version/);
+  assert.match(
+    workflow,
+    /git add \$packagePath \$tauriConfigPath \$cargoManifestPath \$cargoLockPath/,
+  );
+  assert.match(
+    workflow,
+    /git commit -m "chore: Bigstarを\$\{version\}に更新"/,
+  );
+  assert.match(
+    workflow,
+    /git push --atomic origin "HEAD:refs\/heads\/\$branch" "refs\/tags\/\$tag"/,
+  );
+  assert.match(workflow, /\$checkoutRef = \$tag/);
+  assert.doesNotMatch(workflow, /without mutating main/);
+});
+
 test('通常のInsidersビルドは専用更新チャンネルだけを参照する', () => {
   const tauriConfig = JSON.parse(
     readFileSync(
@@ -404,7 +437,85 @@ test('通常ビルドのバージョンをNode・Tauri・Cargoで統一する', 
   const cargoVersion = cargoManifest.match(
     /^\[package\][\s\S]*?^version = "([^"]+)"/m,
   )?.[1];
+  const cargoLock = readFileSync(
+    new URL('../src-tauri/Cargo.lock', import.meta.url),
+    'utf8',
+  );
+  const cargoLockVersion = cargoLock.match(
+    /^\[\[package\]\]\r?\nname = "bigstar"\r?\nversion = "([^"]+)"/m,
+  )?.[1];
 
   assert.equal(tauriVersion, packageVersion);
   assert.equal(cargoVersion, packageVersion);
+  assert.equal(cargoLockVersion, packageVersion);
+});
+
+test('リリースバージョンをNode・Tauri・Cargoへ一括反映する', () => {
+  const root = mkdtempSync(resolve(tmpdir(), 'bigstar-version-'));
+  try {
+    mkdirSync(resolve(root, 'src-tauri'), { recursive: true });
+    writeFileSync(
+      resolve(root, 'package.json'),
+      `${JSON.stringify({ name: 'bigstar', version: '1.2.3' }, null, 2)}\n`,
+    );
+    writeFileSync(
+      resolve(root, 'src-tauri', 'tauri.conf.json'),
+      `${JSON.stringify({ version: '1.2.3' }, null, 2)}\n`,
+    );
+    writeFileSync(
+      resolve(root, 'src-tauri', 'Cargo.toml'),
+      '[package]\nname = "bigstar"\nversion = "1.2.3"\n',
+    );
+    writeFileSync(
+      resolve(root, 'src-tauri', 'Cargo.lock'),
+      [
+        '[[package]]',
+        'name = "bigstar"',
+        'version = "1.2.3"',
+        '',
+        '[[package]]',
+        'name = "dependency"',
+        'version = "1.2.3"',
+        '',
+      ].join('\n'),
+    );
+
+    setBigstarVersion(root, '1.3.0');
+
+    assert.equal(
+      JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')).version,
+      '1.3.0',
+    );
+    assert.equal(
+      JSON.parse(
+        readFileSync(
+          resolve(root, 'src-tauri', 'tauri.conf.json'),
+          'utf8',
+        ),
+      ).version,
+      '1.3.0',
+    );
+    assert.match(
+      readFileSync(resolve(root, 'src-tauri', 'Cargo.toml'), 'utf8'),
+      /^version = "1\.3\.0"$/m,
+    );
+    const cargoLock = readFileSync(
+      resolve(root, 'src-tauri', 'Cargo.lock'),
+      'utf8',
+    );
+    assert.match(
+      cargoLock,
+      /name = "bigstar"\nversion = "1\.3\.0"/,
+    );
+    assert.match(
+      cargoLock,
+      /name = "dependency"\nversion = "1\.2\.3"/,
+    );
+    assert.throws(
+      () => setBigstarVersion(root, 'next'),
+      /SemVer形式ではない/,
+    );
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
 });

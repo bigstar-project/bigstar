@@ -1,6 +1,6 @@
 {
   "name": "bigstar",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -24,6 +24,7 @@
     "format-and-lint:fix": "biome check . --write",
     "test:unit": "vitest --config vitest.config.ts run",
     "test:editions": "node --test scripts/edition-policy.test.mjs",
+    "version:set": "node scripts/set-version.mjs",
     "verify:nsis-migration": "node scripts/verify-nsis-migration.mjs",
     "test:browser": "vitest --config vitest.browser.config.ts run",
     "test:e2e": "playwright test",

@@ -12,7 +12,7 @@ on:
           - insiders
           - public
       release_bump:
-        description: Version bump to build and publish without mutating main
+        description: Version bump to commit, tag, build, and publish
         required: true
         default: none
         type: choice
@@ -65,6 +65,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: ${{ (github.event_name == 'workflow_dispatch' || github.ref_type == 'tag') && 'bigstar-release' || format('bigstar-ci-{0}', github.run_id) }}
+  cancel-in-progress: false
+
 env:
   MELONDS_GIT_BRANCH: ${{ github.ref }}
   MELONDS_GIT_HASH: ${{ github.sha }}
@@ -90,12 +94,15 @@ jobs:
         shell: pwsh
         run: |
           $packagePath = "tools/bigstar/package.json"
-          $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
-          $version = [string]$package.version
+          $tauriConfigPath = "tools/bigstar/src-tauri/tauri.conf.json"
+          $cargoManifestPath = "tools/bigstar/src-tauri/Cargo.toml"
+          $cargoLockPath = "tools/bigstar/src-tauri/Cargo.lock"
+          $versionScript = "tools/bigstar/scripts/set-version.mjs"
           $publish = "${{ github.ref_type }}" -eq "tag"
           $checkoutRef = "${{ github.sha }}"
           $checkoutSha = "${{ github.sha }}"
           $tag = "${{ github.ref_name }}"
+          $branch = "${{ github.ref_name }}"
           $edition = "${{ inputs.edition }}"
           if (-not $edition) {
             $edition = "insiders"
@@ -105,9 +112,34 @@ jobs:
             $bump = "none"
           }
 
-          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.publish_release }}" -eq "true") {
+          $manualPublish = "${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.publish_release }}" -eq "true"
+          if ($manualPublish) {
             $publish = $true
           }
+
+          $releaseMutation = "${{ github.event_name }}" -eq "workflow_dispatch" -and ($manualPublish -or $bump -ne "none")
+          if ($releaseMutation) {
+            if ("${{ github.ref_type }}" -ne "branch") {
+              throw "Release publishing must be dispatched from the default branch"
+            }
+            if ($branch -ne "${{ github.event.repository.default_branch }}") {
+              throw "Release publishing must be dispatched from ${{ github.event.repository.default_branch }}"
+            }
+
+            git fetch origin "refs/heads/$branch"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to fetch the latest $branch"
+            }
+            git checkout --detach FETCH_HEAD
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to check out the latest $branch"
+            }
+            $checkoutSha = [string](git rev-parse HEAD)
+            $checkoutRef = $checkoutSha
+          }
+
+          $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
+          $version = [string]$package.version
 
           if ($bump -ne "none") {
             if ("${{ github.event_name }}" -ne "workflow_dispatch") {
@@ -144,6 +176,38 @@ jobs:
             if ($existingTag) {
               throw "Tag already exists: $tag"
             }
+
+            node $versionScript $version
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to update Bigstar version files"
+            }
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add $packagePath $tauriConfigPath $cargoManifestPath $cargoLockPath
+            git diff --cached --quiet
+            if ($LASTEXITCODE -eq 0) {
+              throw "Version bump did not change any tracked files"
+            }
+            if ($LASTEXITCODE -ne 1) {
+              throw "Failed to inspect the version bump"
+            }
+
+            git commit -m "chore: Bigstarを${version}に更新"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to commit version $version"
+            }
+            git tag $tag
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to create tag $tag"
+            }
+            git push --atomic origin "HEAD:refs/heads/$branch" "refs/tags/$tag"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to atomically push the version commit and $tag"
+            }
+
+            $checkoutRef = $tag
+            $checkoutSha = [string](git rev-parse HEAD)
             $publish = $true
           } elseif ("${{ github.event_name }}" -eq "workflow_dispatch") {
             $inputTag = "${{ inputs.release_tag }}"
@@ -151,6 +215,27 @@ jobs:
               $tag = $inputTag
             } else {
               $tag = "${edition}-v${version}"
+            }
+            if ($publish) {
+              git show-ref --verify --quiet "refs/tags/$tag"
+              if ($LASTEXITCODE -eq 0) {
+                $tagCommit = [string](git rev-parse "$tag^{commit}")
+                if ($tagCommit -ne $checkoutSha) {
+                  throw "Existing tag $tag does not point to $checkoutSha"
+                }
+              } elseif ($LASTEXITCODE -eq 1) {
+                git tag $tag
+                if ($LASTEXITCODE -ne 0) {
+                  throw "Failed to create tag $tag"
+                }
+                git push origin "refs/tags/$tag"
+                if ($LASTEXITCODE -ne 0) {
+                  throw "Failed to push tag $tag"
+                }
+              } else {
+                throw "Failed to inspect tag $tag"
+              }
+              $checkoutRef = $tag
             }
           } elseif ("${{ github.ref_type }}" -eq "tag") {
             $checkoutRef = "${{ github.ref_name }}"
