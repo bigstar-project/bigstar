@@ -50,6 +50,18 @@ if (edition === 'insiders') {
     migrationHooks,
     /BIGSTAR_CREATE_MIGRATED_SHORTCUT "\$DESKTOP\\\$\{PRODUCTNAME\}\.lnk"/,
   );
+  assert.match(
+    migrationHooks,
+    /BIGSTAR_MIGRATE_MELONDS_CONFIG "\$BigstarLegacyInstallDir"/,
+  );
+  assert.match(
+    migrationHooks,
+    /BIGSTAR_MIGRATE_MELONDS_CONFIG "\$LOCALAPPDATA\\\$\{BIGSTAR_LEGACY_PRODUCT_NAME\}"/,
+  );
+  assert.match(
+    migrationHooks,
+    /CopyFiles \/SILENT "\$\{SOURCE_DIR\}\\melonDS\.toml" "\$INSTDIR"/,
+  );
 } else {
   assert.match(installer, /!define PRODUCTNAME "Bigstar"/);
   assert.match(installer, /!define MANUFACTURER "Bigstar Project"/);

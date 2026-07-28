@@ -353,6 +353,19 @@ test('旧版の移行インストーラーをInsidersだけへ組み込む', () 
   assert.match(migrationHooks, /\$SMPROGRAMS\\\$\{PRODUCTNAME\}\.lnk/);
   assert.match(migrationHooks, /\$DESKTOP\\\$\{PRODUCTNAME\}\.lnk/);
   assert.match(migrationHooks, /SetLnkAppUserModelId/);
+  assert.match(migrationHooks, /BIGSTAR_MIGRATE_MELONDS_CONFIG/);
+  assert.match(
+    migrationHooks,
+    /\$\{FileExists\} "\$INSTDIR\\melonDS\.toml"/,
+  );
+  assert.match(
+    migrationHooks,
+    /CopyFiles \/SILENT "\$\{SOURCE_DIR\}\\melonDS\.toml" "\$INSTDIR"/,
+  );
+  assert.match(
+    migrationHooks,
+    /\$LOCALAPPDATA\\\$\{BIGSTAR_LEGACY_PRODUCT_NAME\}/,
+  );
   assert.match(migrationHooks, /DeleteRegValue HKCU/);
   assert.match(migrationHooks, /DeleteRegKey SHCTX/);
   assert.doesNotMatch(migrationHooks, /RMDir\s+\/r/i);

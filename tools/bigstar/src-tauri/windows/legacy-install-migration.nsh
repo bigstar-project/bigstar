@@ -34,6 +34,20 @@ Var BigstarLegacyDesktopShortcutFound
   !insertmacro SetLnkAppUserModelId "${SHORTCUT_PATH}"
 !macroend
 
+!macro BIGSTAR_MIGRATE_MELONDS_CONFIG SOURCE_DIR
+  ${If} ${FileExists} "$INSTDIR\melonDS.toml"
+    DetailPrint "Keeping the existing Bigstar melonDS configuration"
+  ${ElseIf} ${FileExists} "${SOURCE_DIR}\melonDS.toml"
+    ClearErrors
+    CopyFiles /SILENT "${SOURCE_DIR}\melonDS.toml" "$INSTDIR"
+    ${If} ${Errors}
+      DetailPrint "Could not migrate the legacy melonDS configuration from ${SOURCE_DIR}"
+    ${Else}
+      DetailPrint "Migrated the legacy melonDS configuration from ${SOURCE_DIR}"
+    ${EndIf}
+  ${EndIf}
+!macroend
+
 ; Detect the old per-user NSIS installation without changing it. Cleanup is
 ; intentionally deferred until the new Bigstar Insiders files and registry
 ; entries have been installed successfully.
@@ -62,6 +76,19 @@ Var BigstarLegacyDesktopShortcutFound
 ; Failure is non-fatal because the new installation is already complete and
 ; leaving the old installation intact is safer than deleting paths manually.
 !macro NSIS_HOOK_POSTINSTALL
+  ; Windows melonDS is built in portable mode, so its configuration is stored
+  ; next to melonDS.exe instead of in the launcher's app-data directory.
+  ; Copy it before running the old uninstaller and never overwrite a config
+  ; that the user has already created in Bigstar Insiders.
+  ${If} ${FileExists} "$INSTDIR\bigstar.exe"
+    ${If} $BigstarLegacyInstallDir != ""
+      !insertmacro BIGSTAR_MIGRATE_MELONDS_CONFIG "$BigstarLegacyInstallDir"
+    ${EndIf}
+    ; The old uninstaller may already be gone after a previous migration
+    ; attempt, so also check the standard per-user installation directory.
+    !insertmacro BIGSTAR_MIGRATE_MELONDS_CONFIG "$LOCALAPPDATA\${BIGSTAR_LEGACY_PRODUCT_NAME}"
+  ${EndIf}
+
   ${If} $BigstarLegacyMigrationFound = 1
   ${AndIf} ${FileExists} "$INSTDIR\bigstar.exe"
     ClearErrors
