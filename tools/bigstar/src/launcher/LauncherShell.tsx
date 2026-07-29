@@ -11,8 +11,9 @@ import { useHotkeys } from 'react-hotkeys-hook';
 import { css, cx } from 'styled-system/css';
 import { token } from 'styled-system/tokens';
 import launcherBg from '../assets/launcher-bg.png';
+import { currentEditionConfig } from '../buildProfile';
 import { StatusPill } from '../components/StatusPill';
-import { Button, Kbd, Tabs } from '../components/ui';
+import { Badge, Button, Kbd, Tabs } from '../components/ui';
 import type { StatusKind } from '../types';
 import type { UpdateStatus, View } from './types';
 
@@ -169,6 +170,8 @@ export function LauncherShell({
   updateBusy: boolean;
   updateStatus: UpdateStatus;
 }) {
+  const edition = currentEditionConfig();
+
   useHotkeys(
     ['ctrl+1', 'ctrl+2', 'ctrl+3'],
     (event) => {
@@ -254,43 +257,56 @@ export function LauncherShell({
             >
               <div
                 className={css({
-                  display: 'grid',
-                  gap: '1',
+                  alignItems: 'flex-start',
+                  display: 'flex',
+                  gap: '2',
                   px: '2',
                 })}
               >
                 <div
                   className={css({
-                    color: 'fg.default',
-                    fontWeight: 'black',
-                    lineHeight: 'none',
-                    textStyle: '2xl',
+                    display: 'grid',
+                    gap: '1',
                   })}
                 >
-                  BIG
+                  <div
+                    className={css({
+                      color: 'fg.default',
+                      fontWeight: 'black',
+                      lineHeight: 'none',
+                      textStyle: '2xl',
+                    })}
+                  >
+                    BIG
+                  </div>
+                  <div
+                    className={css({
+                      color: 'fg.default',
+                      fontWeight: 'black',
+                      lineHeight: 'none',
+                      textStyle: '2xl',
+                    })}
+                  >
+                    <span className={css({ color: 'yellow.plain.fg' })}>
+                      STAR
+                    </span>
+                  </div>
                 </div>
-                <div
-                  className={css({
-                    color: 'fg.default',
-                    fontWeight: 'black',
-                    lineHeight: 'none',
-                    textStyle: '2xl',
-                  })}
-                >
-                  <span className={css({ color: 'yellow.plain.fg' })}>
-                    STAR
-                  </span>
-                </div>
-                <div
-                  className={css({
-                    color: 'blue.plain.fg',
-                    fontWeight: 'bold',
-                    opacity: '0.8',
-                    textStyle: 'xs',
-                  })}
-                >
-                  ONLINE
-                </div>
+                {edition.edition === 'insiders' ? (
+                  <Badge
+                    className={css({
+                      borderRadius: 'full',
+                      fontWeight: 'bold',
+                      mt: '0.5',
+                    })}
+                    colorPalette="yellow"
+                    data-testid="edition-badge"
+                    size="sm"
+                    variant="subtle"
+                  >
+                    {edition.badge}
+                  </Badge>
+                ) : null}
               </div>
 
               <Tabs.List

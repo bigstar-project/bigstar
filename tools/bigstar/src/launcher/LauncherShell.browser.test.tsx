@@ -1,8 +1,12 @@
 import { useState } from 'react';
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import { LauncherShell } from './LauncherShell';
 import type { View } from './types';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function ShortcutTestShell() {
   const [view, setView] = useState<View>('battle');
@@ -74,5 +78,30 @@ describe('ランチャーのタブショートカット', () => {
     await expect
       .element(screen.getByTestId('active-view'))
       .toHaveTextContent('history');
+  });
+});
+
+describe('ランチャーのエディション表示', () => {
+  test('Insiders版ではブランド名の横にバッジを表示する', async () => {
+    const screen = await render(<ShortcutTestShell />);
+
+    await expect
+      .element(screen.getByTestId('edition-badge'))
+      .toHaveTextContent('Insiders');
+    await expect.element(screen.getByText('ONLINE')).not.toBeInTheDocument();
+  });
+
+  test('Public版ではエディションバッジを表示しない', async () => {
+    vi.stubGlobal('__BIGSTAR_EDITION_CONFIG__', {
+      badge: 'Public',
+      displayName: 'Bigstar',
+      edition: 'public',
+    });
+
+    const screen = await render(<ShortcutTestShell />);
+
+    await expect
+      .element(screen.getByTestId('edition-badge'))
+      .not.toBeInTheDocument();
   });
 });
