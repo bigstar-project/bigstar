@@ -38,6 +38,27 @@ pub(crate) fn app_version() -> &'static str {
         _ => env!("CARGO_PKG_VERSION"),
     }
 }
+pub(crate) fn app_edition() -> &'static str {
+    match option_env!("BIGSTAR_EDITION") {
+        Some(edition) if !edition.trim().is_empty() => edition.trim(),
+        _ => {
+            #[cfg(feature = "insiders-edition")]
+            {
+                "insiders"
+            }
+            #[cfg(not(feature = "insiders-edition"))]
+            {
+                "public"
+            }
+        }
+    }
+}
+pub(crate) fn build_profile() -> &'static str {
+    match option_env!("BIGSTAR_BUILD_PROFILE") {
+        Some(profile) if !profile.trim().is_empty() => profile.trim(),
+        _ => "local",
+    }
+}
 pub(crate) const DEFAULT_PORT: u16 = 8165;
 pub(crate) const DEFAULT_FRAMES: u32 = 999_999;
 pub(crate) const NETPLAY_START_FRAME: u32 = 840;

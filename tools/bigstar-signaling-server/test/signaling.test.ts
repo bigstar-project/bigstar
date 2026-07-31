@@ -287,55 +287,94 @@ describe('マッチメイキング HTTP API', () => {
   });
 });
 
-describe('ログアーカイブ upload API', () => {
-  test('upload tokenと1GB上限を検証してmultipart uploadを開始する', async () => {
-    const unauthorized = await SELF.fetch(
-      'https://match.test/log-archives/uploads',
+describe('フィードバック upload API', () => {
+  const feedback = {
+    app_version: '0.10.1',
+    category: 'connection',
+    description: '接続中にタイムアウトしました',
+    edition: 'public',
+    file_name: 'feedback.zip',
+    schema_version: 1,
+    size: 3,
+  };
+
+  test('必須情報と10MB上限を検証して一時upload tokenを発行する', async () => {
+    const missingDescription = await SELF.fetch(
+      'https://match.test/feedback/uploads',
       {
         body: JSON.stringify({
-          file_name: 'logs.zip',
-          size: 1024,
+          ...feedback,
+          description: '',
         }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
       },
     );
-    expect(unauthorized.status).toBe(403);
+    expect(missingDescription.status).toBe(400);
 
-    const tooLarge = await SELF.fetch(
-      'https://match.test/log-archives/uploads',
-      {
-        body: JSON.stringify({
-          file_name: 'logs.zip',
-          size: 1024 * 1024 * 1024 + 1,
-        }),
-        headers: {
-          'content-type': 'application/json',
-          'x-bigstar-log-upload-token': 'test-upload-token',
-        },
-        method: 'POST',
-      },
-    );
+    const tooLarge = await SELF.fetch('https://match.test/feedback/uploads', {
+      body: JSON.stringify({
+        ...feedback,
+        size: 10 * 1024 * 1024 + 1,
+      }),
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    });
     expect(tooLarge.status).toBe(400);
 
-    const created = await SELF.fetch(
-      'https://match.test/log-archives/uploads',
+    const created = await SELF.fetch('https://match.test/feedback/uploads', {
+      body: JSON.stringify(feedback),
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    });
+    expect(created.status).toBe(201);
+    const createdBody = (await json(created)) as {
+      report_id: string;
+      upload_id: string;
+      upload_token: string;
+    };
+    expect(createdBody).toMatchObject({
+      max_part_size: 5 * 1024 * 1024,
+      max_size: 10 * 1024 * 1024,
+      report_id: expect.any(String),
+      upload_id: expect.any(String),
+      upload_token: expect.any(String),
+    });
+
+    const partUrl = `https://match.test/feedback/uploads/${createdBody.report_id}/${createdBody.upload_id}/parts/1`;
+    const unauthorizedPart = await SELF.fetch(partUrl, {
+      body: new Uint8Array([1, 2, 3]),
+      headers: { 'x-bigstar-feedback-token': 'wrong-token' },
+      method: 'PUT',
+    });
+    expect(unauthorizedPart.status).toBe(403);
+
+    const uploadedPart = await SELF.fetch(partUrl, {
+      body: new Uint8Array([1, 2, 3]),
+      headers: {
+        'content-length': '3',
+        'x-bigstar-feedback-token': createdBody.upload_token,
+      },
+      method: 'PUT',
+    });
+    expect(uploadedPart.status).toBe(200);
+    const part = await json(uploadedPart);
+
+    const completed = await SELF.fetch(
+      `https://match.test/feedback/uploads/${createdBody.report_id}/${createdBody.upload_id}/complete`,
       {
-        body: JSON.stringify({
-          file_name: 'logs.zip',
-          size: 1024,
-        }),
+        body: JSON.stringify({ parts: [part] }),
         headers: {
           'content-type': 'application/json',
-          'x-bigstar-log-upload-token': 'test-upload-token',
+          'x-bigstar-feedback-token': createdBody.upload_token,
         },
         method: 'POST',
       },
     );
-    expect(created.status).toBe(201);
-    expect(await json(created)).toMatchObject({
-      max_part_size: 64 * 1024 * 1024,
-      max_size: 1024 * 1024 * 1024,
+    expect(completed.status).toBe(200);
+    expect(await json(completed)).toMatchObject({
+      report_id: createdBody.report_id,
+      size: 3,
     });
   });
 });

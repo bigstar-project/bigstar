@@ -55,7 +55,7 @@ function actions(overrides: Partial<LauncherActions> = {}) {
     setStartupEnabled: vi.fn(async () => {}),
     startMatch: vi.fn(async () => {}),
     stopMatch: vi.fn(async () => {}),
-    uploadLogArchive: vi.fn(async () => {}),
+    uploadLogArchive: vi.fn(async () => null),
     ...overrides,
   };
 }

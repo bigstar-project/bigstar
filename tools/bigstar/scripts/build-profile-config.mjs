@@ -52,7 +52,7 @@ export function resolveRuntimeCapabilities(edition, buildProfile) {
       edition.capabilities.automaticUnresolvedSessionReport,
     configurableSignalServer:
       buildProfile.capabilities.configurableSignalServer,
-    manualLogUpload: edition.capabilities.manualLogUpload,
+    feedbackSubmission: edition.capabilities.feedbackSubmission,
     notifyOwnRooms: buildProfile.capabilities.notifyOwnRooms,
   };
 }

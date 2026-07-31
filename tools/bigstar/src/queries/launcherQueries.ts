@@ -1,5 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 import { check } from '@tauri-apps/plugin-updater';
+import { recordAppError } from '../appDiagnostics';
 import {
   getDefaults,
   getSessionStatus,
@@ -31,7 +32,14 @@ export function updateQueryOptions(enabled: boolean) {
   return queryOptions({
     enabled,
     queryKey: launcherQueryKeys.update,
-    queryFn: () => check(),
+    queryFn: async () => {
+      try {
+        return await check();
+      } catch (error) {
+        void recordAppError('updater', 'update.check', error);
+        throw error;
+      }
+    },
     refetchInterval: (query) => (query.state.data ? false : 5 * 60 * 1000),
     staleTime: 5 * 60 * 1000,
     retry: false,

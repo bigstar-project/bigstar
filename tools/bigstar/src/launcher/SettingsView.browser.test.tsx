@@ -19,12 +19,20 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function renderSettingsView(configurableSignalServer = true) {
+async function renderSettingsView(
+  configurableSignalServer = true,
+  edition: 'insiders' | 'public' = 'insiders',
+) {
+  vi.stubGlobal('__BIGSTAR_EDITION_CONFIG__', {
+    badge: edition === 'insiders' ? 'Insiders' : 'Public',
+    displayName: edition === 'insiders' ? 'Bigstar Insiders' : 'Bigstar',
+    edition,
+  });
   vi.stubGlobal('__BIGSTAR_RUNTIME_CAPABILITIES__', {
     aiDevTools: true,
     automaticUnresolvedSessionReport: true,
     configurableSignalServer,
-    manualLogUpload: true,
+    feedbackSubmission: true,
     notifyOwnRooms: true,
   });
   const launcherActions = {
@@ -47,7 +55,7 @@ async function renderSettingsView(configurableSignalServer = true) {
     setStartupEnabled: vi.fn(async () => {}),
     startMatch: vi.fn(async () => {}),
     stopMatch: vi.fn(async () => {}),
-    uploadLogArchive: vi.fn(async () => {}),
+    uploadLogArchive: vi.fn(async () => null),
   } satisfies LauncherActions;
   const updateField = vi.fn();
 
@@ -123,6 +131,26 @@ describe('設定ビュー', () => {
       'ws://127.0.0.1:8787/session',
     );
     await expect.element(screen.getByLabelText('UDP ポート')).toBeVisible();
+  });
+
+  test.each([
+    false,
+    true,
+  ])('Publicでは内部ログ管理を表示しない', async (configurableSignalServer) => {
+    await renderSettingsView(configurableSignalServer, 'public');
+
+    expect(document.body.textContent).not.toContain('パフォーマンスログ');
+    expect(document.body.textContent).not.toContain('古い詳細ログを削除');
+  });
+
+  test('Public distributionでは詳細診断設定を表示しない', async () => {
+    await renderSettingsView(false, 'public');
+
+    expect(document.body.textContent).not.toContain('診断イベントログ');
+    expect(document.body.textContent).not.toContain(
+      '入力、通信、画面状態のログを増やして原因調査しやすくします',
+    );
+    expect(document.body.textContent).not.toContain('AI用プレイログ');
   });
 
   test('ロム、起動前チェック、melonDS 関連処理を実行する', async () => {

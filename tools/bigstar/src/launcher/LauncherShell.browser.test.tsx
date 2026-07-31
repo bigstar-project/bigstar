@@ -88,6 +88,9 @@ describe('ランチャーのエディション表示', () => {
     await expect
       .element(screen.getByTestId('edition-badge'))
       .toHaveTextContent('Insiders');
+    await expect
+      .element(screen.getByTestId('brand-star-row'))
+      .toHaveTextContent('STARInsiders');
     await expect.element(screen.getByText('ONLINE')).not.toBeInTheDocument();
   });
 

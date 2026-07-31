@@ -22,3 +22,4 @@ export { Span, type SpanProps } from './span';
 export { Spinner, type SpinnerProps } from './spinner';
 export * as Switch from './switch';
 export * as Tabs from './tabs';
+export { Textarea, type TextareaProps } from './textarea';

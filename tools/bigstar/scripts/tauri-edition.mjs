@@ -102,10 +102,6 @@ function parseTauriArgs(args, command) {
       process.exit(1);
     }
   }
-  if (command === 'dev' && buildProfile !== 'local') {
-    console.error('dev コマンドでは distribution profile を使用できません');
-    process.exit(1);
-  }
   try {
     edition = normalizeEdition(edition);
   } catch (error) {

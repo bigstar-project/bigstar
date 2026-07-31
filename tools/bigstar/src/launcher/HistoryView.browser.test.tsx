@@ -347,17 +347,15 @@ describe('履歴ビュー', () => {
     expect(onDeleteMatch).toHaveBeenCalledWith(playedMatch.id);
   });
 
-  test('履歴を展開するとログ操作ボタンからログフォルダを渡す', async () => {
+  test('履歴ではログパスと診断ZIP作成を表示せず必要な操作だけ提供する', async () => {
     const [playedMatch] = previewMatchHistory();
     const onOpenLogDir = vi.fn();
-    const onCreateLogArchive = vi.fn();
-    const onUploadLogArchive = vi.fn();
+    const onUploadLogArchive = vi.fn(async () => 'report-test');
 
     const screen = await render(
       <HistoryTestProviders>
         <HistoryView
           matches={[playedMatch]}
-          onCreateLogArchive={onCreateLogArchive}
           onOpenLogDir={onOpenLogDir}
           onUploadLogArchive={onUploadLogArchive}
         />
@@ -365,12 +363,22 @@ describe('履歴ビュー', () => {
     );
 
     await screen.getByText('3 - 1').click();
+    expect(document.body.textContent).not.toContain(playedMatch.logDir);
+    await expect
+      .element(screen.getByRole('button', { name: '診断ZIPを作成' }))
+      .not.toBeInTheDocument();
     await screen.getByRole('button', { name: 'ログを開く' }).click();
-    await screen.getByRole('button', { name: 'zipを作成' }).click();
-    await screen.getByRole('button', { name: 'ログを送信' }).click();
+    await screen.getByRole('button', { name: 'フィードバック' }).click();
+    await screen
+      .getByLabelText('発生した問題')
+      .fill('接続中にタイムアウトしました');
+    await screen.getByRole('button', { name: '送信' }).click();
 
     expect(onOpenLogDir).toHaveBeenCalledWith(playedMatch.logDir);
-    expect(onCreateLogArchive).toHaveBeenCalledWith(playedMatch.logDir);
-    expect(onUploadLogArchive).toHaveBeenCalledWith(playedMatch.logDir);
+    expect(onUploadLogArchive).toHaveBeenCalledWith(playedMatch.logDir, {
+      category: 'other',
+      description: '接続中にタイムアウトしました',
+      includePerformance: true,
+    });
   });
 });

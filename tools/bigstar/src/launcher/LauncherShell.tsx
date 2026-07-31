@@ -257,9 +257,6 @@ export function LauncherShell({
             >
               <div
                 className={css({
-                  alignItems: 'flex-start',
-                  display: 'flex',
-                  gap: '2',
                   px: '2',
                 })}
               >
@@ -280,9 +277,13 @@ export function LauncherShell({
                     BIG
                   </div>
                   <div
+                    data-testid="brand-star-row"
                     className={css({
+                      alignItems: 'flex-end',
                       color: 'fg.default',
+                      display: 'flex',
                       fontWeight: 'black',
+                      gap: '2',
                       lineHeight: 'none',
                       textStyle: '2xl',
                     })}
@@ -290,23 +291,22 @@ export function LauncherShell({
                     <span className={css({ color: 'yellow.plain.fg' })}>
                       STAR
                     </span>
+                    {edition.edition === 'insiders' ? (
+                      <Badge
+                        className={css({
+                          borderRadius: 'full',
+                          fontWeight: 'bold',
+                        })}
+                        colorPalette="yellow"
+                        data-testid="edition-badge"
+                        size="sm"
+                        variant="subtle"
+                      >
+                        {edition.badge}
+                      </Badge>
+                    ) : null}
                   </div>
                 </div>
-                {edition.edition === 'insiders' ? (
-                  <Badge
-                    className={css({
-                      borderRadius: 'full',
-                      fontWeight: 'bold',
-                      mt: '0.5',
-                    })}
-                    colorPalette="yellow"
-                    data-testid="edition-badge"
-                    size="sm"
-                    variant="subtle"
-                  >
-                    {edition.badge}
-                  </Badge>
-                ) : null}
               </div>
 
               <Tabs.List

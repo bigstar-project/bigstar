@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { css } from 'styled-system/css';
 import { AIReplayViewer } from '@/launcher/AIReplayViewer';
-import { areAiDevToolsEnabled } from './buildProfile';
+import {
+  areAiDevToolsEnabled,
+  currentRuntimeCapabilities,
+} from './buildProfile';
 import { AppTitlebar } from './components/AppTitlebar';
 import { BattleView } from './launcher/BattleView';
 import { HistoryView } from './launcher/HistoryView';
@@ -13,6 +16,8 @@ import { useLauncherController } from './launcher/useLauncherController';
 export function App() {
   const launcher = useLauncherController();
   const aiDevToolsEnabled = areAiDevToolsEnabled();
+  const feedbackSubmissionEnabled =
+    currentRuntimeCapabilities().feedbackSubmission;
   const [aiViewerMounted, setAiViewerMounted] = useState(
     launcher.activeView === 'ai',
   );
@@ -59,9 +64,12 @@ export function App() {
           />
           {aiDevToolsEnabled && aiViewerMounted ? <AIReplayViewer /> : null}
           <HistoryView
-            onCreateLogArchive={launcher.actions.createLogArchive}
             onOpenLogDir={launcher.actions.openLogDir}
-            onUploadLogArchive={launcher.actions.uploadLogArchive}
+            onUploadLogArchive={
+              feedbackSubmissionEnabled
+                ? launcher.actions.uploadLogArchive
+                : undefined
+            }
           />
           <SettingsView
             actions={launcher.actions}

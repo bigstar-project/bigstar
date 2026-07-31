@@ -90,7 +90,7 @@ export function validateEditionConfig(config, expectedEdition) {
   }
   for (const capability of [
     'automaticUnresolvedSessionReport',
-    'manualLogUpload',
+    'feedbackSubmission',
     'aiDevToolsInLocalBuilds',
   ]) {
     if (typeof config.capabilities?.[capability] !== 'boolean') {

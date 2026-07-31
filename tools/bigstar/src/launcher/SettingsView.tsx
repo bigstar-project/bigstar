@@ -16,7 +16,7 @@ import { useState } from 'react';
 import { css, cx } from 'styled-system/css';
 import { surface } from 'styled-system/recipes';
 import { token } from 'styled-system/tokens';
-import { currentRuntimeCapabilities } from '../buildProfile';
+import { currentEdition, currentRuntimeCapabilities } from '../buildProfile';
 import {
   FilePathField,
   NumberField,
@@ -80,6 +80,8 @@ export function SettingsView({
   const [cleanupConfirmOpen, setCleanupConfirmOpen] = useState(false);
   const [cleanupBusy, setCleanupBusy] = useState(false);
   const { configurableSignalServer } = currentRuntimeCapabilities();
+  const insidersEdition = currentEdition() === 'insiders';
+  const advancedDiagnostics = insidersEdition || configurableSignalServer;
 
   return (
     <Tabs.Content value="settings">
@@ -228,158 +230,170 @@ export function SettingsView({
                 入力設定を開く
               </Button>
             </div>
-            <SelectField
-              icon={<WarningCircle size={18} weight="fill" />}
-              label="診断イベントログ"
-              options={diagnosticEventOptions}
-              value={form.diagnosticEventsEnabled ? 'on' : 'off'}
-              onChange={(value) =>
-                updateField('diagnosticEventsEnabled', value === 'on')
-              }
-            />
-            <Switch.Root
-              checked={form.performanceLogsEnabled}
-              onCheckedChange={(details) =>
-                updateField('performanceLogsEnabled', details.checked)
-              }
-              className={settingsSwitchClassName}
-            >
-              <Switch.HiddenInput />
-              <div
-                className={css({
-                  display: 'grid',
-                  gap: '1',
-                  minW: '0',
-                })}
+            {advancedDiagnostics ? (
+              <SelectField
+                icon={<WarningCircle size={18} weight="fill" />}
+                label="診断イベントログ"
+                options={diagnosticEventOptions}
+                value={form.diagnosticEventsEnabled ? 'on' : 'off'}
+                onChange={(value) =>
+                  updateField('diagnosticEventsEnabled', value === 'on')
+                }
+              />
+            ) : null}
+            {insidersEdition ? (
+              <Switch.Root
+                checked={form.performanceLogsEnabled}
+                onCheckedChange={(details) =>
+                  updateField('performanceLogsEnabled', details.checked)
+                }
+                className={settingsSwitchClassName}
               >
-                <Switch.Label className={css({ fontSize: 'sm' })}>
-                  パフォーマンスログ
-                </Switch.Label>
+                <Switch.HiddenInput />
                 <div
                   className={css({
-                    color: 'fg.muted',
-                    textStyle: 'xs',
+                    display: 'grid',
+                    gap: '1',
+                    minW: '0',
                   })}
                 >
-                  FPS低下時の処理時間、音声待ち、CPU時間を低負荷で記録します
-                </div>
-              </div>
-              <Switch.Control />
-            </Switch.Root>
-            <Switch.Root
-              checked={form.detailedLogsEnabled}
-              onCheckedChange={(details) =>
-                updateField('detailedLogsEnabled', details.checked)
-              }
-              className={settingsSwitchClassName}
-            >
-              <Switch.HiddenInput />
-              <div
-                className={css({
-                  display: 'grid',
-                  gap: '1',
-                  minW: '0',
-                })}
-              >
-                <Switch.Label className={css({ fontSize: 'sm' })}>
-                  詳細ログ
-                </Switch.Label>
-                <div
-                  className={css({
-                    color: 'fg.muted',
-                    textStyle: 'xs',
-                  })}
-                >
-                  入力、通信、画面状態のログを増やして原因調査しやすくします
-                </div>
-              </div>
-              <Switch.Control />
-            </Switch.Root>
-            <Switch.Root
-              checked={form.aiPlayLogEnabled}
-              onCheckedChange={(details) =>
-                updateField('aiPlayLogEnabled', details.checked)
-              }
-              className={settingsSwitchClassName}
-            >
-              <Switch.HiddenInput />
-              <div
-                className={css({
-                  display: 'grid',
-                  gap: '1',
-                  minW: '0',
-                })}
-              >
-                <Switch.Label className={css({ fontSize: 'sm' })}>
-                  AI用プレイログ
-                </Switch.Label>
-                <div
-                  className={css({
-                    color: 'fg.muted',
-                    textStyle: 'xs',
-                  })}
-                >
-                  stage 0の対戦中だけcompact observation v3ログを保存します
-                </div>
-              </div>
-              <Switch.Control />
-            </Switch.Root>
-            <Dialog.Root
-              open={cleanupConfirmOpen}
-              onOpenChange={(details) => setCleanupConfirmOpen(details.open)}
-            >
-              <Dialog.Trigger asChild>
-                <Button variant="outline">
-                  <Trash size={18} weight="bold" />
-                  古い詳細ログを削除
-                </Button>
-              </Dialog.Trigger>
-              <Portal>
-                <Dialog.Backdrop />
-                <Dialog.Positioner>
-                  <Dialog.Content
+                  <Switch.Label className={css({ fontSize: 'sm' })}>
+                    パフォーマンスログ
+                  </Switch.Label>
+                  <div
                     className={css({
-                      maxW: 'md',
-                      w: 'full',
+                      color: 'fg.muted',
+                      textStyle: 'xs',
                     })}
                   >
-                    <Dialog.CloseTrigger>
-                      <CloseButton />
-                    </Dialog.CloseTrigger>
-                    <Dialog.Header>
-                      <Dialog.Title>古い詳細ログを削除しますか？</Dialog.Title>
-                      <Dialog.Description>
-                        対戦履歴、作成済みzip、現在実行中の対戦ログは残ります。
-                      </Dialog.Description>
-                    </Dialog.Header>
-                    <Dialog.Footer>
-                      <Dialog.ActionTrigger asChild>
-                        <Button disabled={cleanupBusy} variant="outline">
-                          キャンセル
+                    FPS低下時の処理時間、音声待ち、CPU時間を低負荷で記録します
+                  </div>
+                </div>
+                <Switch.Control />
+              </Switch.Root>
+            ) : null}
+            {advancedDiagnostics ? (
+              <Switch.Root
+                checked={form.detailedLogsEnabled}
+                onCheckedChange={(details) =>
+                  updateField('detailedLogsEnabled', details.checked)
+                }
+                className={settingsSwitchClassName}
+              >
+                <Switch.HiddenInput />
+                <div
+                  className={css({
+                    display: 'grid',
+                    gap: '1',
+                    minW: '0',
+                  })}
+                >
+                  <Switch.Label className={css({ fontSize: 'sm' })}>
+                    詳細ログ
+                  </Switch.Label>
+                  <div
+                    className={css({
+                      color: 'fg.muted',
+                      textStyle: 'xs',
+                    })}
+                  >
+                    入力、通信、画面状態のログを増やして原因調査しやすくします
+                  </div>
+                </div>
+                <Switch.Control />
+              </Switch.Root>
+            ) : null}
+            {advancedDiagnostics ? (
+              <Switch.Root
+                checked={form.aiPlayLogEnabled}
+                onCheckedChange={(details) =>
+                  updateField('aiPlayLogEnabled', details.checked)
+                }
+                className={settingsSwitchClassName}
+              >
+                <Switch.HiddenInput />
+                <div
+                  className={css({
+                    display: 'grid',
+                    gap: '1',
+                    minW: '0',
+                  })}
+                >
+                  <Switch.Label className={css({ fontSize: 'sm' })}>
+                    AI用プレイログ
+                  </Switch.Label>
+                  <div
+                    className={css({
+                      color: 'fg.muted',
+                      textStyle: 'xs',
+                    })}
+                  >
+                    stage 0の対戦中だけcompact observation v3ログを保存します
+                  </div>
+                </div>
+                <Switch.Control />
+              </Switch.Root>
+            ) : null}
+            {insidersEdition ? (
+              <Dialog.Root
+                open={cleanupConfirmOpen}
+                onOpenChange={(details) => setCleanupConfirmOpen(details.open)}
+              >
+                <Dialog.Trigger asChild>
+                  <Button variant="outline">
+                    <Trash size={18} weight="bold" />
+                    古い詳細ログを削除
+                  </Button>
+                </Dialog.Trigger>
+                <Portal>
+                  <Dialog.Backdrop />
+                  <Dialog.Positioner>
+                    <Dialog.Content
+                      className={css({
+                        maxW: 'md',
+                        w: 'full',
+                      })}
+                    >
+                      <Dialog.CloseTrigger>
+                        <CloseButton />
+                      </Dialog.CloseTrigger>
+                      <Dialog.Header>
+                        <Dialog.Title>
+                          古い詳細ログを削除しますか？
+                        </Dialog.Title>
+                        <Dialog.Description>
+                          対戦履歴、作成済みzip、現在実行中の対戦ログは残ります。
+                        </Dialog.Description>
+                      </Dialog.Header>
+                      <Dialog.Footer>
+                        <Dialog.ActionTrigger asChild>
+                          <Button disabled={cleanupBusy} variant="outline">
+                            キャンセル
+                          </Button>
+                        </Dialog.ActionTrigger>
+                        <Button
+                          colorPalette="red"
+                          loading={cleanupBusy}
+                          onClick={async () => {
+                            setCleanupBusy(true);
+                            try {
+                              await actions.cleanupDetailedLogs();
+                              setCleanupConfirmOpen(false);
+                            } finally {
+                              setCleanupBusy(false);
+                            }
+                          }}
+                          variant="solid"
+                        >
+                          <Trash size={18} weight="bold" />
+                          削除する
                         </Button>
-                      </Dialog.ActionTrigger>
-                      <Button
-                        colorPalette="red"
-                        loading={cleanupBusy}
-                        onClick={async () => {
-                          setCleanupBusy(true);
-                          try {
-                            await actions.cleanupDetailedLogs();
-                            setCleanupConfirmOpen(false);
-                          } finally {
-                            setCleanupBusy(false);
-                          }
-                        }}
-                        variant="solid"
-                      >
-                        <Trash size={18} weight="bold" />
-                        削除する
-                      </Button>
-                    </Dialog.Footer>
-                  </Dialog.Content>
-                </Dialog.Positioner>
-              </Portal>
-            </Dialog.Root>
+                      </Dialog.Footer>
+                    </Dialog.Content>
+                  </Dialog.Positioner>
+                </Portal>
+              </Dialog.Root>
+            ) : null}
           </SettingsPanel>
 
           <SettingsPanel

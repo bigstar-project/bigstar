@@ -2,8 +2,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { parseAsStringLiteral, useQueryState } from 'nuqs';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { recordAppError } from '../appDiagnostics';
 import {
   areAiDevToolsEnabled,
+  currentEdition,
   currentRuntimeCapabilities,
 } from '../buildProfile';
 import {
@@ -75,6 +77,7 @@ import { stageLabel } from './options';
 import {
   type BattleMatchRecord,
   type BattleMatchStatus,
+  type FeedbackInput,
   isUpdateRequired,
   type LauncherActions,
   type LauncherSummary,
@@ -97,7 +100,7 @@ function isWebSocketUrl(value: string) {
   return value.startsWith('ws://') || value.startsWith('wss://');
 }
 
-function logArchiveUploadUrl(signalUrl: string) {
+function feedbackUploadUrl(signalUrl: string) {
   const url = new URL(signalUrl);
   if (url.protocol === 'wss:') {
     url.protocol = 'https:';
@@ -108,7 +111,7 @@ function logArchiveUploadUrl(signalUrl: string) {
       'ログアップロード先は ws:// または wss:// から導出してください',
     );
   }
-  url.pathname = '/log-archives';
+  url.pathname = '/feedback';
   url.search = '';
   url.hash = '';
   return url.toString().replace(/\/$/, '');
@@ -255,6 +258,9 @@ export function useLauncherController() {
       await update.downloadAndInstall();
       await relaunch();
     },
+    onError: (error) => {
+      void recordAppError('updater', 'update.install', error);
+    },
   });
   const [activeView, setActiveView] = useQueryState(
     'view',
@@ -310,7 +316,6 @@ export function useLauncherController() {
   );
   const currentMatchRef = useRef<BattleMatchRecord | null>(null);
   const [playerProfileId, setPlayerProfileId] = useState('');
-  const [logArchiveUploadToken, setLogArchiveUploadToken] = useState('');
   const defaultsInitializedRef = useRef(false);
 
   const defaultsLoaded =
@@ -715,7 +720,6 @@ export function useLauncherController() {
     });
     setPlayerProfileId(defaults.player_profile_id);
     playerProfileIdRef.current = defaults.player_profile_id;
-    setLogArchiveUploadToken(defaults.log_archive_upload_token ?? '');
     setOnboardingRomsPrepared(defaults.roms_prepared_once);
     setOnboardingInputConfigOpened(defaults.input_config_opened_once);
     setOnboardingPlayerNameConfigured(defaults.player_name.trim().length > 0);
@@ -942,6 +946,13 @@ export function useLauncherController() {
         return false;
       }
 
+      const advancedDiagnostics =
+        currentEdition() === 'insiders' ||
+        runtimeCapabilities.configurableSignalServer;
+      const performanceLogsEnabled =
+        (currentEdition() === 'public' &&
+          !runtimeCapabilities.configurableSignalServer) ||
+        nextForm.performanceLogsEnabled;
       const request: LaunchRequest = {
         role: nextForm.role,
         signal_url: nextForm.signalUrl,
@@ -953,10 +964,12 @@ export function useLauncherController() {
             : nextForm.clientRomPath,
         settings: currentSettings(nextForm),
         player_names: playerNames,
-        diagnostic_events_enabled: nextForm.diagnosticEventsEnabled,
-        detailed_logs_enabled: nextForm.detailedLogsEnabled,
-        performance_logs_enabled: nextForm.performanceLogsEnabled,
-        ai_play_log_enabled: nextForm.aiPlayLogEnabled,
+        diagnostic_events_enabled:
+          advancedDiagnostics && nextForm.diagnosticEventsEnabled,
+        detailed_logs_enabled:
+          advancedDiagnostics && nextForm.detailedLogsEnabled,
+        performance_logs_enabled: performanceLogsEnabled,
+        ai_play_log_enabled: advancedDiagnostics && nextForm.aiPlayLogEnabled,
       };
 
       try {
@@ -1004,6 +1017,7 @@ export function useLauncherController() {
       form,
       launchMatch,
       playerProfileId,
+      runtimeCapabilities.configurableSignalServer,
     ],
   );
 
@@ -1390,7 +1404,7 @@ export function useLauncherController() {
     try {
       const response = await createLogArchiveCommand(logDir);
       setActivityStatus({
-        text: `ログzipを作成しました: ${response.archive_path}`,
+        text: `安全な診断ZIPを作成しました: ${response.archive_path}`,
         kind: 'ok',
       });
     } catch (error) {
@@ -1398,19 +1412,26 @@ export function useLauncherController() {
     }
   };
 
-  const uploadLogArchive = async (logDir: string) => {
+  const uploadLogArchive = async (
+    logDir: string,
+    feedback: FeedbackInput,
+  ): Promise<string | null> => {
     try {
       const response = await uploadLogArchiveCommand({
         log_dir: logDir,
-        upload_url: logArchiveUploadUrl(form.signalUrl),
-        upload_token: logArchiveUploadToken,
+        upload_url: feedbackUploadUrl(form.signalUrl),
+        category: feedback.category,
+        description: feedback.description,
+        include_performance: feedback.includePerformance,
       });
       setActivityStatus({
-        text: `ログzipをアップロードしました: ${response.key}`,
+        text: `フィードバックを送信しました: ${response.report_id}`,
         kind: 'ok',
       });
+      return response.report_id;
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });
+      return null;
     }
   };
 
@@ -1503,6 +1524,7 @@ export function useLauncherController() {
       await navigator.clipboard.writeText(form.roomCode);
       setActivityStatus({ text: '部屋コードをコピーしました', kind: 'ok' });
     } catch {
+      void recordAppError('gui', 'clipboard.copy_room_code', 'copy failed');
       setActivityStatus({
         text: '部屋コードのコピーに失敗しました',
         kind: 'warn',

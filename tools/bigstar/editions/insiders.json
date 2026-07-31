@@ -15,7 +15,7 @@
   },
   "capabilities": {
     "automaticUnresolvedSessionReport": true,
-    "manualLogUpload": true,
+    "feedbackSubmission": true,
     "aiDevToolsInLocalBuilds": true
   }
 }

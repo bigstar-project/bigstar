@@ -6,6 +6,7 @@ import type {
   RomIdentity,
   RoomSummary,
 } from '../../bigstar-signaling-server/src/schemas';
+import { recordAppError } from './appDiagnostics';
 import type { GameSettings } from './types';
 
 export type { RoomSummary };
@@ -103,10 +104,19 @@ async function readError(response: Response): Promise<string> {
   return response.statusText || `HTTP ${response.status}`;
 }
 
+async function throwResponseError(
+  operation: string,
+  response: Response,
+): Promise<never> {
+  const error = new Error(await readError(response));
+  void recordAppError('matchmaking', operation, error);
+  throw error;
+}
+
 export async function listRooms(signalUrl: string) {
   const response = await clientFor(signalUrl).rooms.$get();
   if (!response.ok) {
-    throw new Error(await readError(response));
+    return throwResponseError('rooms.list', response);
   }
   return response.json();
 }
@@ -124,13 +134,16 @@ export function subscribeLobbyRooms(
         handlers.onSnapshot(message.rooms);
       }
     } catch (error) {
+      void recordAppError('matchmaking', 'lobby.message', error);
       handlers.onError?.(
         error instanceof Error ? error : new Error(String(error)),
       );
     }
   });
   socket.addEventListener('error', () => {
-    handlers.onError?.(new Error('lobby websocket error'));
+    const error = new Error('lobby websocket error');
+    void recordAppError('matchmaking', 'lobby.websocket', error);
+    handlers.onError?.(error);
   });
   socket.addEventListener('close', () => handlers.onClose?.());
   return () => socket.close();
@@ -150,13 +163,16 @@ export function subscribeHostRoomEvents(
         handlers.onJoined(message.room);
       }
     } catch (error) {
+      void recordAppError('matchmaking', 'host_room.message', error);
       handlers.onError?.(
         error instanceof Error ? error : new Error(String(error)),
       );
     }
   });
   socket.addEventListener('error', () => {
-    handlers.onError?.(new Error('host room events websocket error'));
+    const error = new Error('host room events websocket error');
+    void recordAppError('matchmaking', 'host_room.websocket', error);
+    handlers.onError?.(error);
   });
   socket.addEventListener('close', () => handlers.onClose?.());
   return () => socket.close();
@@ -167,7 +183,7 @@ export async function getRoom(signalUrl: string, roomId: string) {
     param: { roomId },
   });
   if (!response.ok) {
-    throw new Error(await readError(response));
+    return throwResponseError('rooms.get', response);
   }
   return response.json();
 }
@@ -188,7 +204,7 @@ export async function createRoom({
     },
   });
   if (!response.ok) {
-    throw new Error(await readError(response));
+    return throwResponseError('rooms.create', response);
   }
   const data = await response.json();
   return {
@@ -213,7 +229,7 @@ export async function joinRoom({
     },
   });
   if (!response.ok) {
-    throw new Error(await readError(response));
+    return throwResponseError('rooms.join', response);
   }
   const data = await response.json();
   return {
@@ -227,7 +243,7 @@ export async function closeRoom(signalUrl: string, roomId: string) {
     param: { roomId },
   });
   if (!response.ok) {
-    throw new Error(await readError(response));
+    return throwResponseError('rooms.close', response);
   }
   return response.json();
 }

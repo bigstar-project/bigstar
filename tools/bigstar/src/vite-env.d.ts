@@ -13,7 +13,7 @@ declare var __BIGSTAR_RUNTIME_CAPABILITIES__:
       aiDevTools: boolean;
       automaticUnresolvedSessionReport: boolean;
       configurableSignalServer: boolean;
-      manualLogUpload: boolean;
+      feedbackSubmission: boolean;
       notifyOwnRooms: boolean;
     }
   | undefined;

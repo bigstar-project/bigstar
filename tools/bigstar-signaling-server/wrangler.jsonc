@@ -27,8 +27,7 @@
     }
   ],
   "vars": {
-    "CORS_ORIGINS": "http://127.0.0.1:1420,http://localhost:1420",
-    "DEFAULT_ICE_SERVERS": "stun:stun.l.google.com:19302",
-    "LOG_UPLOAD_TOKEN": "test-upload-token"
+    "CORS_ORIGINS": "http://127.0.0.1:1420,http://localhost:1420,http://127.0.0.1:1421,http://localhost:1421",
+    "DEFAULT_ICE_SERVERS": "stun:stun.l.google.com:19302"
   }
 }

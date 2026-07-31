@@ -3,8 +3,6 @@ import {
   CaretDown,
   ChartLineUp,
   CircleNotch,
-  CloudArrowUp,
-  FileZip,
   FolderOpen,
   MinusCircle,
   Star,
@@ -26,8 +24,9 @@ import {
   Dialog,
 } from '../components/ui';
 import type { MvlStageResult, Role } from '../types';
+import { FeedbackDialog } from './FeedbackDialog';
 import { stageLabel } from './options';
-import type { BattleMatchRecord } from './types';
+import type { BattleMatchRecord, FeedbackInput } from './types';
 
 type PlayerSide = 'mario' | 'luigi';
 type MatchOutcome = 'win' | 'loss' | 'stopped' | 'running' | 'complete';
@@ -36,20 +35,20 @@ export function MatchRecordCollapsible({
   defaultOpen,
   match,
   onDelete,
-  onCreateLogArchive,
   onOpenLogDir,
   onSelectOpponent,
   onUploadLogArchive,
+  showLogPath = true,
   showStageDots = true,
   showStartedAt = true,
 }: {
   defaultOpen: boolean;
   match: BattleMatchRecord;
-  onCreateLogArchive?: () => Promise<void> | void;
   onDelete?: () => Promise<void> | void;
   onOpenLogDir?: () => Promise<void> | void;
   onSelectOpponent?: (playerId: string, playerName: string) => void;
-  onUploadLogArchive?: () => Promise<void> | void;
+  onUploadLogArchive?: (feedback: FeedbackInput) => Promise<string | null>;
+  showLogPath?: boolean;
   showStageDots?: boolean;
   showStartedAt?: boolean;
 }) {
@@ -291,19 +290,22 @@ export function MatchRecordCollapsible({
               </tbody>
             </table>
           </div>
-          {match.logDir || onDelete ? (
+          {(showLogPath && match.logDir) ||
+          (match.logDir && (onOpenLogDir || onUploadLogArchive)) ||
+          onDelete ? (
             <div
               className={css({
-                alignItems: { base: 'stretch', md: 'center' },
-                display: 'grid',
+                alignItems: 'center',
+                display: 'flex',
+                flexWrap: 'wrap',
                 gap: '2',
-                gridTemplateColumns: { base: '1fr', md: 'minmax(0, 1fr) auto' },
               })}
             >
-              {match.logDir ? (
+              {showLogPath && match.logDir ? (
                 <code
                   className={css({
                     color: 'fg.subtle',
+                    flex: '[1 1 18rem]',
                     fontFamily: 'mono',
                     fontWeight: 'semibold',
                     minW: '0',
@@ -313,15 +315,13 @@ export function MatchRecordCollapsible({
                 >
                   {match.logDir}
                 </code>
-              ) : (
-                <span />
-              )}
+              ) : null}
               <div
                 className={css({
                   display: 'flex',
                   flexWrap: 'wrap',
                   gap: '2',
-                  justifyContent: { base: 'flex-start', md: 'flex-end' },
+                  ml: 'auto',
                 })}
               >
                 {match.logDir && onOpenLogDir ? (
@@ -331,19 +331,8 @@ export function MatchRecordCollapsible({
                     onClick={onOpenLogDir}
                   />
                 ) : null}
-                {match.logDir && onCreateLogArchive ? (
-                  <LogActionButton
-                    icon={<FileZip size={16} weight="bold" />}
-                    label="zipを作成"
-                    onClick={onCreateLogArchive}
-                  />
-                ) : null}
                 {match.logDir && onUploadLogArchive ? (
-                  <LogActionButton
-                    icon={<CloudArrowUp size={16} weight="bold" />}
-                    label="ログを送信"
-                    onClick={onUploadLogArchive}
-                  />
+                  <FeedbackDialog onSubmit={onUploadLogArchive} />
                 ) : null}
                 {onDelete ? <DeleteMatchButton onDelete={onDelete} /> : null}
               </div>

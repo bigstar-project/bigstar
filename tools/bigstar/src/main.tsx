@@ -3,6 +3,8 @@ import { NuqsAdapter } from 'nuqs/adapters/react';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { installGlobalAppErrorHandlers } from './appDiagnostics';
+import { AppErrorBoundary } from './components/AppErrorBoundary';
 import './styles.css';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -12,6 +14,7 @@ if (!app) {
 }
 
 document.documentElement.classList.add('dark');
+installGlobalAppErrorHandlers();
 
 const [legacyView, legacyQuery = ''] = window.location.hash.slice(1).split('?');
 if (['battle', 'history', 'settings'].includes(legacyView)) {
@@ -31,10 +34,12 @@ const queryClient = new QueryClient();
 
 createRoot(app).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <NuqsAdapter>
-        <App />
-      </NuqsAdapter>
-    </QueryClientProvider>
+    <AppErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <NuqsAdapter>
+          <App />
+        </NuqsAdapter>
+      </QueryClientProvider>
+    </AppErrorBoundary>
   </StrictMode>,
 );

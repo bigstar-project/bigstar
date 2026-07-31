@@ -1,3 +1,4 @@
+import { recordAppError } from './appDiagnostics';
 import { commands } from './bindings';
 import {
   previewHistoryDashboard,
@@ -50,8 +51,15 @@ async function unwrapCommand<T>(
     { status: 'ok'; data: T } | { status: 'error'; error: string }
   >,
 ) {
-  const response = await result;
+  let response: Awaited<typeof result>;
+  try {
+    response = await result;
+  } catch (error) {
+    void recordAppError('tauri', 'invoke_transport', error);
+    throw error;
+  }
   if (response.status === 'error') {
+    void recordAppError('tauri', 'invoke_command', response.error);
     throw response.error;
   }
   return response.data;
@@ -464,6 +472,7 @@ export function createLogArchive(logDir: string) {
     return Promise.resolve<LogArchiveResponse>({
       archive_path: `${logDir}\\bigstar-logs-preview.zip`,
       size: 1024,
+      included_files: ['feedback-summary.json'],
     });
   }
   return unwrapCommand(commands.createLogArchive(logDir));
@@ -485,8 +494,7 @@ export function cleanupDetailedLogs() {
 export function uploadLogArchive(request: UploadLogArchiveRequest) {
   if (!isTauriRuntime()) {
     return Promise.resolve<UploadLogArchiveResponse>({
-      archive_path: `${request.log_dir}\\bigstar-logs-preview.zip`,
-      key: 'log-archives/preview/bigstar-logs-preview.zip',
+      report_id: 'preview-report',
       size: 1024,
     });
   }

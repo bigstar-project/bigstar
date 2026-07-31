@@ -103,7 +103,6 @@ async function installGuiDriver(
                 host_rom_path: 'C:\\roms\\host.nds',
                 input_config_opened_once: state.inputConfigOpened,
                 diagnostic_events_enabled: false,
-                log_archive_upload_token: '',
                 new_room_notifications_enabled: true,
                 player_name: state.playerName,
                 player_profile_id: state.playerProfileId,

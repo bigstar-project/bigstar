@@ -85,6 +85,21 @@ test('local版とdistribution版の機能差を能力一覧として定義する
   );
 });
 
+test('開発ビルドでもROM生成処理だけを最適化する', () => {
+  const cargoToml = readFileSync(
+    new URL('../src-tauri/Cargo.toml', import.meta.url),
+    'utf8',
+  );
+  assert.match(
+    cargoToml,
+    /\[profile\.dev\.package\.bigstar-rom\]\s+opt-level = 3/,
+  );
+  assert.match(
+    cargoToml,
+    /\[profile\.dev\.package\.ds-rom\]\s+opt-level = 3/,
+  );
+});
+
 test('Tauri overlayへ版固有値と指定バージョンを反映する', () => {
   const overlay = tauriEditionOverlay(publicEdition, '1.2.3');
   assert.equal(overlay.productName, publicEdition.displayName);
@@ -116,8 +131,34 @@ test('開発起動を共通ランナー経由で版別に構成する', () => {
   const packageJson = JSON.parse(
     readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
   );
-  assert.match(packageJson.scripts['dev:insiders'], /tauri-edition\.mjs dev/);
-  assert.match(packageJson.scripts['dev:public'], /tauri-edition\.mjs dev/);
+  assert.match(
+    packageJson.scripts.dev,
+    /--edition insiders --build-profile local/,
+  );
+  assert.match(
+    packageJson.scripts['dev:local:insiders'],
+    /--edition insiders --build-profile local/,
+  );
+  assert.match(
+    packageJson.scripts['dev:local:public'],
+    /--edition public --build-profile local/,
+  );
+  assert.match(
+    packageJson.scripts['dev:distribution:insiders'],
+    /--edition insiders --build-profile distribution/,
+  );
+  assert.match(
+    packageJson.scripts['dev:distribution:public'],
+    /--edition public --build-profile distribution/,
+  );
+  assert.equal(
+    packageJson.scripts['dev:insiders'],
+    packageJson.scripts['dev:local:insiders'],
+  );
+  assert.equal(
+    packageJson.scripts['dev:public'],
+    packageJson.scripts['dev:local:public'],
+  );
   assert.match(
     packageJson.scripts['build:insiders'],
     /tauri-edition\.mjs build/,

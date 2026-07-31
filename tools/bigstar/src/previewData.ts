@@ -17,7 +17,6 @@ export const previewDefaults: Defaults = {
   ai_play_log_enabled: false,
   performance_logs_enabled: false,
   new_room_notifications_enabled: true,
-  log_archive_upload_token: '',
   port: 8165,
 };
 

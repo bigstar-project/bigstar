@@ -14,6 +14,7 @@ import { spinner } from './spinner';
 import { surface } from './surface';
 import { switchRecipe } from './switch';
 import { tabs } from './tabs';
+import { textarea } from './textarea';
 export const recipes = {
   button,
   select,
@@ -31,5 +32,6 @@ export const recipes = {
   switchRecipe,
   surface,
   kbd,
+  textarea,
 };
 export const slotRecipes = {};

@@ -1,6 +1,7 @@
 import type { RoomSummary } from '../matchmakingClient';
 import type {
   BridgeDiagnostics,
+  FeedbackCategory,
   FormState,
   GameStateMismatch,
   MatchHistoryRecord,
@@ -66,7 +67,16 @@ export type LauncherActions = {
   setStartupEnabled: (enabled: boolean) => Promise<void>;
   startMatch: () => Promise<void>;
   stopMatch: () => Promise<void>;
-  uploadLogArchive: (logDir: string) => Promise<void>;
+  uploadLogArchive: (
+    logDir: string,
+    feedback: FeedbackInput,
+  ) => Promise<string | null>;
+};
+
+export type FeedbackInput = {
+  category: FeedbackCategory;
+  description: string;
+  includePerformance: boolean;
 };
 
 export type OnboardingState = {

@@ -33,7 +33,7 @@ import type {
 import { MatchRecordCollapsible } from './MatchRecordCollapsible';
 import { EmptyMatchResultCard } from './MatchResultCard';
 import { stageLabel } from './options';
-import type { BattleMatchRecord } from './types';
+import type { BattleMatchRecord, FeedbackInput } from './types';
 
 const pageSize = 50;
 type PeriodValue =
@@ -47,16 +47,17 @@ type StageValue = 'all' | '0' | '1' | '2' | '3' | '4';
 
 export function HistoryView({
   matches,
-  onCreateLogArchive,
   onDeleteMatch,
   onOpenLogDir,
   onUploadLogArchive,
 }: {
   matches?: BattleMatchRecord[];
-  onCreateLogArchive?: (logDir: string) => Promise<void> | void;
   onDeleteMatch?: (matchId: string) => Promise<void> | void;
   onOpenLogDir?: (logDir: string) => Promise<void> | void;
-  onUploadLogArchive?: (logDir: string) => Promise<void> | void;
+  onUploadLogArchive?: (
+    logDir: string,
+    feedback: FeedbackInput,
+  ) => Promise<string | null>;
 }) {
   const [filters, setFilters] = useQueryStates(
     {
@@ -349,11 +350,7 @@ export function HistoryView({
                         defaultOpen={false}
                         key={match.id}
                         match={match}
-                        onCreateLogArchive={
-                          onCreateLogArchive && match.logDir
-                            ? () => onCreateLogArchive(match.logDir)
-                            : undefined
-                        }
+                        showLogPath={false}
                         onDelete={() => deleteMutation.mutateAsync(match.id)}
                         onOpenLogDir={
                           onOpenLogDir && match.logDir
@@ -367,7 +364,8 @@ export function HistoryView({
                         }
                         onUploadLogArchive={
                           onUploadLogArchive && match.logDir
-                            ? () => onUploadLogArchive(match.logDir)
+                            ? (feedback) =>
+                                onUploadLogArchive(match.logDir, feedback)
                             : undefined
                         }
                       />

@@ -115,6 +115,7 @@ vi.mock('../roomNotifications', () => ({
 vi.mock('../tauriClient', () => ({
   createLogArchive: vi.fn(async () => ({
     archive_path: 'C:\\logs\\run1\\bigstar-logs.zip',
+    included_files: ['feedback-summary.json'],
     size: 1024,
   })),
   ensureRoms: vi.fn(async () => ({
@@ -138,7 +139,6 @@ vi.mock('../tauriClient', () => ({
     performance_logs_enabled: false,
     host_rom_path: 'C:\\roms\\host.nds',
     input_config_opened_once: true,
-    log_archive_upload_token: '',
     new_room_notifications_enabled: true,
     player_name: 'Host Player',
     player_profile_id: mocks.hostProfileId,
@@ -189,8 +189,7 @@ vi.mock('../tauriClient', () => ({
   stopMatch: vi.fn(async () => {}),
   upsertMatchHistory: mocks.upsertMatchHistoryMock,
   uploadLogArchive: vi.fn(async () => ({
-    archive_path: 'C:\\logs\\run1\\bigstar-logs.zip',
-    key: 'log-archives/test/bigstar-logs.zip',
+    report_id: 'test-report',
     size: 1024,
   })),
 }));
@@ -211,7 +210,7 @@ function stubRuntimeCapabilities(notifyOwnRooms: boolean) {
     aiDevTools: true,
     automaticUnresolvedSessionReport: true,
     configurableSignalServer: true,
-    manualLogUpload: true,
+    feedbackSubmission: true,
     notifyOwnRooms,
   });
 }
@@ -483,7 +482,6 @@ describe('useLauncherController', () => {
       performance_logs_enabled: false,
       host_rom_path: 'C:\\roms\\host.nds',
       input_config_opened_once: true,
-      log_archive_upload_token: '',
       new_room_notifications_enabled: false,
       player_name: 'Host Player',
       player_profile_id: mocks.hostProfileId,

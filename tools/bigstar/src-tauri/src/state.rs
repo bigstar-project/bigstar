@@ -14,6 +14,8 @@ pub(crate) struct AppState {
 pub(crate) struct ManagedSession {
     pub(crate) melon: Child,
     pub(crate) bridge: Child,
+    pub(crate) last_melon_state: String,
+    pub(crate) last_bridge_state: String,
     pub(crate) _process_job: ChildProcessJob,
     pub(crate) log_dir: PathBuf,
     #[cfg(feature = "insiders-edition")]

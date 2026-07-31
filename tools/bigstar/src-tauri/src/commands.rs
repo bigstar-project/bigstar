@@ -8,8 +8,11 @@ use tauri_plugin_autostart::ManagerExt;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use crate::config::{default_signal_url, DEFAULT_PORT, DEFAULT_ROOM_CODE};
-use crate::crash_report::create_user_log_archive;
+use crate::config::{
+    app_edition, app_version, build_profile, default_signal_url, DEFAULT_PORT, DEFAULT_ROOM_CODE,
+};
+use crate::crash_report::{create_feedback_archive, FeedbackArchiveOptions};
+use crate::diagnostics::{app_context_file, app_error_files};
 use crate::history_store::{
     delete_match_history as delete_match_history_db,
     load_match_history_dashboard as load_match_history_dashboard_db,
@@ -39,8 +42,8 @@ use crate::settings::validate_request;
 use crate::state::AppState;
 use crate::windowing::show_main_window;
 
-const MAX_LOG_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
-const LOG_ARCHIVE_UPLOAD_PART_BYTES: usize = 32 * 1024 * 1024;
+const MAX_LOG_ARCHIVE_BYTES: u64 = 10 * 1024 * 1024;
+const LOG_ARCHIVE_UPLOAD_PART_BYTES: usize = 5 * 1024 * 1024;
 const DETAILED_LOG_FILES: &[&str] = &[
     "bridge-events.jsonl",
     "melonds-events.jsonl",
@@ -82,12 +85,8 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
         diagnostic_events_enabled: saved.diagnostic_events_enabled,
         detailed_logs_enabled: saved.detailed_logs_enabled,
         ai_play_log_enabled: saved.ai_play_log_enabled,
-        performance_logs_enabled: saved.performance_logs_enabled,
+        performance_logs_enabled: saved.performance_logs_enabled || app_edition() == "public",
         new_room_notifications_enabled: saved.new_room_notifications_enabled,
-        log_archive_upload_token: std::env::var("BIGSTAR_LOG_UPLOAD_TOKEN")
-            .unwrap_or_default()
-            .trim()
-            .to_owned(),
     })
 }
 
@@ -253,11 +252,22 @@ pub(crate) fn create_log_archive(
     log_dir: String,
 ) -> Result<LogArchiveResponse, String> {
     let log_dir = resolve_allowed_log_dir(&app, &log_dir)?;
-    let archive_path = create_user_log_archive(&log_dir)?;
-    let size = archive_size(&archive_path)?;
+    let app_errors = app_error_files(&app)?;
+    let app_context = app_context_file(&app)?;
+    let archive = create_feedback_archive(
+        &log_dir,
+        &FeedbackArchiveOptions {
+            category: "other",
+            include_performance: true,
+            app_error_files: &app_errors,
+            app_context_file: Some(&app_context),
+        },
+    )?;
+    let size = archive_size(&archive.path)?;
     Ok(LogArchiveResponse {
-        archive_path: archive_path.to_string_lossy().into_owned(),
+        archive_path: archive.path.to_string_lossy().into_owned(),
         size: archive_size_for_gui(size)?,
+        included_files: archive.included_files,
     })
 }
 
@@ -285,8 +295,22 @@ pub(crate) async fn upload_log_archive(
 ) -> Result<UploadLogArchiveResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let log_dir = resolve_allowed_log_dir(&app, &request.log_dir)?;
-        let archive_path = create_user_log_archive(&log_dir)?;
-        upload_log_archive_inner(&archive_path, &request)
+        validate_feedback(&request.category, &request.description)?;
+        let app_errors = app_error_files(&app)?;
+        let app_context = app_context_file(&app)?;
+        let archive_path = create_feedback_archive(
+            &log_dir,
+            &FeedbackArchiveOptions {
+                category: request.category.as_str(),
+                include_performance: request.include_performance,
+                app_error_files: &app_errors,
+                app_context_file: Some(&app_context),
+            },
+        )?
+        .path;
+        let result = upload_log_archive_inner(&archive_path, &request);
+        let _ = fs::remove_file(&archive_path);
+        result
     })
     .await
     .map_err(|err| format!("log archive upload worker が停止しました: {err}"))?
@@ -537,12 +561,18 @@ fn archive_size(path: &Path) -> Result<u64, String> {
 struct CreateUploadRequest {
     file_name: String,
     size: u64,
+    category: String,
+    description: String,
+    app_version: String,
+    edition: String,
+    schema_version: u8,
 }
 
 #[derive(serde::Deserialize)]
 struct CreateUploadResponse {
-    key: String,
+    report_id: String,
     upload_id: String,
+    upload_token: String,
     max_size: u64,
     max_part_size: usize,
 }
@@ -556,13 +586,12 @@ struct UploadedPart {
 
 #[derive(serde::Serialize)]
 struct CompleteUploadRequest {
-    key: String,
     parts: Vec<UploadedPart>,
 }
 
 #[derive(serde::Deserialize)]
 struct CompleteUploadResponse {
-    key: String,
+    report_id: String,
 }
 
 fn upload_log_archive_inner(
@@ -571,7 +600,10 @@ fn upload_log_archive_inner(
 ) -> Result<UploadLogArchiveResponse, String> {
     let size = archive_size(archive_path)?;
     if size > MAX_LOG_ARCHIVE_BYTES {
-        return Err(format!("log archive が1GBを超えています: {} bytes", size));
+        return Err(format!(
+            "feedback archive が10MBを超えています: {} bytes",
+            size
+        ));
     }
     let base_url = normalized_upload_url(&request.upload_url)?;
     let file_name = archive_path
@@ -579,13 +611,23 @@ fn upload_log_archive_inner(
         .and_then(|name| name.to_str())
         .unwrap_or("bigstar-logs.zip")
         .to_owned();
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|err| format!("feedback upload client を作成できません: {err}"))?;
     let create_response: CreateUploadResponse = send_json(
         client
             .post(format!("{base_url}/uploads"))
-            .json(&CreateUploadRequest { file_name, size }),
-        &request.upload_token,
-        "log archive upload の開始",
+            .json(&CreateUploadRequest {
+                file_name,
+                size,
+                category: request.category.as_str().to_owned(),
+                description: request.description.trim().to_owned(),
+                app_version: app_version().to_owned(),
+                edition: app_edition().to_owned(),
+                schema_version: 1,
+            }),
+        "feedback upload の開始",
     )?;
     if create_response.max_size > 0 && size > create_response.max_size {
         return Err(format!(
@@ -596,53 +638,72 @@ fn upload_log_archive_inner(
     let part_size = create_response
         .max_part_size
         .clamp(1, LOG_ARCHIVE_UPLOAD_PART_BYTES);
-    let mut file =
-        fs::File::open(archive_path).map_err(|err| format!("log archive を読めません: {err}"))?;
-    let mut parts = Vec::new();
-    let mut part_number: u16 = 1;
-    loop {
-        let mut buffer = vec![0_u8; part_size];
-        let read = file
-            .read(&mut buffer)
-            .map_err(|err| format!("log archive の読み込みに失敗しました: {err}"))?;
-        if read == 0 {
-            break;
-        }
-        buffer.truncate(read);
-        let mut part_url = reqwest::Url::parse(&format!(
-            "{base_url}/uploads/{}/parts/{part_number}",
-            create_response.upload_id
-        ))
-        .map_err(|err| format!("log archive upload URL が不正です: {err}"))?;
-        part_url
-            .query_pairs_mut()
-            .append_pair("key", &create_response.key);
-        let part: UploadedPart = send_json(
-            client.put(part_url).body(buffer),
-            &request.upload_token,
-            "log archive part の送信",
-        )?;
-        parts.push(part);
-        part_number = part_number
-            .checked_add(1)
-            .ok_or_else(|| "log archive part 数が多すぎます".to_owned())?;
-    }
-    let complete: CompleteUploadResponse = send_json(
-        client
-            .post(format!(
-                "{base_url}/uploads/{}/complete",
-                create_response.upload_id
+    let upload_result = (|| {
+        let mut file = fs::File::open(archive_path)
+            .map_err(|err| format!("feedback archive を読めません: {err}"))?;
+        let mut parts = Vec::new();
+        let mut part_number: u16 = 1;
+        loop {
+            let mut buffer = vec![0_u8; part_size];
+            let read = file
+                .read(&mut buffer)
+                .map_err(|err| format!("feedback archive の読み込みに失敗しました: {err}"))?;
+            if read == 0 {
+                break;
+            }
+            buffer.truncate(read);
+            let part_url = reqwest::Url::parse(&format!(
+                "{base_url}/uploads/{}/{}/parts/{part_number}",
+                create_response.report_id, create_response.upload_id
             ))
-            .json(&CompleteUploadRequest {
-                key: create_response.key,
-                parts,
-            }),
-        &request.upload_token,
-        "log archive upload の完了",
-    )?;
+            .map_err(|err| format!("feedback upload URL が不正です: {err}"))?;
+            let part: UploadedPart = send_json(
+                client
+                    .put(part_url)
+                    .header(
+                        "x-bigstar-feedback-token",
+                        create_response.upload_token.as_str(),
+                    )
+                    .body(buffer),
+                "feedback archive part の送信",
+            )?;
+            parts.push(part);
+            part_number = part_number
+                .checked_add(1)
+                .ok_or_else(|| "feedback archive part 数が多すぎます".to_owned())?;
+        }
+        send_json(
+            client
+                .post(format!(
+                    "{base_url}/uploads/{}/{}/complete",
+                    create_response.report_id, create_response.upload_id
+                ))
+                .header(
+                    "x-bigstar-feedback-token",
+                    create_response.upload_token.as_str(),
+                )
+                .json(&CompleteUploadRequest { parts }),
+            "feedback upload の完了",
+        )
+    })();
+    let complete: CompleteUploadResponse = match upload_result {
+        Ok(complete) => complete,
+        Err(err) => {
+            let _ = client
+                .delete(format!(
+                    "{base_url}/uploads/{}/{}",
+                    create_response.report_id, create_response.upload_id
+                ))
+                .header(
+                    "x-bigstar-feedback-token",
+                    create_response.upload_token.as_str(),
+                )
+                .send();
+            return Err(err);
+        }
+    };
     Ok(UploadLogArchiveResponse {
-        archive_path: archive_path.to_string_lossy().into_owned(),
-        key: complete.key,
+        report_id: complete.report_id,
         size: archive_size_for_gui(size)?,
     })
 }
@@ -655,22 +716,43 @@ fn archive_size_for_gui(size: u64) -> Result<u32, String> {
 }
 
 fn normalized_upload_url(value: &str) -> Result<String, String> {
-    let url = reqwest::Url::parse(value.trim())
+    let mut url = reqwest::Url::parse(value.trim())
         .map_err(|err| format!("log archive upload URL が不正です: {err}"))?;
     match url.scheme() {
-        "http" | "https" => Ok(url.as_str().trim_end_matches('/').to_owned()),
-        _ => Err("log archive upload URL は http:// または https:// を指定してください".to_owned()),
+        "http" | "https" => {}
+        _ => {
+            return Err(
+                "log archive upload URL は http:// または https:// を指定してください".to_owned(),
+            );
+        }
     }
+    url.set_query(None);
+    url.set_fragment(None);
+    let normalized = url.as_str().trim_end_matches('/').to_owned();
+    if build_profile() == "distribution" {
+        let mut expected = reqwest::Url::parse(default_signal_url())
+            .map_err(|err| format!("既定 signaling URL が不正です: {err}"))?;
+        expected
+            .set_scheme(if expected.scheme() == "wss" {
+                "https"
+            } else {
+                "http"
+            })
+            .map_err(|_| "既定 signaling URL の scheme を変換できません".to_owned())?;
+        expected.set_path("/feedback");
+        expected.set_query(None);
+        expected.set_fragment(None);
+        if normalized != expected.as_str().trim_end_matches('/') {
+            return Err("配布版の feedback upload URL が既定サーバーと一致しません".to_owned());
+        }
+    }
+    Ok(normalized)
 }
 
 fn send_json<T: serde::de::DeserializeOwned>(
-    mut request: reqwest::blocking::RequestBuilder,
-    token: &str,
+    request: reqwest::blocking::RequestBuilder,
     label: &str,
 ) -> Result<T, String> {
-    if !token.trim().is_empty() {
-        request = request.header("x-bigstar-log-upload-token", token.trim());
-    }
     let response = request
         .send()
         .map_err(|err| format!("{label}に失敗しました: {err}"))?;
@@ -682,6 +764,20 @@ fn send_json<T: serde::de::DeserializeOwned>(
     response
         .json()
         .map_err(|err| format!("{label}のレスポンス形式が不正です: {err}"))
+}
+
+fn validate_feedback(
+    _category: &crate::models::FeedbackCategory,
+    description: &str,
+) -> Result<(), String> {
+    let count = description.trim().chars().count();
+    if count == 0 {
+        return Err("フィードバックの内容を入力してください".to_owned());
+    }
+    if count > 4000 {
+        return Err("フィードバックの内容は4000文字以内で入力してください".to_owned());
+    }
+    Ok(())
 }
 
 async fn prepare_roms_on_blocking_thread(

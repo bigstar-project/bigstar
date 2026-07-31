@@ -163,7 +163,10 @@ public:
     explicit NsmlPerformanceLog(const char* path)
     {
         if (path && *path)
-            File = Platform::OpenFile(path, Platform::FileMode::WriteText);
+        {
+            Path = path;
+            File = Platform::OpenFile(Path.c_str(), Platform::FileMode::WriteText);
+        }
     }
 
     ~NsmlPerformanceLog()
@@ -436,8 +439,19 @@ private:
 
     void Write(const std::string& line, bool flush)
     {
+        constexpr std::size_t MaxLogBytes = 8 * 1024 * 1024;
+        if (BytesWritten + line.size() > MaxLogBytes && !Path.empty())
+        {
+            Platform::FileFlush(File);
+            Platform::CloseFile(File);
+            File = Platform::OpenFile(Path.c_str(), Platform::FileMode::WriteText);
+            BytesWritten = 0;
+            if (!File)
+                return;
+        }
         const auto start = std::chrono::steady_clock::now();
         const auto written = Platform::FileWrite(line.data(), 1, line.size(), File);
+        BytesWritten += static_cast<std::size_t>(written);
         if (flush)
             Platform::FileFlush(File);
         LastWriteMs = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(
@@ -452,6 +466,8 @@ private:
     }
 
     Platform::FileHandle* File = nullptr;
+    std::string Path;
+    std::size_t BytesWritten = 0;
     std::vector<NsmlPerformanceSample> Samples;
     unsigned long long LastSpikeUnixMs = 0;
     double LastWriteMs = 0.0;

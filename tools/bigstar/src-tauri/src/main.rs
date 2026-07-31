@@ -4,6 +4,7 @@ mod ai_workbench;
 mod commands;
 mod config;
 mod crash_report;
+mod diagnostics;
 mod history_store;
 mod models;
 mod paths;
@@ -46,6 +47,8 @@ fn specta_builder() -> SpectaBuilder<tauri::Wry> {
         ai_workbench::run_ai_tool,
         ai_workbench::select_ai_log_file,
         commands::get_defaults,
+        diagnostics::record_app_context,
+        diagnostics::record_app_error,
         commands::save_rom_paths,
         commands::save_diagnostic_events_enabled,
         commands::save_detailed_logs_enabled,
@@ -143,10 +146,19 @@ fn main() {
             }
         })
         .setup(move |app| {
+            diagnostics::install_panic_hook(app.handle());
             specta_builder.mount_events(app);
             setup_tray(app)?;
             start_session_supervisor(app.handle().clone());
+            if let Err(err) = paths::cleanup_log_retention(app.handle()) {
+                diagnostics::record_backend_error(app.handle(), "log_retention", &err);
+            }
             if let Err(err) = apply_startup_default_off_migration(app.handle()) {
+                diagnostics::record_backend_error(
+                    app.handle(),
+                    "startup_default_off_migration",
+                    &err,
+                );
                 eprintln!("{err}");
             }
             if let Some(window) = app.get_webview_window("main") {
@@ -174,6 +186,7 @@ fn start_session_supervisor(app: tauri::AppHandle) {
             std::thread::sleep(std::time::Duration::from_secs(1));
             let state = app.state::<AppState>();
             if let Err(err) = processes::supervise_session_inner(state.inner()) {
+                diagnostics::record_backend_error(&app, "session_supervisor", &err);
                 eprintln!("session supervisor failed: {err}");
             }
         });

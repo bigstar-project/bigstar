@@ -3,7 +3,7 @@ export type RuntimeCapabilities = {
   aiDevTools: boolean;
   automaticUnresolvedSessionReport: boolean;
   configurableSignalServer: boolean;
-  manualLogUpload: boolean;
+  feedbackSubmission: boolean;
   notifyOwnRooms: boolean;
 };
 
@@ -17,7 +17,7 @@ const localInsidersCapabilities: RuntimeCapabilities = {
   aiDevTools: true,
   automaticUnresolvedSessionReport: true,
   configurableSignalServer: true,
-  manualLogUpload: true,
+  feedbackSubmission: true,
   notifyOwnRooms: true,
 };
 

@@ -17,7 +17,7 @@ describe('build profile', () => {
       aiDevTools: true,
       automaticUnresolvedSessionReport: true,
       configurableSignalServer: true,
-      manualLogUpload: true,
+      feedbackSubmission: true,
       notifyOwnRooms: true,
     });
     expect(currentEdition()).toBe('insiders');
@@ -34,7 +34,7 @@ describe('build profile', () => {
       aiDevTools: false,
       automaticUnresolvedSessionReport: false,
       configurableSignalServer: false,
-      manualLogUpload: true,
+      feedbackSubmission: true,
       notifyOwnRooms: false,
     });
 

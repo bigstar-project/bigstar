@@ -41,7 +41,7 @@ const logArchives = await R2Bucket('log-archives', {
       conditions: { prefix: '' },
       enabled: true,
       deleteObjectsTransition: {
-        condition: { type: 'Age', maxAge: 24 * 60 * 60 },
+        condition: { type: 'Age', maxAge: 14 * 24 * 60 * 60 },
       },
     },
   ],
@@ -50,10 +50,13 @@ const logArchives = await R2Bucket('log-archives', {
 const defaultCorsOrigins = [
   'http://127.0.0.1:1420',
   'http://localhost:1420',
+  'http://127.0.0.1:1421',
+  'http://localhost:1421',
   'http://tauri.localhost',
   'https://tauri.localhost',
   'tauri://localhost',
 ].join(',');
+const feedbackWebhookUrl = process.env.FEEDBACK_WEBHOOK_URL;
 
 export const signaling = await Worker('signaling', {
   adopt: true,
@@ -65,7 +68,14 @@ export const signaling = await Worker('signaling', {
     DEFAULT_ICE_SERVERS:
       process.env.DEFAULT_ICE_SERVERS ?? 'stun:stun.l.google.com:19302',
     CORS_ORIGINS: process.env.CORS_ORIGINS ?? defaultCorsOrigins,
-    LOG_UPLOAD_TOKEN: process.env.LOG_UPLOAD_TOKEN ?? '',
+    ...(feedbackWebhookUrl
+      ? {
+          FEEDBACK_WEBHOOK_URL: alchemy.secret(
+            feedbackWebhookUrl,
+            `${edition}-feedback-webhook-url`,
+          ),
+        }
+      : {}),
     APP_EDITION: edition,
   },
   bundle: {

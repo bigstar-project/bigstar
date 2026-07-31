@@ -12,7 +12,7 @@
   },
   "capabilities": {
     "automaticUnresolvedSessionReport": false,
-    "manualLogUpload": true,
+    "feedbackSubmission": true,
     "aiDevToolsInLocalBuilds": false
   }
 }

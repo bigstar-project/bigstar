@@ -85,7 +85,6 @@ pub(crate) struct Defaults {
     pub(crate) ai_play_log_enabled: bool,
     pub(crate) performance_logs_enabled: bool,
     pub(crate) new_room_notifications_enabled: bool,
-    pub(crate) log_archive_upload_token: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Type)]
@@ -182,6 +181,7 @@ pub(crate) struct SavePlayerNameRequest {
 pub(crate) struct LogArchiveResponse {
     pub(crate) archive_path: String,
     pub(crate) size: u32,
+    pub(crate) included_files: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Type)]
@@ -198,14 +198,63 @@ pub(crate) struct CleanupDetailedLogsResponse {
 pub(crate) struct UploadLogArchiveRequest {
     pub(crate) log_dir: String,
     pub(crate) upload_url: String,
-    pub(crate) upload_token: String,
+    pub(crate) category: FeedbackCategory,
+    pub(crate) description: String,
+    pub(crate) include_performance: bool,
 }
 
 #[derive(Debug, Serialize, Type)]
 pub(crate) struct UploadLogArchiveResponse {
-    pub(crate) archive_path: String,
-    pub(crate) key: String,
+    pub(crate) report_id: String,
     pub(crate) size: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum FeedbackCategory {
+    Gui,
+    Connection,
+    Performance,
+    Desync,
+    Crash,
+    Update,
+    Other,
+}
+
+impl FeedbackCategory {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            Self::Gui => "gui",
+            Self::Connection => "connection",
+            Self::Performance => "performance",
+            Self::Desync => "desync",
+            Self::Crash => "crash",
+            Self::Update => "update",
+            Self::Other => "other",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct RecordAppErrorRequest {
+    pub(crate) source: String,
+    pub(crate) operation: String,
+    pub(crate) message: String,
+    pub(crate) stack: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct RecordAppContextRequest {
+    pub(crate) user_agent: String,
+    pub(crate) language: String,
+    pub(crate) hardware_concurrency: u32,
+    pub(crate) device_memory_gib: Option<f64>,
+    pub(crate) screen_width: u32,
+    pub(crate) screen_height: u32,
+    pub(crate) device_pixel_ratio: f64,
+    pub(crate) gpu_renderer: Option<String>,
 }
 
 #[derive(Debug, Serialize, Type)]

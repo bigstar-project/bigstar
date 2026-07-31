@@ -7,6 +7,7 @@ export type {
   CleanupDetailedLogsResponse,
   CourseMode,
   Defaults,
+  FeedbackCategory,
   GameSettings,
   GameStateMismatch,
   GenerateRomRequest,

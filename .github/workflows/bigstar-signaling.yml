@@ -72,6 +72,11 @@ jobs:
           ALCHEMY_STATE_TOKEN: ${{ secrets.ALCHEMY_STATE_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           DEFAULT_ICE_SERVERS: ${{ vars.DEFAULT_ICE_SERVERS }}
-          LOG_UPLOAD_TOKEN: ${{ secrets.LOG_UPLOAD_TOKEN }}
+          FEEDBACK_WEBHOOK_URL: ${{ secrets.FEEDBACK_WEBHOOK_URL }}
           NODE_ENV: production
-        run: pnpm run deploy --stage "$ALCHEMY_STAGE"
+        run: |
+          if [ -z "$FEEDBACK_WEBHOOK_URL" ]; then
+            echo "FEEDBACK_WEBHOOK_URL secret is required for the $BIGSTAR_EDITION environment" >&2
+            exit 1
+          fi
+          pnpm run deploy --stage "$ALCHEMY_STAGE"

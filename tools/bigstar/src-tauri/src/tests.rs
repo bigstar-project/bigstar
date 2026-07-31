@@ -933,8 +933,9 @@ fn crash_log_archive_excludes_diagnostic_events() {
     let archive = create_log_archive(&dir).expect("create archive");
     let file = fs::File::open(&archive).expect("open archive");
     let mut zip = zip::ZipArchive::new(file).expect("read archive");
-    assert!(zip.by_name("melonds.stdout.txt").is_ok());
-    assert!(zip.by_name("screens/frame.txt").is_ok());
+    assert!(zip.by_name("feedback-summary.json").is_ok());
+    assert!(zip.by_name("melonds.stdout.tail.txt").is_ok());
+    assert!(zip.by_name("screens/frame.txt").is_err());
     assert!(zip.by_name("melonds-events.jsonl").is_err());
 
     let _ = fs::remove_file(archive);
@@ -942,7 +943,7 @@ fn crash_log_archive_excludes_diagnostic_events() {
 }
 
 #[test]
-fn user_log_archive_includes_diagnostic_events_and_excludes_previous_archives() {
+fn user_log_archive_uses_safe_allowlist() {
     let dir = temp_log_dir("user-archive");
     fs::write(dir.join("bridge.stderr.txt"), "bridge").expect("write bridge log");
     fs::write(dir.join("melonds-events.jsonl"), "{}\n").expect("write diagnostics");
@@ -951,9 +952,67 @@ fn user_log_archive_includes_diagnostic_events_and_excludes_previous_archives() 
     let archive = create_user_log_archive(&dir).expect("create user archive");
     let file = fs::File::open(&archive).expect("open archive");
     let mut zip = zip::ZipArchive::new(file).expect("read archive");
-    assert!(zip.by_name("bridge.stderr.txt").is_ok());
-    assert!(zip.by_name("melonds-events.jsonl").is_ok());
+    assert!(zip.by_name("feedback-summary.json").is_ok());
+    assert!(zip.by_name("bridge.stderr.tail.txt").is_ok());
+    assert!(zip.by_name("melonds-events.jsonl").is_err());
     assert!(zip.by_name("bigstar-logs-old.zip").is_err());
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn feedback_archive_does_not_include_connection_secrets_or_raw_paths() {
+    let dir = temp_log_dir("feedback-redaction");
+    fs::write(
+        dir.join("launcher.json"),
+        r#"{
+          "request": {
+            "role": "host",
+            "signal_url": "wss://example.test/session?token=super-secret",
+            "room_code": "private-room",
+            "player_names": {"mario": "Private Player", "luigi": "Opponent"},
+            "settings": {"course_mode":"random","course_stages":[0],"wins":1}
+          },
+          "paths": {"rom":"C:\\Users\\Private\\rom.nds"}
+        }"#,
+    )
+    .expect("write launcher");
+    fs::write(
+        dir.join("bridge-status.json"),
+        r#"{
+          "phase":"connected",
+          "signal_url":"wss://example.test/session?token=super-secret",
+          "session":"private-room",
+          "selected_candidate_pair":{
+            "route":"stun",
+            "local_type":"srflx",
+            "remote_type":"srflx",
+            "local_address":"192.0.2.1:1234",
+            "remote_address":"198.51.100.2:5678"
+          }
+        }"#,
+    )
+    .expect("write bridge status");
+    fs::write(
+        dir.join("bridge.stderr.txt"),
+        r#"token=super-secret room_code=private-room player_name="Private Player" remote=198.51.100.2:5678"#,
+    )
+    .expect("write stderr");
+
+    let archive = create_user_log_archive(&dir).expect("create feedback archive");
+    let file = fs::File::open(&archive).expect("open archive");
+    let mut zip = zip::ZipArchive::new(file).expect("read archive");
+    let mut content = String::new();
+    for index in 0..zip.len() {
+        let mut entry = zip.by_index(index).expect("read entry");
+        entry.read_to_string(&mut content).expect("read entry text");
+    }
+    assert!(!content.contains("super-secret"));
+    assert!(!content.contains("private-room"));
+    assert!(!content.contains("Private Player"));
+    assert!(!content.contains(r"C:\Users\Private"));
+    assert!(!content.contains("198.51.100.2"));
+    assert!(content.contains("\"route\": \"stun\""));
 
     let _ = fs::remove_dir_all(dir);
 }

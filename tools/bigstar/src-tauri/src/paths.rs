@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Manager};
 
 use crate::models::{LauncherSettings, MatchHistoryRecord, MvlStageResult};
@@ -40,6 +41,72 @@ fn chrono_like_stamp() -> String {
 }
 
 static LOG_DIR_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+pub(crate) fn cleanup_log_retention(app: &AppHandle) -> Result<(), String> {
+    const MAX_SESSIONS: usize = 50;
+    const MAX_TOTAL_BYTES: u64 = 500 * 1024 * 1024;
+    const MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+
+    let logs_root = app_data_dir(app)?.join("logs");
+    if !logs_root.is_dir() {
+        return Ok(());
+    }
+    let mut entries = fs::read_dir(&logs_root)
+        .map_err(|err| format!("log retention directory を読めません: {err}"))?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let metadata = entry.metadata().ok()?;
+            metadata.is_dir().then_some((
+                entry.path(),
+                metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+            ))
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|(_, modified)| std::cmp::Reverse(*modified));
+
+    let now = SystemTime::now();
+    let mut retained_bytes = 0_u64;
+    for (index, (path, modified)) in entries.into_iter().enumerate() {
+        let bytes = directory_size(&path);
+        let expired = now
+            .duration_since(modified)
+            .map(|age| age > MAX_AGE)
+            .unwrap_or(false);
+        let exceeds_count = index >= MAX_SESSIONS;
+        let exceeds_bytes = retained_bytes.saturating_add(bytes) > MAX_TOTAL_BYTES;
+        if expired || exceeds_count || exceeds_bytes {
+            fs::remove_dir_all(&path)
+                .map_err(|err| format!("期限切れログを削除できません {}: {err}", path.display()))?;
+        } else {
+            retained_bytes = retained_bytes.saturating_add(bytes);
+        }
+    }
+    Ok(())
+}
+
+fn directory_size(path: &Path) -> u64 {
+    fs::read_dir(path)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| {
+            entry
+                .metadata()
+                .ok()
+                .map(|metadata| {
+                    if metadata.is_dir() {
+                        directory_size(&entry.path())
+                    } else if metadata.is_file() {
+                        metadata.len()
+                    } else {
+                        0
+                    }
+                })
+                .unwrap_or(0)
+        })
+        .sum()
+}
 
 pub(crate) fn absolutize_existing(value: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(value.trim());

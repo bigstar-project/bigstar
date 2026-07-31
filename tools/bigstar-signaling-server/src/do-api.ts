@@ -61,7 +61,7 @@ export type MatchmakingEnv = {
   LOG_ARCHIVES: AlchemyEnv['LOG_ARCHIVES'];
   DEFAULT_ICE_SERVERS?: AlchemyEnv['DEFAULT_ICE_SERVERS'];
   CORS_ORIGINS?: AlchemyEnv['CORS_ORIGINS'];
-  LOG_UPLOAD_TOKEN?: AlchemyEnv['LOG_UPLOAD_TOKEN'];
+  FEEDBACK_WEBHOOK_URL?: AlchemyEnv['FEEDBACK_WEBHOOK_URL'];
   APP_EDITION?: AlchemyEnv['APP_EDITION'];
 };
 

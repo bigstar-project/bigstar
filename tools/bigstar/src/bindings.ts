@@ -11,6 +11,8 @@ export const commands = {
 	runAiTool: (request: RunAiToolRequest) => typedError<RunAiToolResponse, string>(__TAURI_INVOKE("run_ai_tool", { request })),
 	selectAiLogFile: (currentPath: string) => typedError<string | null, string>(__TAURI_INVOKE("select_ai_log_file", { currentPath })),
 	getDefaults: () => typedError<Defaults, string>(__TAURI_INVOKE("get_defaults")),
+	recordAppContext: (request: RecordAppContextRequest) => typedError<null, string>(__TAURI_INVOKE("record_app_context", { request })),
+	recordAppError: (request: RecordAppErrorRequest) => typedError<null, string>(__TAURI_INVOKE("record_app_error", { request })),
 	saveRomPaths: (request: SaveRomPathsRequest) => typedError<null, string>(__TAURI_INVOKE("save_rom_paths", { request })),
 	saveDiagnosticEventsEnabled: (request: SaveDiagnosticEventsRequest) => typedError<null, string>(__TAURI_INVOKE("save_diagnostic_events_enabled", { request })),
 	saveDetailedLogsEnabled: (request: SaveDetailedLogsRequest) => typedError<null, string>(__TAURI_INVOKE("save_detailed_logs_enabled", { request })),
@@ -103,8 +105,9 @@ export type Defaults = {
 	ai_play_log_enabled: boolean,
 	performance_logs_enabled: boolean,
 	new_room_notifications_enabled: boolean,
-	log_archive_upload_token: string,
 };
+
+export type FeedbackCategory = "gui" | "connection" | "performance" | "desync" | "crash" | "update" | "other";
 
 export type GameSettings = {
 	course_mode: CourseMode,
@@ -185,6 +188,7 @@ export type Lives = "3" | "5" | "endless";
 export type LogArchiveResponse = {
 	archive_path: string,
 	size: number,
+	included_files: string[],
 };
 
 export type MatchHistoryCursor = {
@@ -345,6 +349,24 @@ export type ReadAiTextFileResponse = {
 	sampled_lines: number,
 };
 
+export type RecordAppContextRequest = {
+	user_agent: string,
+	language: string,
+	hardware_concurrency: number,
+	device_memory_gib: number | null,
+	screen_width: number,
+	screen_height: number,
+	device_pixel_ratio: number | null,
+	gpu_renderer: string | null,
+};
+
+export type RecordAppErrorRequest = {
+	source: string,
+	operation: string,
+	message: string,
+	stack: string | null,
+};
+
 export type Role = "host" | "client";
 
 export type RomIdentity = {
@@ -448,12 +470,13 @@ export type ShowNewRoomNotificationRequest = {
 export type UploadLogArchiveRequest = {
 	log_dir: string,
 	upload_url: string,
-	upload_token: string,
+	category: FeedbackCategory,
+	description: string,
+	include_performance: boolean,
 };
 
 export type UploadLogArchiveResponse = {
-	archive_path: string,
-	key: string,
+	report_id: string,
 	size: number,
 };
 

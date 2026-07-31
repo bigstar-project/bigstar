@@ -15,6 +15,7 @@ use std::os::windows::process::CommandExt;
 use crate::config::{app_version, DEFAULT_FRAMES, NETPLAY_START_FRAME};
 #[cfg(feature = "insiders-edition")]
 use crate::crash_report::{match_result_decided, send_crash_report_async};
+use crate::diagnostics::append_session_event;
 use crate::models::{
     BridgeDiagnostics, CourseMode, GameStateMismatch, LaunchRequest, LaunchResponse,
     MelonDiagnostics, MvlPlayerResult, MvlStageResult, Role, SessionStatus,
@@ -47,23 +48,39 @@ pub(crate) fn start_match_resolved(
     paths: LaunchPaths,
 ) -> Result<LaunchResponse, String> {
     stop_existing(state)?;
+    append_session_event(&paths.log_dir, "launcher", "session_starting", None);
     write_launch_manifest(&paths, &request)?;
     let process_job = ChildProcessJob::create()?;
 
+    append_session_event(&paths.log_dir, "bridge", "process_starting", None);
     let mut bridge = build_bridge_command(&paths.bridge_path, &request, &paths.log_dir)?;
-    let mut bridge_child = bridge
-        .spawn()
-        .map_err(|err| format!("bridge の起動に失敗しました: {err}"))?;
+    let mut bridge_child = bridge.spawn().map_err(|err| {
+        append_session_event(
+            &paths.log_dir,
+            "bridge",
+            "process_start_failed",
+            Some(&err.to_string()),
+        );
+        format!("bridge の起動に失敗しました: {err}")
+    })?;
+    if let Err(err) = capture_child_stdio(&mut bridge_child, &paths.log_dir, "bridge") {
+        terminate_child(&mut bridge_child);
+        return Err(err);
+    }
+    append_session_event(&paths.log_dir, "bridge", "process_started", None);
     if let Err(err) = process_job.assign_child(&bridge_child, "bridge") {
         terminate_child(&mut bridge_child);
         return Err(err);
     }
 
     if let Err(err) = wait_for_bridge_connected(&mut bridge_child, &paths.log_dir) {
+        append_session_event(&paths.log_dir, "bridge", "connection_failed", Some(&err));
         terminate_child(&mut bridge_child);
         return Err(err);
     }
+    append_session_event(&paths.log_dir, "bridge", "connected", None);
 
+    append_session_event(&paths.log_dir, "melonds", "process_starting", None);
     let mut melon = build_melon_command(
         &paths.melon_path,
         &paths.rom_path,
@@ -72,8 +89,21 @@ pub(crate) fn start_match_resolved(
         &paths.log_dir,
     )?;
     let melon_child = match melon.spawn() {
-        Ok(child) => child,
+        Ok(mut child) => {
+            if let Err(err) = capture_child_stdio(&mut child, &paths.log_dir, "melonds") {
+                terminate_child(&mut child);
+                terminate_child(&mut bridge_child);
+                return Err(err);
+            }
+            child
+        }
         Err(err) => {
+            append_session_event(
+                &paths.log_dir,
+                "melonds",
+                "process_start_failed",
+                Some(&err.to_string()),
+            );
             terminate_child(&mut bridge_child);
             return Err(format!("melonDS の起動に失敗しました: {err}"));
         }
@@ -90,6 +120,8 @@ pub(crate) fn start_match_resolved(
         melon_pid: melon_child.id(),
         bridge_pid: bridge_child.id(),
     };
+    append_session_event(&paths.log_dir, "melonds", "process_started", None);
+    append_session_event(&paths.log_dir, "launcher", "session_started", None);
 
     let mut guard = state
         .session
@@ -98,6 +130,8 @@ pub(crate) fn start_match_resolved(
     *guard = Some(ManagedSession {
         melon: melon_child,
         bridge: bridge_child,
+        last_melon_state: "running".to_owned(),
+        last_bridge_state: "running".to_owned(),
         _process_job: process_job,
         log_dir: paths.log_dir,
         #[cfg(feature = "insiders-edition")]
@@ -166,6 +200,16 @@ fn stop_existing_inner(state: &AppState, report_unresolved: bool) -> Result<(), 
         .lock()
         .map_err(|_| "session state lock failed".to_owned())?;
     if let Some(mut session) = guard.take() {
+        append_session_event(
+            &session.log_dir,
+            "launcher",
+            if report_unresolved {
+                "session_stopped_by_user"
+            } else {
+                "session_replaced"
+            },
+            None,
+        );
         terminate_child(&mut session.melon);
         terminate_child(&mut session.bridge);
         let compression_result = finalize_ai_observation_v3_log(&session.log_dir);
@@ -254,6 +298,19 @@ fn refresh_session_processes(
         melon = process_state(&mut session.melon)?;
     }
 
+    record_process_state_change(
+        &session.log_dir,
+        "melonds",
+        &mut session.last_melon_state,
+        &melon,
+    );
+    record_process_state_change(
+        &session.log_dir,
+        "bridge",
+        &mut session.last_bridge_state,
+        &bridge,
+    );
+
     let compression_result = if melon != "running" {
         finalize_ai_observation_v3_log(&session.log_dir)
     } else {
@@ -279,6 +336,16 @@ fn refresh_session_processes(
     compression_result?;
 
     Ok((melon, bridge, mvl_results))
+}
+
+fn record_process_state_change(log_dir: &Path, source: &str, previous: &mut String, current: &str) {
+    if previous == current {
+        return;
+    }
+    if current != "running" {
+        append_session_event(log_dir, source, "process_exited", Some(current));
+    }
+    current.clone_into(previous);
 }
 
 pub(crate) fn finalize_ai_observation_v3_log(log_dir: &Path) -> Result<bool, String> {
@@ -763,14 +830,83 @@ pub(crate) fn melon_env(
 }
 
 fn with_stdio(mut command: Command, log_dir: &Path, name: &str) -> Result<Command, String> {
-    let stdout = File::create(log_dir.join(format!("{name}.stdout.txt")))
-        .map_err(|err| format!("{name} stdout log を作成できません: {err}"))?;
-    let stderr = File::create(log_dir.join(format!("{name}.stderr.txt")))
-        .map_err(|err| format!("{name} stderr log を作成できません: {err}"))?;
-    command.stdout(Stdio::from(stdout));
-    command.stderr(Stdio::from(stderr));
+    fs::create_dir_all(log_dir)
+        .map_err(|err| format!("{name} log directory を作成できません: {err}"))?;
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
     hide_child_console_window(&mut command);
     Ok(command)
+}
+
+fn capture_child_stdio(child: &mut Child, log_dir: &Path, name: &str) -> Result<(), String> {
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| format!("{name} stdout pipe を取得できません"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| format!("{name} stderr pipe を取得できません"))?;
+    let stdout_path = log_dir.join(format!("{name}.stdout.txt"));
+    let stderr_path = log_dir.join(format!("{name}.stderr.txt"));
+    let stdout_limit = if name == "melonds" {
+        8 * 1024 * 1024
+    } else {
+        2 * 1024 * 1024
+    };
+    spawn_rotating_stream_writer(stdout, stdout_path, stdout_limit, format!("{name}-stdout"))?;
+    spawn_rotating_stream_writer(stderr, stderr_path, 1024 * 1024, format!("{name}-stderr"))
+}
+
+fn spawn_rotating_stream_writer<R>(
+    mut reader: R,
+    path: PathBuf,
+    max_bytes: u64,
+    thread_name: String,
+) -> Result<(), String>
+where
+    R: Read + Send + 'static,
+{
+    std::thread::Builder::new()
+        .name(format!("bigstar-{thread_name}-capture"))
+        .spawn(move || {
+            let rotated = path.with_extension("txt.1");
+            let mut file = match File::create(&path) {
+                Ok(file) => file,
+                Err(_) => return,
+            };
+            let mut written = 0_u64;
+            let mut buffer = [0_u8; 16 * 1024];
+            loop {
+                let read = match reader.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => read,
+                };
+                let mut offset = 0;
+                while offset < read {
+                    if written >= max_bytes {
+                        let _ = file.flush();
+                        drop(file);
+                        let _ = fs::remove_file(&rotated);
+                        let _ = fs::rename(&path, &rotated);
+                        file = match File::create(&path) {
+                            Ok(file) => file,
+                            Err(_) => return,
+                        };
+                        written = 0;
+                    }
+                    let available = (max_bytes - written).min((read - offset) as u64) as usize;
+                    if file.write_all(&buffer[offset..offset + available]).is_err() {
+                        return;
+                    }
+                    written += available as u64;
+                    offset += available;
+                }
+            }
+            let _ = file.flush();
+        })
+        .map(|_| ())
+        .map_err(|err| format!("{thread_name} log capture thread を開始できません: {err}"))
 }
 
 fn write_launch_manifest(paths: &LaunchPaths, request: &LaunchRequest) -> Result<(), String> {
@@ -890,10 +1026,12 @@ pub(crate) fn read_melon_diagnostics(log_dir: &Path) -> Option<MelonDiagnostics>
 }
 
 pub(crate) fn read_mvl_results(log_dir: &Path) -> Vec<MvlStageResult> {
-    let stdout = match fs::read_to_string(log_dir.join("melonds.stdout.txt")) {
-        Ok(stdout) => stdout,
-        Err(_) => return Vec::new(),
-    };
+    let stdout_path = log_dir.join("melonds.stdout.txt");
+    let mut stdout = fs::read_to_string(stdout_path.with_extension("txt.1")).unwrap_or_default();
+    stdout.push_str(&fs::read_to_string(&stdout_path).unwrap_or_default());
+    if stdout.is_empty() {
+        return Vec::new();
+    }
     let stages = read_launcher_course_stages(log_dir);
     let mut results: Vec<MvlStageResult> = stdout
         .lines()
