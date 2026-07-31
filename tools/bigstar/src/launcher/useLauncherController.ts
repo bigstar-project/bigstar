@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { parseAsStringLiteral, useQueryState } from 'nuqs';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { recordAppError } from '../appDiagnostics';
 import {
   areAiDevToolsEnabled,
@@ -61,10 +61,8 @@ import {
   upsertMatchHistory as upsertMatchHistoryCommand,
 } from '../tauriClient';
 import type {
-  BridgeDiagnostics,
   Defaults,
   FormState,
-  GameStateMismatch,
   GenerateRomRequest,
   GenerateRomResponse,
   LaunchRequest,
@@ -73,7 +71,6 @@ import type {
   SessionStatus,
   StatusKind,
 } from '../types';
-import { stageLabel } from './options';
 import {
   type BattleMatchRecord,
   type BattleMatchStatus,
@@ -91,6 +88,51 @@ import {
 } from './useMatchmakingSubscriptions';
 
 const ACTIVITY_STATUS_VISIBLE_MS = 5000;
+
+type ConnectionStatusState = {
+  active: boolean;
+  kind: StatusKind;
+  text: string;
+};
+
+const TERMINAL_WEBRTC_STATES = new Set(['closed', 'disconnected', 'failed']);
+
+export function connectionStatusFromSession(
+  response: SessionStatus,
+): ConnectionStatusState {
+  const phase = response.webrtc?.phase?.toLowerCase() ?? null;
+  const connectionState =
+    response.webrtc?.connection_state?.toLowerCase() ?? null;
+
+  if (response.game_state_mismatch) {
+    return { active: response.active, kind: 'error', text: '同期エラー' };
+  }
+  if (
+    phase === 'failed' ||
+    (connectionState !== null && TERMINAL_WEBRTC_STATES.has(connectionState)) ||
+    processExited(response.melon) ||
+    processExited(response.bridge)
+  ) {
+    return { active: response.active, kind: 'error', text: '接続エラー' };
+  }
+  if (!response.active) {
+    return { active: false, kind: 'idle', text: '未接続' };
+  }
+  if (response.diagnostics_error) {
+    return {
+      active: true,
+      kind: 'warn',
+      text: '接続状態を確認できません',
+    };
+  }
+  if (
+    phase === 'connected' &&
+    (connectionState === null || connectionState === 'connected')
+  ) {
+    return { active: true, kind: 'ok', text: '接続済み' };
+  }
+  return { active: true, kind: 'idle', text: '接続中…' };
+}
 
 function isTauriRuntime() {
   return '__TAURI_INTERNALS__' in window;
@@ -269,24 +311,21 @@ export function useLauncherController() {
       .withOptions({ history: 'push' }),
   );
   const [form, setForm] = useState<FormState>(initialForm);
-  const [connectionStatus, setConnectionStatus] = useState({
-    text: '初期化中',
-    kind: 'idle' as StatusKind,
-  });
+  const [connectionStatus, setConnectionStatus] =
+    useState<ConnectionStatusState>({
+      active: false,
+      text: '初期化中',
+      kind: 'idle' as StatusKind,
+    });
   const [activityStatus, setActivityStatus] = useState<{
     text: string;
     kind: StatusKind;
   } | null>(null);
   const [lastLogDir, setLastLogDir] = useState('');
-  const [bridgeDiagnostics, setBridgeDiagnostics] =
-    useState<BridgeDiagnostics | null>(null);
-  const [gameStateMismatch, setGameStateMismatch] =
-    useState<GameStateMismatch | null>(null);
 
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [roomsError, setRoomsError] = useState<string | null>(null);
-  const [romPreparation, setRomPreparation] = useState('未確認');
   const [onboardingRomsPrepared, setOnboardingRomsPrepared] = useState(false);
   const [romEnsureBusy, setRomEnsureBusy] = useState(false);
   const [romGenerationBusy, setRomGenerationBusy] = useState(false);
@@ -332,36 +371,10 @@ export function useLauncherController() {
           ? { phase: 'available', version: updateQuery.data.version }
           : { phase: 'none' };
 
-  const currentRomPath =
-    form.role === 'host' ? form.hostRomPath : form.clientRomPath;
-  const selectedStage = useMemo(
-    () => selectedStageFrom(form.courseMode, form.matchSeed, form.courseStages),
-    [form.courseMode, form.courseStages, form.matchSeed],
-  );
-  const selectedStageLabel =
-    selectedStage === null
-      ? form.courseMode === 'random'
-        ? '未確定'
-        : stageLabel(0)
-      : stageLabel(selectedStage);
-  const courseNote =
-    form.courseMode === 'select'
-      ? `ゲーム ${form.courseStages.map((stage) => stageLabel(stage)).join(' / ')}`
-      : '起動時にコース列と各試合の seed を確定します。';
-  const connectionActive =
-    connectionStatus.text.startsWith('実行中') ||
-    connectionStatus.text.startsWith('起動済み');
+  const connectionActive = connectionStatus.active;
   const updateRequired = isUpdateRequired(updateStatus);
-  const romsConfigured = Boolean(
-    form.hostRomPath && form.clientRomPath && form.baseRomPath,
-  );
   const summary: LauncherSummary = {
     connectionActive,
-    courseNote,
-    currentRomPath,
-    romPreparation,
-    romsConfigured,
-    selectedStageLabel,
     updateRequired,
     updateVersion: updateStatus.version,
   };
@@ -642,18 +655,8 @@ export function useLauncherController() {
         setLastLogDir(response.log_dir);
         applySessionResults(response.log_dir, response.mvl_results);
       }
-      setBridgeDiagnostics(response.webrtc ?? null);
-      setGameStateMismatch(response.game_state_mismatch ?? null);
-      if (processExited(response.melon) || processExited(response.bridge)) {
-        setConnectionStatus({
-          text: `プロセス終了 melonDS:${response.melon ?? '-'} bridge:${response.bridge ?? '-'}`,
-          kind: 'error',
-        });
-        return;
-      }
+      setConnectionStatus(connectionStatusFromSession(response));
       if (!response.active) {
-        setGameStateMismatch(null);
-        setConnectionStatus({ text: '未接続', kind: 'idle' });
         if (
           response.log_dir &&
           currentMatchRef.current?.logDir === response.log_dir &&
@@ -661,23 +664,7 @@ export function useLauncherController() {
         ) {
           archiveCurrentMatch('stopped');
         }
-        return;
       }
-      if (response.diagnostics_error) {
-        setConnectionStatus({ text: response.diagnostics_error, kind: 'warn' });
-        return;
-      }
-      if (response.game_state_mismatch) {
-        setConnectionStatus({
-          text: `実行中: ゲーム状態ミスマッチ frame=${response.game_state_mismatch.frame ?? '-'}`,
-          kind: 'warn',
-        });
-        return;
-      }
-      setConnectionStatus({
-        text: `実行中 melonDS:${response.melon ?? '-'} bridge:${response.bridge ?? '-'}`,
-        kind: 'ok',
-      });
     },
     [applySessionResults, archiveCurrentMatch],
   );
@@ -741,7 +728,11 @@ export function useLauncherController() {
       });
     }
     if (sessionStatusQuery.error) {
-      setConnectionStatus({ text: '状態取得に失敗しました', kind: 'warn' });
+      setConnectionStatus((current) => ({
+        ...current,
+        text: '接続状態を確認できません',
+        kind: 'warn',
+      }));
     }
   }, [
     defaultsQuery.error,
@@ -792,7 +783,6 @@ export function useLauncherController() {
         hostRomPath: response.host_rom,
         clientRomPath: response.client_rom,
       }));
-      setRomPreparation('準備済み');
       setOnboardingRomsPrepared(true);
       void queryClient.invalidateQueries({
         queryKey: launcherQueryKeys.defaults,
@@ -850,7 +840,6 @@ export function useLauncherController() {
           hostRomPath: response.host_rom,
           clientRomPath: response.client_rom,
         }));
-        setRomPreparation(response.generated ? '初回準備済み' : '再利用');
         setOnboardingRomsPrepared(true);
         void queryClient.invalidateQueries({
           queryKey: launcherQueryKeys.defaults,
@@ -898,21 +887,13 @@ export function useLauncherController() {
       return;
     }
     startupRomPreparationKeyRef.current = key;
-    setRomPreparation('起動時準備中');
-    void ensurePreparedRoms(form)
-      .then((response) => {
-        setRomPreparation(
-          response.generated ? '起動時に準備済み' : '起動時に再利用',
-        );
-      })
-      .catch((error) => {
-        startupRomPreparationKeyRef.current = null;
-        setRomPreparation('準備失敗');
-        setActivityStatus({
-          text: `起動時のROM準備に失敗しました: ${String(error)}`,
-          kind: 'warn',
-        });
+    void ensurePreparedRoms(form).catch((error) => {
+      startupRomPreparationKeyRef.current = null;
+      setActivityStatus({
+        text: `起動時のROM準備に失敗しました: ${String(error)}`,
+        kind: 'warn',
       });
+    });
   }, [defaultsLoaded, form, connectionActive, ensurePreparedRoms]);
 
   const startMatchFor = useCallback(
@@ -999,9 +980,13 @@ export function useLauncherController() {
         currentMatchRef.current = record;
         setCurrentMatch(record);
         setLastLogDir(response.log_dir);
-        setGameStateMismatch(null);
+        setConnectionStatus({
+          active: true,
+          text: '接続中…',
+          kind: 'idle',
+        });
         setActivityStatus({
-          text: `起動済み melonDS:${response.melon_pid} bridge:${response.bridge_pid}`,
+          text: '対戦を起動しました',
           kind: 'ok',
         });
         return true;
@@ -1338,7 +1323,6 @@ export function useLauncherController() {
   const stopMatch = async () => {
     try {
       await stopMatchMutation.mutateAsync();
-      setGameStateMismatch(null);
       archiveCurrentMatch('stopped');
       setActivityStatus({ text: '停止しました', kind: 'warn' });
     } catch (error) {
@@ -1582,7 +1566,6 @@ export function useLauncherController() {
   return {
     actions,
     activeView,
-    bridgeDiagnostics,
     changeView,
     connectionActive,
     connectionStatus,
@@ -1590,7 +1573,6 @@ export function useLauncherController() {
     activityStatus,
     form,
     lastLogDir,
-    gameStateMismatch,
     matchmakingRooms: {
       rooms,
       loading: roomsLoading,

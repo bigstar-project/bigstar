@@ -52,10 +52,6 @@ export function App() {
         >
           <BattleView
             actions={launcher.actions}
-            diagnostics={{
-              bridgeDiagnostics: launcher.bridgeDiagnostics,
-              gameStateMismatch: launcher.gameStateMismatch,
-            }}
             form={launcher.form}
             matchmakingRooms={launcher.matchmakingRooms}
             currentMatch={launcher.currentMatch}
@@ -75,7 +71,6 @@ export function App() {
             actions={launcher.actions}
             form={launcher.form}
             startup={launcher.startup}
-            summary={launcher.summary}
             updateField={launcher.updateField}
           />
         </LauncherShell>

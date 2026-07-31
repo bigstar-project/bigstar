@@ -5,7 +5,6 @@ import { initialForm } from '../form';
 import { BattleView } from './BattleView';
 import type {
   BattleMatchRecord,
-  DiagnosticsState,
   LauncherActions,
   LauncherSummary,
   MatchmakingRoomsState,
@@ -13,11 +12,6 @@ import type {
 
 const summary: LauncherSummary = {
   connectionActive: false,
-  courseNote: '起動時にコース列と各試合の seed を確定します。',
-  currentRomPath: 'C:\\roms\\host.nds',
-  romPreparation: '再利用',
-  romsConfigured: true,
-  selectedStageLabel: '土管',
   updateRequired: false,
 };
 
@@ -154,7 +148,6 @@ const currentMatch: BattleMatchRecord = {
 async function renderBattleView(
   props: {
     actionOverrides?: Partial<LauncherActions>;
-    diagnostics?: DiagnosticsState;
     currentMatch?: BattleMatchRecord | null;
     matchmakingRooms?: MatchmakingRoomsState;
     summaryOverride?: Partial<LauncherSummary>;
@@ -167,12 +160,6 @@ async function renderBattleView(
     <Tabs.Root value="battle">
       <BattleView
         actions={launcherActions}
-        diagnostics={
-          props.diagnostics ?? {
-            bridgeDiagnostics: null,
-            gameStateMismatch: null,
-          }
-        }
         form={{
           ...initialForm,
           baseRomPath: 'C:\\roms\\base.nds',
@@ -376,30 +363,11 @@ describe('対戦ビュー', () => {
       .toBeVisible();
   });
 
-  test('ゲーム状態ミスマッチを警告として表示する', async () => {
-    const { screen } = await renderBattleView({
-      diagnostics: {
-        bridgeDiagnostics: null,
-        gameStateMismatch: {
-          basic_matches: false,
-          frame: 240,
-          instance: 0,
-          line: 'NSMB MvL Netplay: game state mismatch inst=0 frame=240 local=00000000000000AA remote=00000000000000BB basic=0 playerGlobal=1 wifiCandidate=0 renderCandidate=1',
-          local_hash: '00000000000000AA',
-          player_global_matches: true,
-          remote_hash: '00000000000000BB',
-          render_candidate_matches: true,
-          wifi_candidate_matches: false,
-        },
-      },
-      summaryOverride: { connectionActive: true },
-    });
+  test('接続状況の診断パネルを表示しない', async () => {
+    const { screen } = await renderBattleView();
 
     await expect
-      .element(screen.getByText('ゲーム状態ミスマッチ', { exact: true }))
-      .toBeVisible();
-    await expect
-      .element(screen.getByText(/NSMB MvL Netplay: game state mismatch/))
-      .toBeVisible();
+      .element(screen.getByText('接続状況', { exact: true }))
+      .not.toBeInTheDocument();
   });
 });

@@ -55,9 +55,8 @@ export default defineConfig({
           statusMax: { value: "42ch" },
           sidebar: { value: "204px" },
           sidebarCompact: { value: "92px" },
-          diagnostics: { value: "350px" },
-          cta: { value: "60px" },
-          settingsAside: { value: "350px" }
+          mainPanel: { value: "616px" },
+          cta: { value: "60px" }
         }
       },
 

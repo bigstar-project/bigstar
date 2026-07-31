@@ -3,17 +3,7 @@ import { render } from 'vitest-browser-react';
 import { Tabs } from '../components/ui';
 import { initialForm } from '../form';
 import { SettingsView } from './SettingsView';
-import type { LauncherActions, LauncherSummary } from './types';
-
-const summary: LauncherSummary = {
-  connectionActive: false,
-  courseNote: '起動時にコース列と各試合の seed を確定します。',
-  currentRomPath: 'C:\\roms\\host.nds',
-  romPreparation: '再利用',
-  romsConfigured: true,
-  selectedStageLabel: '土管',
-  updateRequired: false,
-};
+import type { LauncherActions } from './types';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -72,7 +62,6 @@ async function renderSettingsView(
           signalUrl: 'ws://127.0.0.1:8787/session',
         }}
         startup={{ enabled: false, loading: false }}
-        summary={summary}
         updateField={updateField}
       />
     </Tabs.Root>,
@@ -231,14 +220,11 @@ describe('設定ビュー', () => {
     expect(launcherActions.cleanupDetailedLogs).toHaveBeenCalledTimes(1);
   });
 
-  test('現在の設定状態を要約して表示する', async () => {
+  test('現在の構成パネルを表示しない', async () => {
     const { screen } = await renderSettingsView();
 
-    await expect.element(screen.getByText('対戦準備 OK！')).toBeVisible();
-    await expect.element(screen.getByText('host.nds')).toBeVisible();
     await expect
-      .element(screen.getByText('ws://127.0.0.1:8787/session'))
-      .toBeVisible();
-    await expect.element(screen.getByText('8165')).toBeVisible();
+      .element(screen.getByText('現在の構成', { exact: true }))
+      .not.toBeInTheDocument();
   });
 });

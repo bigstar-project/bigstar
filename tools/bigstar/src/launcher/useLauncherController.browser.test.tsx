@@ -11,8 +11,49 @@ import {
 } from '../matchmakingClient';
 import { notifyNewRoomAvailable } from '../roomNotifications';
 import { getDefaults } from '../tauriClient';
-import type { LaunchRequest, LaunchResponse } from '../types';
-import { useLauncherController } from './useLauncherController';
+import type {
+  BridgeDiagnostics,
+  LaunchRequest,
+  LaunchResponse,
+  SessionStatus,
+} from '../types';
+import {
+  connectionStatusFromSession,
+  useLauncherController,
+} from './useLauncherController';
+
+function bridgeDiagnostics(
+  phase: string,
+  connectionState: string | null,
+): BridgeDiagnostics {
+  return {
+    connection_state: connectionState,
+    gathering_state: null,
+    ice_servers: null,
+    ice_state: null,
+    last_error: null,
+    phase,
+    role: null,
+    selected_candidate_pair: null,
+    session: null,
+    signal_url: null,
+    stats: null,
+  };
+}
+
+function sessionStatus(overrides: Partial<SessionStatus> = {}): SessionStatus {
+  return {
+    active: true,
+    bridge: 'running',
+    diagnostics_error: null,
+    game_state_mismatch: null,
+    log_dir: 'C:\\logs\\run1',
+    melon: 'running',
+    mvl_results: [],
+    webrtc: bridgeDiagnostics('connecting', 'connecting'),
+    ...overrides,
+  };
+}
 
 const mocks = vi.hoisted(() => {
   const hostProfileId = '11111111-1111-4111-8111-111111111111';
@@ -265,7 +306,15 @@ function LauncherHarness() {
       <output aria-label="busy">
         {launcher.matchmakingRooms.busy ? 'busy' : 'idle'}
       </output>
-      <output aria-label="status">{launcher.activityStatus?.text ?? ''}</output>
+      <output aria-label="activity-status">
+        {launcher.activityStatus?.text ?? ''}
+      </output>
+      <output
+        aria-label="connection-status"
+        data-kind={launcher.connectionStatus.kind}
+      >
+        {launcher.connectionStatus.text}
+      </output>
       <output aria-label="opponent">
         {launcher.currentMatch?.playerNames.luigi ?? ''}
       </output>
@@ -290,6 +339,73 @@ function LauncherHarness() {
 }
 
 describe('useLauncherController', () => {
+  test.each([
+    {
+      expected: { active: false, kind: 'idle', text: '未接続' },
+      name: '停止中',
+      status: sessionStatus({ active: false, bridge: null, melon: null }),
+    },
+    {
+      expected: { active: true, kind: 'idle', text: '接続中…' },
+      name: '接続処理中',
+      status: sessionStatus(),
+    },
+    {
+      expected: { active: true, kind: 'ok', text: '接続済み' },
+      name: '接続完了',
+      status: sessionStatus({
+        webrtc: bridgeDiagnostics('connected', 'connected'),
+      }),
+    },
+    {
+      expected: { active: true, kind: 'error', text: '接続エラー' },
+      name: '対戦中の切断',
+      status: sessionStatus({
+        webrtc: bridgeDiagnostics('failed', 'disconnected'),
+      }),
+    },
+    {
+      expected: { active: false, kind: 'error', text: '接続エラー' },
+      name: 'プロセス異常終了',
+      status: sessionStatus({
+        active: false,
+        bridge: 'exited(1)',
+        melon: null,
+      }),
+    },
+    {
+      expected: { active: true, kind: 'error', text: '同期エラー' },
+      name: 'ゲーム状態不一致',
+      status: sessionStatus({
+        game_state_mismatch: {
+          basic_matches: false,
+          frame: 240,
+          instance: 0,
+          line: 'raw mismatch details',
+          local_hash: 'AA',
+          player_global_matches: true,
+          remote_hash: 'BB',
+          render_candidate_matches: true,
+          wifi_candidate_matches: false,
+        },
+      }),
+    },
+    {
+      expected: {
+        active: true,
+        kind: 'warn',
+        text: '接続状態を確認できません',
+      },
+      name: '診断情報の取得失敗',
+      status: sessionStatus({
+        diagnostics_error: 'C:\\private\\diagnostics.json: access denied',
+        webrtc: null,
+      }),
+    },
+  ])('$nameでは安全な接続表示にする', ({ expected, status }) => {
+    expect(connectionStatusFromSession(status)).toEqual(expected);
+  });
+
   test('画面遷移を履歴に追加してpopstateで復元する', async () => {
     const pushState = vi.spyOn(window.history, 'pushState');
     const screen = await render(
@@ -354,8 +470,14 @@ describe('useLauncherController', () => {
         .toHaveTextContent('idle');
     });
     await expect
-      .element(screen.getByLabelText('status'))
-      .toHaveTextContent('起動済み');
+      .element(screen.getByLabelText('activity-status'))
+      .toHaveTextContent('対戦を起動しました');
+    await expect
+      .element(screen.getByLabelText('activity-status'))
+      .not.toHaveTextContent(/1001|2001/);
+    await expect
+      .element(screen.getByLabelText('connection-status'))
+      .toHaveTextContent('接続中…');
     await expect
       .element(screen.getByLabelText('opponent'))
       .toHaveTextContent('Client Player');

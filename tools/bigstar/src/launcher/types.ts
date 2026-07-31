@@ -1,11 +1,5 @@
 import type { RoomSummary } from '../matchmakingClient';
-import type {
-  BridgeDiagnostics,
-  FeedbackCategory,
-  FormState,
-  GameStateMismatch,
-  MatchHistoryRecord,
-} from '../types';
+import type { FeedbackCategory, FormState, MatchHistoryRecord } from '../types';
 
 export type View = 'battle' | 'ai' | 'history' | 'settings';
 
@@ -38,11 +32,6 @@ export type SelectRomKey = 'baseRomPath';
 
 export type LauncherSummary = {
   connectionActive: boolean;
-  courseNote: string;
-  currentRomPath: string;
-  romPreparation: string;
-  romsConfigured: boolean;
-  selectedStageLabel: string;
   updateRequired: boolean;
   updateVersion?: string;
 };
@@ -85,11 +74,6 @@ export type OnboardingState = {
   romGenerationBusy: boolean;
   inputConfigOpened: boolean;
   playerNameConfigured: boolean;
-};
-
-export type DiagnosticsState = {
-  bridgeDiagnostics: BridgeDiagnostics | null;
-  gameStateMismatch: GameStateMismatch | null;
 };
 
 export type MatchmakingRoomsState = {

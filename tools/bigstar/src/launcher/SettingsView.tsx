@@ -2,8 +2,6 @@ import { Portal } from '@ark-ui/react';
 import {
   BellRinging,
   Broadcast,
-  CheckCircle,
-  FlagCheckered,
   GameController,
   HardDrives,
   Play,
@@ -14,7 +12,6 @@ import {
 import { useState } from 'react';
 import { css, cx } from 'styled-system/css';
 import { surface } from 'styled-system/recipes';
-import { token } from 'styled-system/tokens';
 import { currentEdition, currentRuntimeCapabilities } from '../buildProfile';
 import {
   FilePathField,
@@ -22,17 +19,10 @@ import {
   SelectField,
   TextField,
 } from '../components/Fields';
-import { SummaryItem } from '../components/SummaryItem';
 import { Button, CloseButton, Dialog, Switch, Tabs } from '../components/ui';
 import type { FormState } from '../types';
-import { InfoPanel, SettingsPanel } from './LauncherCards';
-import { shortPath } from './path';
-import type {
-  LauncherActions,
-  LauncherSummary,
-  StartupState,
-  UpdateFormField,
-} from './types';
+import { SettingsPanel } from './LauncherCards';
+import type { LauncherActions, StartupState, UpdateFormField } from './types';
 
 const diagnosticEventOptions = [
   { value: 'off', label: 'Off' },
@@ -57,7 +47,6 @@ export function SettingsView({
   actions,
   form,
   startup,
-  summary,
   updateField,
 }: {
   actions: Pick<
@@ -71,7 +60,6 @@ export function SettingsView({
   >;
   form: FormState;
   startup: StartupState;
-  summary: LauncherSummary;
   updateField: UpdateFormField;
 }) {
   const [cleanupConfirmOpen, setCleanupConfirmOpen] = useState(false);
@@ -84,14 +72,8 @@ export function SettingsView({
     <Tabs.Content value="settings">
       <div
         className={css({
-          display: 'grid',
-          gap: '4',
-          gridTemplateColumns: {
-            base: '1fr',
-            xl: `minmax(0, 1fr) ${token('sizes.settingsAside')}`,
-          },
-          maxW: { base: 'xl', xl: 'contentMax' },
-          mx: { base: 'auto', xl: '0' },
+          maxW: { base: 'xl', xl: 'mainPanel' },
+          mx: 'auto',
           w: 'full',
         })}
       >
@@ -424,80 +406,6 @@ export function SettingsView({
             />
           </SettingsPanel>
         </section>
-
-        <aside
-          className={css({
-            alignContent: 'start',
-            display: 'grid',
-            gap: '3',
-          })}
-        >
-          <InfoPanel
-            icon={<FlagCheckered size={24} weight="fill" />}
-            title="現在の構成"
-            badge={summary.romsConfigured ? '準備 OK' : '未完了'}
-            badgeTone={summary.romsConfigured ? 'green' : 'slate'}
-          >
-            <div
-              className={css({
-                alignItems: 'center',
-                bg: 'green.subtle.bg',
-                borderColor: 'green.outline.border',
-                borderRadius: 'l2',
-                borderWidth: '1px',
-                display: 'flex',
-                gap: '2.5',
-                p: '3',
-              })}
-            >
-              <CheckCircle
-                className={css({
-                  color: 'green.plain.fg',
-                  flexShrink: '0',
-                })}
-                size={32}
-                weight="bold"
-              />
-              <div>
-                <div
-                  className={css({
-                    color: 'green.subtle.fg',
-                    fontWeight: 'black',
-                    textStyle: 'md',
-                  })}
-                >
-                  {summary.romsConfigured
-                    ? '対戦準備 OK！'
-                    : '設定を確認してください'}
-                </div>
-                <div
-                  className={css({
-                    color: 'fg.muted',
-                    fontWeight: 'semibold',
-                    textStyle: 'sm',
-                  })}
-                >
-                  {summary.romsConfigured
-                    ? 'ROM パスが設定されています'
-                    : '未設定の ROM パスがあります'}
-                </div>
-              </div>
-            </div>
-            <SummaryItem
-              label="接続"
-              value={summary.connectionActive ? '接続中' : '未接続'}
-            />
-            <SummaryItem
-              label="使用 ROM"
-              value={shortPath(summary.currentRomPath)}
-            />
-            <SummaryItem label="共通 ROM" value={summary.romPreparation} />
-            {configurableSignalServer ? (
-              <SummaryItem label="シグナリング" value={form.signalUrl || '-'} />
-            ) : null}
-            <SummaryItem label="UDP ポート" value={String(form.port)} />
-          </InfoPanel>
-        </aside>
       </div>
     </Tabs.Content>
   );

@@ -1,7 +1,6 @@
 import { Portal } from '@ark-ui/react';
 import {
   ArrowsClockwise,
-  Broadcast,
   Crown,
   Flag,
   Heart,
@@ -16,11 +15,8 @@ import {
 import { useState } from 'react';
 import { css, cx } from 'styled-system/css';
 import { surface } from 'styled-system/recipes';
-import { token } from 'styled-system/tokens';
 import { NumberField, SelectField } from '../components/Fields';
-import { SummaryItem } from '../components/SummaryItem';
 import { Button, CloseButton, Dialog, Tabs } from '../components/ui';
-import { WebRtcDiagnosticsPanel } from '../components/WebRtcDiagnosticsPanel';
 import {
   clampStage,
   defaultInputDelayFrames,
@@ -29,8 +25,8 @@ import {
   rollbackInputDelayFrames,
   rollbackInputMaxFrameLead,
 } from '../form';
-import type { CourseMode, FormState, GameStateMismatch, Lives } from '../types';
-import { InfoPanel, LauncherCard } from './LauncherCards';
+import type { CourseMode, FormState, Lives } from '../types';
+import { LauncherCard } from './LauncherCards';
 import { MatchResultCard } from './MatchResultCard';
 import {
   bigStarsOptions,
@@ -42,7 +38,6 @@ import {
 } from './options';
 import type {
   BattleMatchRecord,
-  DiagnosticsState,
   LauncherActions,
   LauncherSummary,
   MatchmakingRoomsState,
@@ -51,7 +46,6 @@ import type {
 
 export function BattleView({
   actions,
-  diagnostics,
   form,
   matchmakingRooms,
   currentMatch,
@@ -67,7 +61,6 @@ export function BattleView({
     | 'refreshRooms'
     | 'stopMatch'
   >;
-  diagnostics: DiagnosticsState;
   form: FormState;
   matchmakingRooms: MatchmakingRoomsState;
   currentMatch: BattleMatchRecord | null;
@@ -83,14 +76,10 @@ export function BattleView({
     <Tabs.Content value="battle">
       <form
         className={css({
-          alignItems: 'start',
-          display: 'grid',
-          gap: '4',
-          gridTemplateColumns: {
-            base: '1fr',
-            xl: `minmax(0, 1fr) ${token('sizes.diagnostics')}`,
+          maxW: {
+            base: 'xl',
+            xl: 'mainPanel',
           },
-          maxW: 'contentMax',
           mx: 'auto',
           w: 'full',
         })}
@@ -197,47 +186,6 @@ export function BattleView({
             </div>
           </LauncherCard>
         </section>
-
-        <aside className={css({ alignContent: 'start', display: 'grid' })}>
-          <InfoPanel
-            icon={<Broadcast size={22} weight="bold" />}
-            title="接続状況"
-            badge={
-              diagnostics.gameStateMismatch
-                ? 'ミスマッチ'
-                : summary.connectionActive
-                  ? '接続中'
-                  : '未接続'
-            }
-            badgeTone={
-              diagnostics.gameStateMismatch
-                ? 'red'
-                : summary.connectionActive
-                  ? 'green'
-                  : 'slate'
-            }
-          >
-            <SummaryItem
-              label="接続状態"
-              value={
-                diagnostics.gameStateMismatch
-                  ? '状態不一致を検出'
-                  : summary.connectionActive
-                    ? '接続中'
-                    : '未接続'
-              }
-            />
-            {diagnostics.gameStateMismatch ? (
-              <GameStateMismatchAlert
-                mismatch={diagnostics.gameStateMismatch}
-              />
-            ) : null}
-            <WebRtcDiagnosticsPanel
-              diagnostics={diagnostics.bridgeDiagnostics}
-              compact
-            />
-          </InfoPanel>
-        </aside>
       </form>
     </Tabs.Content>
   );
@@ -667,85 +615,4 @@ function formatRoomSettings(room: MatchmakingRoomsState['rooms'][number]) {
   const rollback = room.settings.rollback_enabled ? 'RB=on' : 'RB=off';
   const stages = room.settings.course_stages.join('/');
   return `Course=${room.settings.course_mode}[${stages}] Wins=${room.settings.wins} Star=${room.settings.big_stars} Lives=${room.settings.lives} Delay=${room.settings.input_delay_frames} Lead=${room.settings.input_max_frame_lead} ${rollback}`;
-}
-
-function GameStateMismatchAlert({
-  compact = false,
-  mismatch,
-}: {
-  compact?: boolean;
-  mismatch: GameStateMismatch;
-}) {
-  return (
-    <div
-      className={css({
-        bg: 'red.subtle.bg',
-        borderColor: 'red.outline.border',
-        borderRadius: 'l2',
-        borderWidth: '1px',
-        color: 'red.subtle.fg',
-        display: 'grid',
-        gap: compact ? '1' : '2',
-        p: compact ? '2.5' : '3',
-      })}
-    >
-      <div
-        className={css({
-          alignItems: 'center',
-          display: 'flex',
-          gap: '2',
-          fontWeight: 'black',
-          textStyle: compact ? 'sm' : 'md',
-        })}
-      >
-        <WarningCircle size={compact ? 18 : 20} weight="fill" />
-        ゲーム状態ミスマッチ
-      </div>
-      <div
-        className={css({
-          color: 'red.subtle.fg',
-          fontWeight: 'bold',
-          overflowWrap: 'anywhere',
-          textStyle: 'sm',
-        })}
-      >
-        {formatMismatchSummary(mismatch)}
-      </div>
-      {compact ? null : (
-        <code
-          className={css({
-            bg: 'red.2',
-            borderColor: 'red.5',
-            borderRadius: 'l1',
-            borderWidth: '1px',
-            color: 'red.12',
-            fontFamily: 'mono',
-            overflowWrap: 'anywhere',
-            px: '2',
-            py: '1.5',
-            textStyle: 'xs',
-          })}
-        >
-          {mismatch.line}
-        </code>
-      )}
-    </div>
-  );
-}
-
-function formatMismatchSummary(mismatch: GameStateMismatch) {
-  return [
-    `frame=${mismatch.frame ?? '-'}`,
-    `basic=${formatMatchFlag(mismatch.basic_matches)}`,
-    `player=${formatMatchFlag(mismatch.player_global_matches)}`,
-    `wifi=${formatMatchFlag(mismatch.wifi_candidate_matches)}`,
-    `render=${formatMatchFlag(mismatch.render_candidate_matches)}`,
-  ].join(' / ');
-}
-
-function formatMatchFlag(value: boolean | null) {
-  if (value === null) {
-    return '-';
-  }
-  return value ? 'OK' : 'NG';
 }
