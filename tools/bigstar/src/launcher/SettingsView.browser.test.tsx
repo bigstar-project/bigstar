@@ -153,20 +153,30 @@ describe('設定ビュー', () => {
     expect(document.body.textContent).not.toContain('AI用プレイログ');
   });
 
-  test('ロム、起動前チェック、melonDS 関連処理を実行する', async () => {
+  test('ロムとmelonDS関連処理を実行する', async () => {
     const { launcherActions, screen } = await renderSettingsView();
 
     await screen.getByRole('button', { name: '参照' }).click();
     await screen.getByRole('button', { name: 'melonDS を開く' }).click();
     await screen.getByRole('button', { name: '入力設定を開く' }).click();
-    await screen.getByRole('button', { name: '起動前チェック' }).click();
-    await screen.getByRole('button', { name: '共通 ROM を準備' }).click();
 
     expect(launcherActions.selectRomPath).toHaveBeenCalledWith('baseRomPath');
     expect(launcherActions.openMelonds).toHaveBeenCalledTimes(1);
     expect(launcherActions.openMelondsInputConfig).toHaveBeenCalledTimes(1);
-    expect(launcherActions.preflightCheck).toHaveBeenCalledTimes(1);
-    expect(launcherActions.prepareRoms).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([
+    'insiders',
+    'public',
+  ] as const)('全エディションで手動の起動前チェックとROM準備を表示しない', async (edition) => {
+    const { screen } = await renderSettingsView(false, edition);
+
+    await expect
+      .element(screen.getByRole('button', { name: '起動前チェック' }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(screen.getByRole('button', { name: '共通 ROM を準備' }))
+      .not.toBeInTheDocument();
   });
 
   test('スタートアップ起動をSwitchで切り替える', async () => {

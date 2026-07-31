@@ -7,7 +7,6 @@ import {
   GameController,
   HardDrives,
   Play,
-  ShieldCheck,
   Trash,
   UserCircle,
   WarningCircle,
@@ -66,8 +65,6 @@ export function SettingsView({
     | 'openMelonds'
     | 'openMelondsInputConfig'
     | 'cleanupDetailedLogs'
-    | 'preflightCheck'
-    | 'prepareRoms'
     | 'savePlayerName'
     | 'selectRomPath'
     | 'setStartupEnabled'
@@ -426,32 +423,6 @@ export function SettingsView({
               onChange={(value) => updateField('port', value)}
             />
           </SettingsPanel>
-
-          <div
-            className={css({
-              display: 'grid',
-              gap: '3',
-              gridTemplateColumns: {
-                base: '1fr',
-                md: 'repeat(2, minmax(0, 1fr))',
-              },
-            })}
-          >
-            <Button
-              variant="outline"
-              onClick={() => void actions.preflightCheck()}
-            >
-              <ShieldCheck size={20} weight="bold" />
-              起動前チェック
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => void actions.prepareRoms()}
-            >
-              <HardDrives size={20} weight="fill" />
-              共通 ROM を準備
-            </Button>
-          </div>
         </section>
 
         <aside
