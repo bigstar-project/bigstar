@@ -78,12 +78,21 @@ function Get-StageTimingSummary {
         RenderCycles = [uint64]0
         TailWallUs = [uint64]0
         TailCycles = [uint64]0
+        DeleteWallUs = [uint64]0
+        DeleteCycles = [uint64]0
+        CreateWallUs = [uint64]0
+        CreateCycles = [uint64]0
+        GameplayWallUs = [uint64]0
+        GameplayCycles = [uint64]0
     }
     $pairs = @(
         [pscustomobject]@{ Start = "input_begin"; End = "input_end"; Wall = "InputWallUs"; Cycles = "InputCycles" },
         [pscustomobject]@{ Start = "input_end"; End = "render_begin"; Wall = "UpdateWallUs"; Cycles = "UpdateCycles" },
         [pscustomobject]@{ Start = "render_begin"; End = "render_end"; Wall = "RenderWallUs"; Cycles = "RenderCycles" },
-        [pscustomobject]@{ Start = "render_end"; End = "tick_end"; Wall = "TailWallUs"; Cycles = "TailCycles" }
+        [pscustomobject]@{ Start = "render_end"; End = "tick_end"; Wall = "TailWallUs"; Cycles = "TailCycles" },
+        [pscustomobject]@{ Start = "delete_begin"; End = "delete_end"; Wall = "DeleteWallUs"; Cycles = "DeleteCycles" },
+        [pscustomobject]@{ Start = "create_begin"; End = "create_end"; Wall = "CreateWallUs"; Cycles = "CreateCycles" },
+        [pscustomobject]@{ Start = "gameplay_begin"; End = "gameplay_end"; Wall = "GameplayWallUs"; Cycles = "GameplayCycles" }
     )
     foreach ($pair in $pairs) {
         foreach ($segmentStart in @($window | Where-Object { $_.stage -eq $pair.Start })) {
@@ -134,6 +143,12 @@ function Get-StageTimingSummary {
         FinalRenderCycles = $finalRenderCycles
         TailWallUs = $segmentTotals.TailWallUs
         TailCycles = $segmentTotals.TailCycles
+        DeleteWallUs = $segmentTotals.DeleteWallUs
+        DeleteCycles = $segmentTotals.DeleteCycles
+        CreateWallUs = $segmentTotals.CreateWallUs
+        CreateCycles = $segmentTotals.CreateCycles
+        GameplayWallUs = $segmentTotals.GameplayWallUs
+        GameplayCycles = $segmentTotals.GameplayCycles
     }
 }
 

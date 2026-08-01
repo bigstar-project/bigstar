@@ -761,6 +761,7 @@ fn patch_game_tick_probe(rom: &mut RomImage) -> Result<()> {
     const FONT_GATE_ADDR: u32 = 0x0200_1A20;
     const RENDER_GATE_ADDR: u32 = 0x0200_1A60;
     const INPUT_GATE_ADDR: u32 = 0x0200_1B40;
+    const PROCESS_STAGE_GATE_ADDR: u32 = 0x0200_1D00;
     const INPUT_UPDATE_ADDR: u32 = 0x0200_5230;
 
     let loop_gate = [
@@ -815,11 +816,13 @@ fn patch_game_tick_probe(rom: &mut RomImage) -> Result<()> {
         GAME_TICK_PROBE_ACTIVE_ADDR,
     ];
     let input_gate = build_game_tick_input_gate(INPUT_GATE_ADDR, INPUT_UPDATE_ADDR)?;
+    let process_stage_gate = build_game_tick_process_stage_gate(PROCESS_STAGE_GATE_ADDR)?;
 
     ensure_zero_arm9_words(rom, LOOP_GATE_ADDR, loop_gate.len())?;
     ensure_zero_arm9_words(rom, FONT_GATE_ADDR, font_gate.len())?;
     ensure_zero_arm9_words(rom, RENDER_GATE_ADDR, render_gate.len())?;
     ensure_zero_arm9_words(rom, INPUT_GATE_ADDR, input_gate.len())?;
+    ensure_zero_arm9_words(rom, PROCESS_STAGE_GATE_ADDR, process_stage_gate.len())?;
     ensure_zero_arm9_words(rom, GAME_TICK_PROBE_REQUEST_ADDR, 2)?;
     ensure_zero_arm9_words(rom, GAME_TICK_PROBE_MAGIC_ADDR, 1)?;
     ensure_zero_arm9_words(rom, GAME_TICK_PROBE_HISTORY_ENABLED_ADDR, 5)?;
@@ -832,6 +835,7 @@ fn patch_game_tick_probe(rom: &mut RomImage) -> Result<()> {
     patch_arm9_words(rom, FONT_GATE_ADDR, &font_gate)?;
     patch_arm9_words(rom, RENDER_GATE_ADDR, &render_gate)?;
     patch_arm9_words(rom, INPUT_GATE_ADDR, &input_gate)?;
+    patch_arm9_words(rom, PROCESS_STAGE_GATE_ADDR, &process_stage_gate)?;
     patch_arm9_words(rom, GAME_TICK_PROBE_REQUEST_ADDR, &[0, 0])?;
     patch_arm9_words(rom, GAME_TICK_PROBE_MAGIC_ADDR, &[GAME_TICK_PROBE_MAGIC])?;
     patch_arm9_words(rom, GAME_TICK_PROBE_HISTORY_ENABLED_ADDR, &[0, 0, 0, 0, 0])?;
@@ -870,7 +874,84 @@ fn patch_game_tick_probe(rom: &mut RomImage) -> Result<()> {
         encode_b(RENDER_HOOK_ADDR, RENDER_GATE_ADDR)?,
         "game-tick render gate",
     )?;
+    for (hook_addr, expected) in [
+        (0x0204_D5B0, 0xEBFF_FFAD),
+        (0x0204_D5C4, 0xEBFF_FFA8),
+        (0x0204_D5D8, 0xEBFF_FFA3),
+    ] {
+        patch_arm9_word_checked(
+            rom,
+            hook_addr,
+            expected,
+            encode_bl(hook_addr, PROCESS_STAGE_GATE_ADDR)?,
+            "game-tick process-list stage gate",
+        )?;
+    }
     Ok(())
+}
+
+fn build_game_tick_process_stage_gate(start_addr: u32) -> Result<Vec<u32>> {
+    const PROCESS_LIST_EXECUTE_ADDR: u32 = 0x0204_D46C;
+    const DELETE_RETURN_ADDR: u32 = 0x0204_D5B4;
+    const CREATE_RETURN_ADDR: u32 = 0x0204_D5C8;
+    const UPDATE_RETURN_ADDR: u32 = 0x0204_D5DC;
+
+    let mut words = Vec::new();
+    let mut literals = Vec::new();
+    let mut refs: Vec<(usize, u8, usize)> = Vec::new();
+    let mut emit = |words: &mut Vec<u32>, rd: u8, value: u32| {
+        let literal_index = literals.len();
+        literals.push(value);
+        let word_index = words.len();
+        words.push(0);
+        refs.push((word_index, rd, literal_index));
+    };
+
+    // Six saved registers keep the stack 8-byte aligned across the nested call.
+    words.push(encode_push(
+        (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 12) | (1 << 14),
+    ));
+    emit(&mut words, 1, GAME_TICK_PROBE_STAGE_MARKER_ADDR);
+    words.push(encode_ldr_imm(2, 13, 20)?);
+    for (return_addr, marker) in [
+        (DELETE_RETURN_ADDR, 7),
+        (CREATE_RETURN_ADDR, 9),
+        (UPDATE_RETURN_ADDR, 11),
+    ] {
+        emit(&mut words, 3, return_addr);
+        words.push(encode_cmp_reg(2, 3));
+        words.push(with_cond(encode_mov_imm(2, marker)?, 0));
+    }
+    words.push(encode_str_imm(2, 1, 0)?);
+    words.push(encode_ldr_imm(0, 13, 0)?);
+    let call_index = words.len();
+    words.push(encode_bl(
+        start_addr + call_index as u32 * 4,
+        PROCESS_LIST_EXECUTE_ADDR,
+    )?);
+
+    emit(&mut words, 1, GAME_TICK_PROBE_STAGE_MARKER_ADDR);
+    words.push(encode_ldr_imm(2, 13, 20)?);
+    for (return_addr, marker) in [
+        (DELETE_RETURN_ADDR, 8),
+        (CREATE_RETURN_ADDR, 10),
+        (UPDATE_RETURN_ADDR, 12),
+    ] {
+        emit(&mut words, 3, return_addr);
+        words.push(encode_cmp_reg(2, 3));
+        words.push(with_cond(encode_mov_imm(2, marker)?, 0));
+    }
+    words.push(encode_str_imm(2, 1, 0)?);
+    words.push(0xE8BD_900F); // pop {r0-r3, r12, pc}
+
+    let literal_start_addr = start_addr + words.len() as u32 * 4;
+    for (word_index, rd, literal_index) in refs {
+        let instruction_addr = start_addr + word_index as u32 * 4;
+        let literal_addr = literal_start_addr + literal_index as u32 * 4;
+        words[word_index] = encode_ldr_pc_literal(rd, instruction_addr, literal_addr, 0xE)?;
+    }
+    words.extend(literals);
+    Ok(words)
 }
 
 fn build_game_tick_input_gate(start_addr: u32, input_update_addr: u32) -> Result<Vec<u32>> {

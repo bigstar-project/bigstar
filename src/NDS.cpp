@@ -1479,6 +1479,12 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
     case 4: stage = "render_begin"; break;
     case 5: stage = "render_end"; break;
     case 6: stage = "tick_end"; break;
+    case 7: stage = "delete_begin"; break;
+    case 8: stage = "delete_end"; break;
+    case 9: stage = "create_begin"; break;
+    case 10: stage = "create_end"; break;
+    case 11: stage = "gameplay_begin"; break;
+    case 12: stage = "gameplay_end"; break;
     case frameBeginMarker: stage = "frame_begin"; break;
     case frameEndMarker: stage = "frame_end"; break;
     default: return;
