@@ -287,6 +287,9 @@ public: // TODO: Encapsulate the rest of these members
     // It lets one guest ARM9 update run to its temporary target without
     // yielding to newly scheduled DS hardware events.
     bool NSMLGameTickProbeFreezeScheduler = false;
+    // Diagnostic-only presentation experiment: keep required CPU/peripheral
+    // events running while postponing LCD scanline events during ROM catch-up.
+    bool NSMLGameTickProbeDeferLCD = false;
     void CaptureNSMLGameTickProbeSchedulerState(NSMLGameTickProbeSchedulerState& state) const;
     void RestoreNSMLGameTickProbeSchedulerState(const NSMLGameTickProbeSchedulerState& state);
 

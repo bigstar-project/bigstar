@@ -1359,7 +1359,7 @@ u64 NDS::NextTarget()
     for (int i = 0; i < Event_MAX; i++)
     {
         if (!mask) break;
-        if (mask & 0x1)
+        if ((mask & 0x1) && !(NSMLGameTickProbeDeferLCD && i == Event_LCD))
         {
             if (SchedList[i].Timestamp < minEvent)
                 minEvent = SchedList[i].Timestamp;
@@ -1384,7 +1384,7 @@ void NDS::RunSystem(u64 timestamp)
     for (int i = 0; i < Event_MAX; i++)
     {
         if (!mask) break;
-        if (mask & 0x1)
+        if ((mask & 0x1) && !(NSMLGameTickProbeDeferLCD && i == Event_LCD))
         {
             SchedEvent& evt = SchedList[i];
 
@@ -1466,6 +1466,7 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
     constexpr u32 historyEnabledAddr = 0x02001ACC;
     constexpr u32 historyIndexAddr = 0x02001AD0;
     constexpr u32 historyCountAddr = 0x02001AD4;
+    constexpr u32 historyTargetAddr = 0x02001AD8;
     constexpr u32 gameFrameAddr = 0x0208B668;
     constexpr u32 frameBeginMarker = 0x100;
     constexpr u32 frameEndMarker = 0x101;
@@ -1496,6 +1497,7 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
         bool Enabled = false;
         bool StageEnabled = false;
         bool JitProfileEnabled = false;
+        bool DeferLCD = false;
         std::string Role = "local";
         std::string OutputDir;
         FILE* LogFile = nullptr;
@@ -1504,7 +1506,9 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
     struct State
     {
         bool HasOrigin = false;
+        bool LCDDeferred = false;
         u64 Sequence = 0;
+        u64 LCDDeferStartTimestamp = 0;
         std::chrono::steady_clock::time_point Origin;
     };
     static Config cfg;
@@ -1513,7 +1517,8 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
     {
         cfg.StageEnabled = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE") != nullptr;
         cfg.JitProfileEnabled = getenv("MELONDS_NSML_JIT_EXECUTION_PROFILE") != nullptr;
-        cfg.Enabled = cfg.StageEnabled || cfg.JitProfileEnabled;
+        cfg.DeferLCD = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_DEFER_LCD") != nullptr;
+        cfg.Enabled = cfg.StageEnabled || cfg.JitProfileEnabled || cfg.DeferLCD;
         if (const char* role = getenv("MELONDS_NSML_ROLE"))
             cfg.Role = role;
         if (const char* outputDir = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_DIR"))
@@ -1548,6 +1553,22 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
         return;
     const u32 historyIndex = nds->ARM9Read32(historyIndexAddr);
     const u32 historyCount = nds->ARM9Read32(historyCountAddr);
+    if (cfg.DeferLCD && nds->ARM9Read32(historyTargetAddr) != 0)
+    {
+        if (marker == 1 && historyIndex == 0 && !state.LCDDeferred)
+        {
+            state.LCDDeferStartTimestamp = nds->GetSysClockCycles(0);
+            nds->NSMLGameTickProbeDeferLCD = true;
+            state.LCDDeferred = true;
+        }
+        else if (marker == 6 && historyIndex >= historyCount && state.LCDDeferred)
+        {
+            const u64 elapsed = nds->GetSysClockCycles(0) - state.LCDDeferStartTimestamp;
+            nds->SchedList[Event_LCD].Timestamp += elapsed;
+            nds->NSMLGameTickProbeDeferLCD = false;
+            state.LCDDeferred = false;
+        }
+    }
     if (cfg.JitProfileEnabled && marker == 11 && historyIndex == 1)
         nds->JIT.ResetExecutionProfile();
     if (cfg.JitProfileEnabled && marker == 12 && historyIndex >= historyCount)
