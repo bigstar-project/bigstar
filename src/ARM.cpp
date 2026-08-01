@@ -97,6 +97,8 @@ static bool NSMLRuntimeHooksMaybeEnabled()
         NSMLEnvFlag("MELONDS_NSML_TRACE_PLAYER_RENDER") ||
         NSMLEnvFlag("MELONDS_NSML_TRACE_PLAYER_DEFEATED") ||
         NSMLEnvFlag("MELONDS_NSML_TRACE_PLAYER_LIFE_CALLS") ||
+        NSMLEnvFlag("MELONDS_NSML_GAME_TICK_PROBE") ||
+        NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE") ||
         NSMLEnvFlag("MELONDS_NSML_GUARD_PLAYER_MODEL_RENDER_PTRS") ||
         NSMLEnvFlag("MELONDS_NSML_DYNAMIC_CAMERA_LEAD") ||
         NSMLEnvFlag("MELONDS_NSML_RENDER_CAMERA_ALIAS") ||
@@ -186,6 +188,462 @@ static bool IsNSMLMarioVsLuigiPacketContext(NDS& nds)
 
     return NSMLPacketBridgeAllowPreGame()
         && IsNSMLMarioVsLuigiGGID(nds.ARM9Read32(0x02088858));
+}
+
+static u64 HashNSMLGameTickProbeMainRAM(NDS& nds)
+{
+    constexpr u64 fnvOffset = 1469598103934665603ull;
+    constexpr u64 fnvPrime = 1099511628211ull;
+    u64 hash = fnvOffset;
+    const u32 length = std::min(nds.MainRAMMask + 1, 0x400000u);
+    for (u32 offset = 0; offset < length; offset++)
+    {
+        hash ^= nds.MainRAM[offset];
+        hash *= fnvPrime;
+    }
+    return hash;
+}
+
+static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
+{
+    constexpr u32 loopStart = 0x02004EC8;
+    constexpr u32 loopGateAfterCounter = 0x020019C0;
+    constexpr u32 requestAddr = 0x02001AC0;
+    constexpr u32 activeAddr = 0x02001AC4;
+    constexpr u32 magicAddr = 0x02001AC8;
+    constexpr u32 magic = 0x52505447;
+
+    if (instrAddr != loopStart && instrAddr != loopGateAfterCounter)
+        return false;
+
+    struct Config
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        bool RestoreAfterExtra = false;
+        bool RenderlessAB = false;
+        u32 StartFrame = 900;
+        u32 ExtraTicks = 1;
+        std::string Role;
+        std::string TargetRole = "host";
+        std::string OutputDir;
+        FILE* LogFile = nullptr;
+    };
+    struct State
+    {
+        bool TargetSeen = false;
+        bool InExtraTicks = false;
+        bool NeedNextNormalTick = false;
+        bool NextNormalTickEntered = false;
+        bool Done = false;
+        bool RenderlessABTickPending = false;
+        u32 ActualTargetFrame = 0;
+        u32 ExtraTicksSeen = 0;
+        std::vector<u8> SavedMainRAM;
+    };
+
+    static Config cfg;
+    static std::map<NDS*, State> states;
+    static std::mutex mutex;
+    std::lock_guard<std::mutex> lock(mutex);
+
+    if (!cfg.Checked)
+    {
+        cfg.Enabled = NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE");
+        cfg.RestoreAfterExtra = NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE_RESTORE_AFTER_EXTRA");
+        cfg.RenderlessAB = NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE_RENDERLESS_AB");
+        cfg.StartFrame = NSMLEnvU32("MELONDS_NSML_ROM_GAME_TICK_PROBE_START_FRAME", 900);
+        cfg.ExtraTicks = std::clamp(
+            NSMLEnvU32("MELONDS_NSML_ROM_GAME_TICK_PROBE_EXTRA_TICKS", 1), 1u, 7u);
+        if (const char* role = getenv("MELONDS_NSML_ROLE"))
+            cfg.Role = role;
+        if (cfg.Role.empty())
+            cfg.Role = "local";
+        if (const char* targetRole = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_TARGET_ROLE"))
+            cfg.TargetRole = targetRole;
+        if (const char* outputDir = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_DIR"))
+            cfg.OutputDir = outputDir;
+        if (cfg.Enabled && !cfg.OutputDir.empty())
+        {
+            const std::string logPath = cfg.OutputDir + "/rom-game-tick-probe-" + cfg.Role + ".csv";
+            cfg.LogFile = fopen(logPath.c_str(), "w");
+            if (cfg.LogFile)
+            {
+                fprintf(cfg.LogFile,
+                    "role,frame,phase,main_ram_hash,game_frame_counter,arm9_timestamp,arm7_timestamp,request,active,extra_ticks_seen\n");
+                fflush(cfg.LogFile);
+            }
+        }
+        cfg.Checked = true;
+    }
+
+    if (!cfg.Enabled || !cpu || cpu->Num != 0 || !cpu->NDS.MainRAM || cfg.OutputDir.empty() ||
+        cpu->NDS.ARM9Read32(magicAddr) != magic)
+        return false;
+
+    State& state = states[&cpu->NDS];
+    const bool isTarget = cfg.Role == cfg.TargetRole;
+
+    auto dump = [&](const char* phase)
+    {
+        const u32 frame = cpu->NDS.NumFrames;
+        const u64 mainRAMHash = HashNSMLGameTickProbeMainRAM(cpu->NDS);
+        if (cfg.LogFile)
+        {
+            fprintf(cfg.LogFile, "%s,%u,%s,%016llX,%u,%llu,%llu,%u,%u,%u\n",
+                cfg.Role.c_str(),
+                frame,
+                phase,
+                static_cast<unsigned long long>(mainRAMHash),
+                cpu->NDS.ARM9Read32(0x0208B668),
+                static_cast<unsigned long long>(cpu->NDS.ARM9Timestamp),
+                static_cast<unsigned long long>(cpu->NDS.ARM7Timestamp),
+                cpu->NDS.ARM9Read32(requestAddr),
+                cpu->NDS.ARM9Read32(activeAddr),
+                state.ExtraTicksSeen);
+            fflush(cfg.LogFile);
+        }
+
+        char filename[1024];
+        snprintf(filename, sizeof(filename), "%s/rom-game-tick-probe-%s-frame%u-%s.bin",
+            cfg.OutputDir.c_str(), cfg.Role.c_str(), frame, phase);
+        if (FILE* file = fopen(filename, "wb"))
+        {
+            const u32 length = std::min(cpu->NDS.MainRAMMask + 1, 0x400000u);
+            fwrite(cpu->NDS.MainRAM, 1, length, file);
+            fclose(file);
+        }
+    };
+
+    if (cfg.RenderlessAB)
+    {
+        if (instrAddr == loopStart && !state.TargetSeen && !state.Done &&
+            cpu->NDS.NumFrames >= cfg.StartFrame && IsNSMLMarioVsLuigiGameplay(cpu->NDS))
+        {
+            state.TargetSeen = true;
+            state.ActualTargetFrame = cpu->NDS.NumFrames;
+            state.RenderlessABTickPending = true;
+            dump("before-renderless-ab-tick");
+            if (isTarget)
+                cpu->NDS.ARM9Write32(activeAddr, 1);
+            return false;
+        }
+        if (instrAddr == loopGateAfterCounter && state.RenderlessABTickPending)
+        {
+            dump(isTarget ? "after-renderless-tick" : "after-normal-control-tick");
+            cpu->NDS.ARM9Write32(activeAddr, 0);
+            state.RenderlessABTickPending = false;
+            state.NeedNextNormalTick = true;
+            return false;
+        }
+        if (instrAddr == loopStart && state.NeedNextNormalTick && !state.NextNormalTickEntered)
+        {
+            state.NextNormalTickEntered = true;
+            dump("before-recovery-normal-tick");
+            return false;
+        }
+        if (instrAddr == loopGateAfterCounter && state.NeedNextNormalTick && state.NextNormalTickEntered)
+        {
+            dump(isTarget ? "after-recovery-normal-tick" : "after-second-normal-control-tick");
+            state.NeedNextNormalTick = false;
+            state.Done = true;
+        }
+        return false;
+    }
+
+    if (instrAddr == loopStart)
+    {
+        if (state.NeedNextNormalTick && !state.NextNormalTickEntered)
+        {
+            state.NextNormalTickEntered = true;
+            dump("next-before-normal-tick");
+        }
+        return false;
+    }
+
+    const u32 request = cpu->NDS.ARM9Read32(requestAddr);
+    const bool active = cpu->NDS.ARM9Read32(activeAddr) != 0;
+    if (isTarget && state.InExtraTicks && active)
+    {
+        state.ExtraTicksSeen++;
+        if (request != 0)
+            return false;
+
+        dump("after-extra-tick");
+        if (cfg.RestoreAfterExtra && !state.SavedMainRAM.empty())
+        {
+            const u32 length = std::min(cpu->NDS.MainRAMMask + 1, 0x400000u);
+            if (state.SavedMainRAM.size() == length)
+                memcpy(cpu->NDS.MainRAM, state.SavedMainRAM.data(), length);
+        }
+        cpu->NDS.ARM9Write32(requestAddr, 0);
+        cpu->NDS.ARM9Write32(activeAddr, 0);
+        cpu->NDS.ARM9Write32(magicAddr, magic);
+        state.InExtraTicks = false;
+        state.NeedNextNormalTick = true;
+        return false;
+    }
+
+    if (state.NeedNextNormalTick && state.NextNormalTickEntered)
+    {
+        dump("next-after-normal-tick");
+        state.Done = true;
+        state.NeedNextNormalTick = false;
+        return false;
+    }
+
+    if (state.TargetSeen || state.Done || cpu->NDS.NumFrames < cfg.StartFrame ||
+        !IsNSMLMarioVsLuigiGameplay(cpu->NDS))
+        return false;
+
+    state.TargetSeen = true;
+    state.ActualTargetFrame = cpu->NDS.NumFrames;
+    dump("target-after-normal-tick");
+    if (!isTarget)
+    {
+        state.NeedNextNormalTick = true;
+        return false;
+    }
+
+    if (cfg.RestoreAfterExtra)
+    {
+        const u32 length = std::min(cpu->NDS.MainRAMMask + 1, 0x400000u);
+        state.SavedMainRAM.assign(cpu->NDS.MainRAM, cpu->NDS.MainRAM + length);
+    }
+    cpu->NDS.ARM9Write32(requestAddr, cfg.ExtraTicks);
+    state.InExtraTicks = true;
+    return false;
+}
+
+static bool HandleNSMLGameTickProbe(ARM* cpu, u32 instrAddr)
+{
+    constexpr u32 processListExecute = 0x0204D46C;
+    constexpr u32 mainLoopAfterProcessLists = 0x02004EEC;
+    constexpr u32 updateProcessList = 0x0208FB18;
+    constexpr u32 renderProcessList = 0x0208FB38;
+    constexpr u32 currentExecutingProcessList = 0x020852A8;
+    constexpr u32 currentProcessNode = 0x0208FB08;
+    constexpr u32 gameFrameCounter = 0x0208B668;
+
+    if (instrAddr != processListExecute && instrAddr != mainLoopAfterProcessLists)
+        return false;
+
+    struct Config
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        u32 StartFrame = 900;
+        u32 GameFrameCounterStep = 2;
+        bool RestoreAfterExtra = false;
+        bool FreezeHardwareDuringExtra = false;
+        u32 ExtraArm9CycleBudget = 1000000;
+        std::string Role;
+        std::string TargetRole = "host";
+        std::string OutputDir;
+        FILE* LogFile = nullptr;
+    };
+    struct State
+    {
+        bool TargetSeen = false;
+        bool InExtraUpdate = false;
+        bool NeedNextUpdate = false;
+        bool NextUpdateEntered = false;
+        bool NextRenderEntered = false;
+        bool Done = false;
+        u32 ActualTargetFrame = 0;
+        u32 SavedRegs[5] {};
+        u32 SavedLR = 0;
+        u32 SavedCurrentExecutingProcessList = 0;
+        u32 SavedCurrentProcessNode = 0;
+        u32 ExtraGameFrameCounter = 0;
+        std::vector<u8> SavedMainRAM;
+        u64 SavedARM9Timestamp = 0;
+        u64 SavedARM9Target = 0;
+        u64 SavedARM7Timestamp = 0;
+        u64 SavedARM7Target = 0;
+        NDS::NSMLGameTickProbeSchedulerState SavedSchedulerState;
+    };
+
+    static Config cfg;
+    static std::map<NDS*, State> states;
+    static std::mutex mutex;
+    std::lock_guard<std::mutex> lock(mutex);
+
+    if (!cfg.Checked)
+    {
+        cfg.Enabled = NSMLEnvFlag("MELONDS_NSML_GAME_TICK_PROBE");
+        cfg.StartFrame = NSMLEnvU32("MELONDS_NSML_GAME_TICK_PROBE_START_FRAME", 900);
+        cfg.GameFrameCounterStep = NSMLEnvU32("MELONDS_NSML_GAME_TICK_PROBE_GAME_FRAME_STEP", 2);
+        cfg.RestoreAfterExtra = NSMLEnvFlag("MELONDS_NSML_GAME_TICK_PROBE_RESTORE_AFTER_EXTRA");
+        cfg.FreezeHardwareDuringExtra = NSMLEnvFlag("MELONDS_NSML_GAME_TICK_PROBE_FREEZE_HARDWARE");
+        cfg.ExtraArm9CycleBudget = NSMLEnvU32("MELONDS_NSML_GAME_TICK_PROBE_ARM9_CYCLE_BUDGET", 1000000);
+        if (const char* role = getenv("MELONDS_NSML_ROLE"))
+            cfg.Role = role;
+        if (cfg.Role.empty())
+            cfg.Role = "local";
+        if (const char* targetRole = getenv("MELONDS_NSML_GAME_TICK_PROBE_TARGET_ROLE"))
+            cfg.TargetRole = targetRole;
+        if (const char* outputDir = getenv("MELONDS_NSML_GAME_TICK_PROBE_DIR"))
+            cfg.OutputDir = outputDir;
+        if (cfg.Enabled && !cfg.OutputDir.empty())
+        {
+            const std::string logPath = cfg.OutputDir + "/game-tick-probe-" + cfg.Role + ".csv";
+            cfg.LogFile = fopen(logPath.c_str(), "w");
+            if (cfg.LogFile)
+            {
+                fprintf(cfg.LogFile,
+                    "role,frame,phase,main_ram_hash,game_frame_counter,arm9_timestamp,arm7_timestamp,current_process_list,current_process_node\n");
+                fflush(cfg.LogFile);
+            }
+        }
+        cfg.Checked = true;
+    }
+
+    if (!cfg.Enabled || !cpu || cpu->Num != 0 || !cpu->NDS.MainRAM || cfg.OutputDir.empty())
+        return false;
+
+    State& state = states[&cpu->NDS];
+    const bool isTarget = cfg.Role == cfg.TargetRole;
+
+    auto dump = [&](const char* phase)
+    {
+        const u32 frame = cpu->NDS.NumFrames;
+        const u64 mainRAMHash = HashNSMLGameTickProbeMainRAM(cpu->NDS);
+        if (cfg.LogFile)
+        {
+            fprintf(cfg.LogFile, "%s,%u,%s,%016llX,%u,%llu,%llu,%08X,%08X\n",
+                cfg.Role.c_str(),
+                frame,
+                phase,
+                static_cast<unsigned long long>(mainRAMHash),
+                cpu->NDS.ARM9Read32(gameFrameCounter),
+                static_cast<unsigned long long>(cpu->NDS.ARM9Timestamp),
+                static_cast<unsigned long long>(cpu->NDS.ARM7Timestamp),
+                cpu->NDS.ARM9Read32(currentExecutingProcessList),
+                cpu->NDS.ARM9Read32(currentProcessNode));
+            fflush(cfg.LogFile);
+        }
+
+        char filename[1024];
+        snprintf(filename, sizeof(filename), "%s/game-tick-probe-%s-frame%u-%s.bin",
+            cfg.OutputDir.c_str(), cfg.Role.c_str(), frame, phase);
+        if (FILE* file = fopen(filename, "wb"))
+        {
+            const u32 length = std::min(cpu->NDS.MainRAMMask + 1, 0x400000u);
+            fwrite(cpu->NDS.MainRAM, 1, length, file);
+            fclose(file);
+        }
+    };
+
+    if (instrAddr == processListExecute && cpu->R[0] == renderProcessList &&
+        state.NeedNextUpdate && state.NextUpdateEntered && !state.NextRenderEntered &&
+        cpu->NDS.NumFrames > state.ActualTargetFrame)
+    {
+        state.NextRenderEntered = true;
+        dump(isTarget && !cfg.RestoreAfterExtra
+            ? "next-after-skip-before-render"
+            : "next-after-update-before-render");
+    }
+
+    if (instrAddr == processListExecute && cpu->R[0] == updateProcessList &&
+        state.NeedNextUpdate && !state.NextUpdateEntered &&
+        cpu->NDS.NumFrames > state.ActualTargetFrame)
+    {
+        state.NextUpdateEntered = true;
+        if (isTarget && !cfg.RestoreAfterExtra)
+            cpu->NDS.ARM9Write32(gameFrameCounter, state.ExtraGameFrameCounter);
+        dump(isTarget && !cfg.RestoreAfterExtra ? "next-before-skip" : "next-before-update");
+        if (isTarget && !cfg.RestoreAfterExtra)
+        {
+            // The target already executed this gameplay tick inside the prior
+            // display frame. Skip exactly one normal update-list pass so it
+            // can be compared with the control peer after the next frame.
+            cpu->JumpTo(cpu->R[14]);
+            return true;
+        }
+    }
+
+    if (instrAddr != mainLoopAfterProcessLists)
+        return false;
+
+    if (state.InExtraUpdate)
+    {
+        dump("after-extra-update");
+        if (cfg.RestoreAfterExtra && !state.SavedMainRAM.empty())
+        {
+            const u32 length = std::min(cpu->NDS.MainRAMMask + 1, 0x400000u);
+            if (state.SavedMainRAM.size() == length)
+                memcpy(cpu->NDS.MainRAM, state.SavedMainRAM.data(), length);
+        }
+        if (cfg.FreezeHardwareDuringExtra)
+        {
+            cpu->NDS.NSMLGameTickProbeFreezeScheduler = false;
+            cpu->NDS.RestoreNSMLGameTickProbeSchedulerState(state.SavedSchedulerState);
+            cpu->NDS.ARM9Timestamp = state.SavedARM9Timestamp;
+            cpu->NDS.ARM9Target = state.SavedARM9Target;
+            cpu->NDS.ARM7Timestamp = state.SavedARM7Timestamp;
+            cpu->NDS.ARM7Target = state.SavedARM7Target;
+        }
+        for (int i = 0; i < 4; i++)
+            cpu->R[i] = state.SavedRegs[i];
+        cpu->R[12] = state.SavedRegs[4];
+        cpu->R[14] = state.SavedLR;
+        cpu->NDS.ARM9Write32(currentExecutingProcessList, state.SavedCurrentExecutingProcessList);
+        cpu->NDS.ARM9Write32(currentProcessNode, state.SavedCurrentProcessNode);
+        state.InExtraUpdate = false;
+        state.NeedNextUpdate = true;
+        return false;
+    }
+
+    if (state.NeedNextUpdate && state.NextUpdateEntered &&
+        cpu->NDS.NumFrames > state.ActualTargetFrame)
+    {
+        dump(isTarget && !cfg.RestoreAfterExtra ? "next-after-skip" : "next-after-update");
+        state.Done = true;
+        state.NeedNextUpdate = false;
+        return false;
+    }
+
+    if (state.TargetSeen || state.Done || cpu->NDS.NumFrames < cfg.StartFrame ||
+        !IsNSMLMarioVsLuigiGameplay(cpu->NDS))
+        return false;
+
+    state.TargetSeen = true;
+    state.ActualTargetFrame = cpu->NDS.NumFrames;
+    dump("target-after-normal-update");
+    state.NeedNextUpdate = true;
+
+    if (!isTarget)
+        return false;
+
+    for (int i = 0; i < 4; i++)
+        state.SavedRegs[i] = cpu->R[i];
+    state.SavedRegs[4] = cpu->R[12];
+    state.SavedLR = cpu->R[14];
+    state.SavedCurrentExecutingProcessList = cpu->NDS.ARM9Read32(currentExecutingProcessList);
+    state.SavedCurrentProcessNode = cpu->NDS.ARM9Read32(currentProcessNode);
+    if (cfg.RestoreAfterExtra)
+    {
+        const u32 length = std::min(cpu->NDS.MainRAMMask + 1, 0x400000u);
+        state.SavedMainRAM.assign(cpu->NDS.MainRAM, cpu->NDS.MainRAM + length);
+    }
+    state.ExtraGameFrameCounter = cpu->NDS.ARM9Read32(gameFrameCounter) + cfg.GameFrameCounterStep;
+    cpu->NDS.ARM9Write32(gameFrameCounter, state.ExtraGameFrameCounter);
+    if (cfg.FreezeHardwareDuringExtra)
+    {
+        state.SavedARM9Timestamp = cpu->NDS.ARM9Timestamp;
+        state.SavedARM9Target = cpu->NDS.ARM9Target;
+        state.SavedARM7Timestamp = cpu->NDS.ARM7Timestamp;
+        state.SavedARM7Target = cpu->NDS.ARM7Target;
+        cpu->NDS.CaptureNSMLGameTickProbeSchedulerState(state.SavedSchedulerState);
+        cpu->NDS.NSMLGameTickProbeFreezeScheduler = true;
+        cpu->NDS.ARM9Target = cpu->NDS.ARM9Timestamp + cfg.ExtraArm9CycleBudget;
+    }
+    state.InExtraUpdate = true;
+    cpu->R[0] = updateProcessList;
+    cpu->R[14] = mainLoopAfterProcessLists;
+    cpu->JumpTo(processListExecute);
+    return true;
 }
 
 static u32 NSMLFindObjectBaseByID(NDS& nds, u16 objectID)
@@ -3208,6 +3666,12 @@ void ARMv5::Execute()
             u32 instrAddr = R[15] - ((CPSR&0x20)?2:4);
             if (nsmlRuntimeHooksEnabled)
             {
+                HandleNSMLRomGameTickProbe(this, instrAddr);
+                if (HandleNSMLGameTickProbe(this, instrAddr))
+                {
+                    NDS.ARM9Timestamp++;
+                    continue;
+                }
                 HandleNSMLNetReadyHotPatch(this, instrAddr);
                 TraceNSMLPacketCapture(this, instrAddr);
                 if (HandleNSMLLowerMPBridge(this, instrAddr))
@@ -3268,6 +3732,12 @@ void ARMv5::Execute()
                 const u32 instrAddr = R[15] - 2;
                 if (nsmlRuntimeHooksEnabled)
                 {
+                    HandleNSMLRomGameTickProbe(this, instrAddr);
+                    if (HandleNSMLGameTickProbe(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
                     HandleNSMLNetReadyHotPatch(this, instrAddr);
                     TraceNSMLPacketCapture(this, instrAddr);
                     if (HandleNSMLLowerMPBridge(this, instrAddr))
@@ -3319,6 +3789,12 @@ void ARMv5::Execute()
                 const u32 instrAddr = R[15] - 4;
                 if (nsmlRuntimeHooksEnabled)
                 {
+                    HandleNSMLRomGameTickProbe(this, instrAddr);
+                    if (HandleNSMLGameTickProbe(this, instrAddr))
+                    {
+                        NDS.ARM9Timestamp++;
+                        continue;
+                    }
                     HandleNSMLNetReadyHotPatch(this, instrAddr);
                     TraceNSMLPacketCapture(this, instrAddr);
                     if (HandleNSMLLowerMPBridge(this, instrAddr))

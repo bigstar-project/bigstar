@@ -1,5 +1,162 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+## 2026-08-01 ROM-side renderless game-loop PoC
+
+### Current judgment
+
+The next Slippi-style step is materially more promising than the direct `ProcessList::execute()` experiment. A diagnostic ROM patch now loops through NSMB's own main game path, advances `Math::frameCounter` naturally, and skips only the render process list plus `Font::updateFont()` while the rollback-loop flag is active. One renderless tick completed safely, kept the known gameplay state synchronized, and its temporary render-state differences cleared after one ordinary rendered tick.
+
+This is not yet an exact rollback implementation or a playability claim. The result changes the recommendation from “the direct process-list shortcut is insufficient” to “continue with the ROM-side loop, but only behind correctness gates.” The network-facing rollback runtime and GUI defaults remain unchanged.
+
+**Current blocker:** the immediate full-Main-RAM image is intentionally not equal when rendering is omitted, and the extra guest tick still consumes ARM9 cycles while DS timers, events, and ARM7 advance. A production kernel must distinguish gameplay state from disposable render/OAM state, preserve the packet/input ring, inject historical inputs, and define how IRQ/DMA/timer/IPC/audio work is handled across `2-7` catch-up ticks.
+
+**Next action:** extend this ROM loop to a controlled `2-7` tick transaction using historical inputs and a curated digest that excludes proven-disposable render buffers but includes actor/process/game globals. Run movement, contact, item, death/respawn, result/restart, and sound-side-effect routes before connecting it to prediction mismatch recovery.
+
+### ROM patch boundary
+
+The diagnostic generator adds `--game-tick-probe` without changing ordinary stable ROM generation. The patch uses a permanent ARM9 code cave and three gates:
+
+- after the normal frame-counter update, a request counter branches from `0x02004EFC` back to the native loop start at `0x02004EC8`;
+- while active, the render-list call at `0x0204D5EC` is skipped;
+- while active, `Font::updateFont()` at `0x02004EEC` is skipped;
+- input update, scene/game helpers, delete/create/update process lists, priority maintenance, and the native frame-counter update remain on the title's normal path.
+
+This is closer to Slippi's game-integrated loop than the earlier emulator-side direct call: the game owns the repeated control flow and all pre-update ordering, while only identified one-shot rendering work is gated.
+
+### Measured result
+
+The counter-aligned one-extra-tick run at `logs/slippi-rom-loop-poc-loop-aligned` produced:
+
+- game counter `729 -> 730` for both the ROM-loop tick and its following normal replay;
+- raw extra-versus-normal output difference: `2,559` bytes across `15` pages;
+- after excluding only the diagnostic cave and known `0x02288000-0x02289FFF` packet/input ring: `434` bytes across `12` pages;
+- known semantic fields remained synchronized through frame 990 apart from expected local-role/camera/state-hash fields and transient CPU sampling fields.
+
+The stronger same-tick renderless A/B and recovery run at `logs/slippi-rom-loop-poc-renderless-recovery` compared a renderless host tick with a normal client tick:
+
+- curated cross-peer difference before the tick: `445` bytes / `17` pages;
+- immediately after renderless-versus-normal: `759` bytes / `22` pages;
+- after one subsequent normally rendered tick: `404` bytes / `17` pages;
+- both peers advanced the game counter from `729` to `730` and the known gameplay trace stayed aligned.
+
+The temporary increase is concentrated in OAM buffers (`0x02087760-0x020887E7`) and actor render/cache pages around `0x021B5000-0x021B7FFF`. Because the cross-peer difference returned below its pre-test baseline after one normal render, these bytes are evidence of disposable/rebuilt render state in this route, not a persistent gameplay divergence. That inference still needs event-route and multi-tick validation before those ranges can be excluded from a rollback digest.
+
+The extra tick advanced ARM9 by about `139k` timestamp units and ARM7 by about `70k`; therefore the ROM loop does not make hardware time disappear. The earlier scheduler-freeze failure remains relevant: hardware handling must be designed rather than globally suppressed.
+
+### Gate status
+
+- Native ROM-loop re-entry: **PASS**.
+- One renderless tick, natural frame counter, known gameplay semantics: **PASS for the tested movement route**.
+- Render-cache recovery after one normal render: **PASS for the tested route**.
+- Immediate full-RAM equality: **EXPECTED FAIL** because render/OAM and packet-ring state are not equal.
+- Curated gameplay digest: **INCOMPLETE**; current exclusions are diagnostic, not yet promoted.
+- Multi-tick, event coverage, duplicate audio/network effects, JIT integration, rollback performance, and WAN: **NOT RUN**.
+
+## 2026-08-01 Slippi-style game-tick equivalence PoC
+
+### Historical result of the direct-call attempt
+
+The diagnostic PoC can re-enter the NSMB MvL update process list once and return safely without executing another complete `NDS::RunFrame()`. That is enough to establish that the Slippi direction is technically plausible at the control-flow level. It does **not** pass the exact-equivalence gate: a direct `ProcessList::execute(updateList)` call is not yet equivalent to one normal NSMB game tick.
+
+The network-facing rollback runtime and GUI defaults were not changed. All new behavior is diagnostic-only behind `MELONDS_NSML_GAME_TICK_PROBE`, and the current harness deliberately uses the interpreter because the existing address hook is not a reliable per-instruction boundary under JIT block linking.
+
+**Blocker found in this attempt:** the candidate update call is coupled to state advanced outside the update list and to DS scheduler/hardware side effects. Restoring Main RAM, ARM timestamps, scheduler event records, and the scheduler mask was insufficient to make the following normal tick exact.
+
+**Disposition:** this direct-call boundary remains rejected. The follow-up experiment did move re-entry into the ROM/game-side main loop and produced the improved result documented in the section above; packet/input preservation and the remaining one-shot policies are still pending there.
+
+### Boundary and positive result
+
+ARM9 call tracing established the relevant retail-US MvL boundaries:
+
+- the main loop returns from `ProcessManager::updateProcessLists()` at `0x02004EEC` and later calls `waitVBlankIntr()` at `0x02004F14`;
+- `updateProcessLists()` executes delete (`0x0208FB28`), create (`0x0208FB48`), gameplay update (`0x0208FB18`), then render (`0x0208FB38`) process lists;
+- `Math::frameCounter` at `0x0208B668` advances by one in the main loop outside the gameplay update-list call. The earlier direct probe's manual step of two reflected its display-frame comparison phase, not the native instruction.
+
+With the counter advanced explicitly, the extra update returned normally. At the update-only boundary, the extra path changed `296` bytes across `13` Main RAM pages, while the peer's normal update changed `310` bytes across the same `13`-page count. In the extra-update-plus-next-frame-skip experiment, known player, actor, and gameplay fields realigned; the frame-930 and frame-960 semantic traces differed only in expected local-role, camera, and state-hash fields. This is evidence that the candidate call performs meaningful gameplay progression rather than merely returning harmlessly.
+
+### Exact-equivalence failure
+
+The close changed-byte counts do not imply state equivalence. The changed-byte masks differed at `520` bytes, because input/packet rings and actor allocations are written at peer- and frame-dependent addresses. A same-instance replay test therefore restored the entire 4 MiB Main RAM after the extra call and compared it with the next normal update from that instance. The outputs still differed at `4,326` bytes across `20` pages. Most of that was in the `0x02288000-0x02289FFF` packet/input ring, but differences also remained in known actor-state pages such as `0x021B5000-0x021B6FFF`.
+
+A stronger isolation attempt prevented ARM9 rescheduling during the extra call, then restored ARM9/ARM7 timestamps, scheduler events, the scheduler mask, and Main RAM. It also failed:
+
+- extra update game counter: `730`; following normal replay: `729`; control normal update: `730`;
+- extra versus same-instance normal output: `4,080` differing bytes across `11` pages;
+- isolated extra update: `2,229` changed bytes across `19` pages, versus normal update `286` bytes across `12` pages;
+- at semantic frame 960 the target was one `netPacketTick` and one moving-hazard step behind the control peer; the divergence remained at frame 990.
+
+This failed variant is important evidence: suppressing scheduler delivery without transactionally restoring all timer, interrupt, DMA, IPC, GPU/SPU, CPU interrupt, and ARM7-visible state changes perturbs the next real tick. Slippi avoids the analogous problem through a game-integrated loop and title-specific side-effect patches; the current melonDS shortcut has not yet reproduced that isolation.
+
+### Implementation and verification
+
+- Added a diagnostic ARM9 hook and RAM/scheduler snapshots in `src/ARM.cpp`, `src/NDS.cpp`, and `src/NDS.h`.
+- Added `scripts/run-nsmb-mvl-game-tick-probe.ps1`, which runs the existing split-local packet bridge, captures update/render boundaries, and writes byte/page equivalence metrics to `summary.csv`.
+- Passed: `cmake --build build\release-windows-x86_64 --config Release --target melonDS -j 4`.
+- Passed: PowerShell parser check for the new probe runner.
+- Measured runs are retained under `logs/slippi-game-tick-poc-*`; the decisive negative run is `logs/slippi-game-tick-poc-frozen-scheduler-restored`.
+- Gate result: control-flow feasibility **PASS**; one-tick exact equivalence **FAIL**; multi-tick, side-effect, performance, and WAN gates **NOT RUN** because promotion stops at the first correctness failure.
+
+## 2026-08-01 Slippi architecture review and current recommendation
+
+### Current judgment
+
+The user's assessment that the existing rollback path is not yet fully comfortable is supported by the repository evidence. The current exact path restores a lightweight checkpoint and then calls a full `nds->RunFrame()` for every corrected frame. Recent measurements put a one-frame correction at roughly `19-37ms`, with historical worst cases around `40-96ms`. The checkpoint itself is usually only about `1.6-2.4ms`, so further snapshot compression alone does not address the dominant cost.
+
+The recommended next research target is a **Slippi-style game-loop rollback kernel**, not another full-emulator savestate variant and not a return to Plan-D semantic state repair. The transferable idea is to restore broad game RAM and re-enter only the title's gameplay update loop inside the current display frame while suppressing render, audio, input sampling, VBlank, network, and other one-shot side effects. Slippi's code cannot be copied directly because it is tied to Melee and GameCube hardware, but this architecture attacks the measured `RunFrame()` bottleneck directly.
+
+The review led to the direct-call and ROM-side experiments documented above. The ROM-side one-tick result is encouraging but is still not a playability claim. The previous `tinycorepreimage-rbwait1500-window32` candidate remains the best measured emulator-level rollback baseline, and the GUI default remains rollback disabled with `delay4/lead4`. Historical sections below describe evidence and rejected routes; they are not the current recommendation for further performance work.
+
+### What Slippi actually does
+
+The review used the official Slippi Dolphin fork at commit `e7711b104b339a99385f2bb12b472d46140a7bc7` and the official Melee ASM repository at commit `fcf47f10dc244152c2ebaa3a9dec142ea42243b7`.
+
+- **Input transport and prediction:** controller packets use an unsequenced ENet channel so reliable traffic does not head-of-line block them. Old unacknowledged inputs are carried forward, missing remote input is predicted from stale input, and predicted bytes are later compared with the real bytes. The rollback start is the earliest mismatching predicted frame.
+- **Delay and bounded history:** the current fork defaults online input delay to two frames and allocates a fixed pool for at most seven rollback frames. It stalls or occasionally adjusts frame progression when one peer gets too far ahead instead of allowing unbounded speculation. Slippi is therefore not a zero-delay design.
+- **Game-memory checkpoint:** `SlippiSavestate` copies selected Melee RAM ranges directly. Most Dolphin CPU/GPU/DSP/audio/full-system state serialization is commented out. Sound and XFB/VI regions are explicitly excluded, and guest-side netcode/input buffers can be preserved across a restore.
+- **Game-loop-only resimulation:** the decisive optimization is in the Melee ASM patch. After restoring RAM and selecting historical/corrected inputs, the patch branches from the end of Melee's `updateFunction` back to the start of the game-engine loop until it catches up. Its own comment states that rollback loops without rendering frames. It does not invoke one complete Dolphin emulation frame for every correction.
+- **Side-effect patches:** controller reads, interrupts, camera work, sounds, rumble, music, and stage-specific behavior receive explicit rollback handling. Slippi is therefore a game-integrated implementation, not a generic Dolphin savestate feature.
+- **Desync and pacing:** finalized frames carry checksums, while frame skip/advance and small speed corrections keep peers near the same timeline and reduce consistently one-sided rollbacks.
+
+Primary sources:
+
+- [Slippi Dolphin fork](https://github.com/project-slippi/Ishiiruka/tree/e7711b104b339a99385f2bb12b472d46140a7bc7)
+- [RAM-range capture/restore and preserved blocks](https://github.com/project-slippi/Ishiiruka/blob/e7711b104b339a99385f2bb12b472d46140a7bc7/Source/Core/Core/Slippi/SlippiSavestate.cpp)
+- [Unsequenced input transport](https://github.com/project-slippi/Ishiiruka/blob/e7711b104b339a99385f2bb12b472d46140a7bc7/Source/Core/Core/Slippi/SlippiNetplay.cpp)
+- [Prediction comparison and renderless rollback trigger](https://github.com/project-slippi/slippi-ssbm-asm/blob/fcf47f10dc244152c2ebaa3a9dec142ea42243b7/Online/Core/TriggerSendInput.asm)
+- [Branch back to the Melee game-engine update loop](https://github.com/project-slippi/slippi-ssbm-asm/blob/fcf47f10dc244152c2ebaa3a9dec142ea42243b7/Online/Core/LoopEngineForRollback.asm)
+
+### Mapping to NSMB MvL
+
+| Slippi/Melee mechanism | Existing melonDS/NSMB evidence | Required NSMB-specific work |
+| --- | --- | --- |
+| Guest-side game update loop hook | Symbols exist for `ProcessList::execute()`, `ProcessManager::updateProcessLists()`, `Game::waitVBlankIntr()`, `Game::mainProcessTable`, and `Math::frameCounter` | The ROM-loop entry/exit is now identified for one tick; prove it across `2-7` ticks and event routes |
+| Curated game-RAM restore | `tinycorepreimage` already snapshots/restores Main RAM cheaply | Define a stable snapshot boundary and preserve packet bridge/input history and emulator-owned control state |
+| Historical/corrected inputs inside guest | Runtime ARM9 patching and the packet bridge already write deterministic local/remote inputs | Prevent normal pad/Wi-Fi/input sampling from overwriting replayed inputs during catch-up |
+| Skip render and one-shot effects | Current resim can skip GPU presentation, but still runs `NDS::RunFrame()` | Bypass or deduplicate display-list submission, VBlank/IRQ/DMA/timers, sound commands, ARM7 interactions, and network writes during extra game ticks |
+| Fixed rollback window and pacing | Input timeline, prediction, mismatch detection, windowing, waits, and frame-lead control already exist | Retain these pieces; measure whether a practical `2-7` frame window is affordable after game-only resim |
+| Finalized-frame checksum | Existing game-state comparison and semantic traces cover known MvL state | Promote a deterministic digest over every Main RAM page changed by a normal gameplay tick plus critical emulator-visible state |
+
+The symbols and patch infrastructure made a bounded experiment possible, but the direct-call result proved that `ProcessList::execute()` alone is not the correct tick. The ROM-side loop preserves the native ordering and passes the current one-tick semantic/recovery check, while VBlank IRQs, DMA, timers, GPU FIFOs, ARM7 sound/Wi-Fi work, and multi-tick behavior remain its current coupling risks.
+
+### Required proof before implementation
+
+1. **Game-tick equivalence gate:** from the same fixed-seed checkpoint and input, compare one normal `NDS::RunFrame()` with one candidate guest game-update tick. Compare every Main RAM page changed by the normal path, actor/process lists, player/star/block/item state, globals/RNG, and relevant GPU/audio command state. Repeat across movement, contact, item, death/respawn, result, and restart events.
+2. **Multi-tick equivalence gate:** run `2-7` candidate ticks without intervening render/VBlank side effects, then compare against the same number of normal frames. A one-tick pass is insufficient because queues and timers can diverge only after several iterations.
+3. **Forced-mismatch performance gate:** inject a known one-frame prediction error and measure restore plus game-only correction. Promotion requires rollback work to fit within the display budget; initial target is `p95 < 8ms` and no rollback-induced frame above `16.7ms` in the practical routes.
+4. **Side-effect gate:** verify no duplicate sound, rumble, packet, item spawn, collision event, or graphics command, and no missed/extra IRQ, DMA, timer, or ARM7-visible event.
+5. **WAN correctness gate:** only after the local equivalence gates pass, run the current packet-loss/jitter suite with a `2-7` frame window and finalized-frame digests.
+
+If the first two gates show that hardware evolution is required for each NSMB gameplay tick, the Slippi form is not viable without a much larger DS scheduler split. In that case the practical fallback remains modest input delay plus rare full-frame correction; Plan-D remains a game-specific semantic synchronization alternative, not exact rollback.
+
+### Verification status and next action
+
+- Completed: reviewed `codex/rollback` history and the two prior rollback evaluation tasks; both support the measured full-`RunFrame()` cost and the lack of a fully comfortable exact path.
+- Completed: inspected current `NsmbRollbackRuntime.cpp`; resimulation still invokes `nds->RunFrame()` once per corrected frame even when presentation is skipped.
+- Completed: inspected the two official Slippi repositories and mapped their responsibilities to existing NSMB symbols/runtime components.
+- Completed after this review: implemented and ran the diagnostic game-tick-equivalence harness described in the section above.
+- Result: the direct update-list route passed control-flow feasibility but failed exact equivalence. Do not build the network-facing rollback mode from this boundary.
+- Completed follow-up: implemented the ROM-side loop and renderless A/B recovery probe. Continue that route through multi-tick and event gates, but do not yet connect it to network-facing rollback.
+
 ## 2026-07-15 input prediction runtime refactor
 
 Rollbackのremote input予測状態を`NsmbMvlNetplayRuntime.cpp`のflat field群から既存の`NsmbInputTimeline`へ移した。`PredictionRuntime`が予測map、最終確定入力、prediction/probe/mismatch counter、pending rollback frameと観測frameを所有し、確定入力優先、直前予測の引継ぎ、後着mismatch時の予測tail無効化、過去frameだけをrollback対象にする既存semanticsをROM不要contract testで固定している。checkpoint保存・復元は引き続き`NsmbRollbackStore`の責務であり、入力予測との混在は避けた。

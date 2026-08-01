@@ -81,6 +81,10 @@ pub(crate) fn encode_add_imm(rd: u8, rn: u8, imm: u32) -> Result<u32> {
     Ok(0xE280_0000 | ((rn as u32) << 16) | ((rd as u32) << 12) | encode_arm_imm12(imm)?)
 }
 
+pub(crate) fn encode_sub_imm(rd: u8, rn: u8, imm: u32) -> Result<u32> {
+    Ok(0xE240_0000 | ((rn as u32) << 16) | ((rd as u32) << 12) | encode_arm_imm12(imm)?)
+}
+
 pub(crate) fn encode_sub_sp_imm(imm: u32) -> Result<u32> {
     Ok(0xE24D_D000 | encode_arm_imm12(imm)?)
 }

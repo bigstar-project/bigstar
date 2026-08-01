@@ -1631,6 +1631,8 @@ void NDS::Reschedule(u64 target)
 {
     if (CurCPU == 0)
     {
+        if (NSMLGameTickProbeFreezeScheduler)
+            return;
         if (target < (ARM9Target >> ARM9ClockShift))
             ARM9Target = (target << ARM9ClockShift);
     }
@@ -1639,6 +1641,18 @@ void NDS::Reschedule(u64 target)
         if (target < ARM7Target)
             ARM7Target = target;
     }
+}
+
+void NDS::CaptureNSMLGameTickProbeSchedulerState(NSMLGameTickProbeSchedulerState& state) const
+{
+    std::copy(std::begin(SchedList), std::end(SchedList), state.Events.begin());
+    state.Mask = SchedListMask;
+}
+
+void NDS::RestoreNSMLGameTickProbeSchedulerState(const NSMLGameTickProbeSchedulerState& state)
+{
+    std::copy(state.Events.begin(), state.Events.end(), std::begin(SchedList));
+    SchedListMask = state.Mask;
 }
 
 void NDS::RegisterEventFuncs(u32 id, void* that, const std::initializer_list<EventFunc>& funcs)

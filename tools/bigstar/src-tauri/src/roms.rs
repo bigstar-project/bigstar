@@ -108,6 +108,7 @@ pub(crate) fn prepare_roms(
         course_mode: inputs.options.course_mode.clone(),
         scene_settings: None,
         symbols,
+        game_tick_probe: false,
     };
 
     bigstar_rom::generate_stable_roms(&options)

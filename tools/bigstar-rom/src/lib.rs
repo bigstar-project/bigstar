@@ -25,6 +25,10 @@ const PLAYER_BASE_REQUESTED_POWERUP_OFFSET: u32 = 0x7AB;
 const PLAYER_BASE_CURRENT_POWERUP_OFFSET: u32 = 0x7AC;
 const PLAYER_BASE_PREVIOUS_POWERUP_OFFSET: u32 = 0x7AD;
 const PLAYER_POWERUP_MEGA: u32 = 3;
+const GAME_TICK_PROBE_REQUEST_ADDR: u32 = 0x0200_1AC0;
+const GAME_TICK_PROBE_ACTIVE_ADDR: u32 = 0x0200_1AC4;
+const GAME_TICK_PROBE_MAGIC_ADDR: u32 = 0x0200_1AC8;
+const GAME_TICK_PROBE_MAGIC: u32 = 0x5250_5447; // "GTPR", little endian
 
 #[derive(Debug, Clone)]
 pub struct StableRomOptions {
@@ -38,6 +42,7 @@ pub struct StableRomOptions {
     pub course_mode: String,
     pub scene_settings: Option<String>,
     pub symbols: PathBuf,
+    pub game_tick_probe: bool,
 }
 
 #[derive(Debug)]
@@ -128,6 +133,9 @@ pub fn generate_stable_roms(options: &StableRomOptions) -> Result<StableRomResul
     };
     patch_direct_mvl_entry(&mut host, &symbols, &host_config)?;
     patch_wifi_communicating_consoles(&mut host, 2)?;
+    if options.game_tick_probe {
+        patch_game_tick_probe(&mut host)?;
+    }
     host.save(&options.host_rom)?;
 
     let mut client = base;
@@ -141,6 +149,9 @@ pub fn generate_stable_roms(options: &StableRomOptions) -> Result<StableRomResul
     };
     patch_direct_mvl_entry(&mut client, &symbols, &client_config)?;
     patch_wifi_communicating_consoles(&mut client, 2)?;
+    if options.game_tick_probe {
+        patch_game_tick_probe(&mut client)?;
+    }
     client.save(&options.client_rom)?;
 
     Ok(StableRomResult {
@@ -724,6 +735,93 @@ fn patch_wifi_communicating_consoles(rom: &mut RomImage, count: u8) -> Result<()
     Ok(())
 }
 
+fn patch_game_tick_probe(rom: &mut RomImage) -> Result<()> {
+    const LOOP_START_ADDR: u32 = 0x0200_4EC8;
+    const FONT_HOOK_ADDR: u32 = 0x0200_4EEC;
+    const COUNTER_TAIL_HOOK_ADDR: u32 = 0x0200_4EFC;
+    const COUNTER_TAIL_RETURN_ADDR: u32 = 0x0200_4F00;
+    const RENDER_HOOK_ADDR: u32 = 0x0204_D5EC;
+    const RENDER_RETURN_ADDR: u32 = 0x0204_D5F0;
+    const FONT_UPDATE_ADDR: u32 = 0x0201_4A44;
+    const PROCESS_LIST_EXECUTE_ADDR: u32 = 0x0204_D46C;
+    const OS_TICK_ADDR: u32 = 0x01FF_9010;
+    const LOOP_GATE_ADDR: u32 = 0x0200_19C0;
+    const FONT_GATE_ADDR: u32 = 0x0200_1A20;
+    const RENDER_GATE_ADDR: u32 = 0x0200_1A60;
+
+    let loop_gate = [
+        encode_ldr_pc_literal(3, LOOP_GATE_ADDR, LOOP_GATE_ADDR + 0x3C, 0xE)?,
+        encode_ldr_imm(12, 3, 0)?,
+        encode_cmp_imm(12, 0)?,
+        with_cond(encode_b(LOOP_GATE_ADDR + 0x0C, LOOP_GATE_ADDR + 0x28)?, 0),
+        encode_sub_imm(12, 12, 1)?,
+        encode_str_imm(12, 3, 0)?,
+        encode_ldr_pc_literal(3, LOOP_GATE_ADDR + 0x18, LOOP_GATE_ADDR + 0x40, 0xE)?,
+        encode_mov_imm(12, 1)?,
+        encode_str_imm(12, 3, 0)?,
+        encode_b(LOOP_GATE_ADDR + 0x24, LOOP_START_ADDR)?,
+        encode_ldr_pc_literal(3, LOOP_GATE_ADDR + 0x28, LOOP_GATE_ADDR + 0x40, 0xE)?,
+        encode_mov_imm(12, 0)?,
+        encode_str_imm(12, 3, 0)?,
+        encode_bl(LOOP_GATE_ADDR + 0x34, OS_TICK_ADDR)?,
+        encode_b(LOOP_GATE_ADDR + 0x38, COUNTER_TAIL_RETURN_ADDR)?,
+        GAME_TICK_PROBE_REQUEST_ADDR,
+        GAME_TICK_PROBE_ACTIVE_ADDR,
+    ];
+    let font_gate = [
+        encode_ldr_pc_literal(12, FONT_GATE_ADDR, FONT_GATE_ADDR + 0x18, 0xE)?,
+        encode_ldr_imm(12, 12, 0)?,
+        encode_cmp_imm(12, 0)?,
+        with_cond(encode_b(FONT_GATE_ADDR + 0x0C, FONT_HOOK_ADDR + 4)?, 1),
+        encode_bl(FONT_GATE_ADDR + 0x10, FONT_UPDATE_ADDR)?,
+        encode_b(FONT_GATE_ADDR + 0x14, FONT_HOOK_ADDR + 4)?,
+        GAME_TICK_PROBE_ACTIVE_ADDR,
+    ];
+    let render_gate = [
+        encode_ldr_pc_literal(12, RENDER_GATE_ADDR, RENDER_GATE_ADDR + 0x18, 0xE)?,
+        encode_ldr_imm(12, 12, 0)?,
+        encode_cmp_imm(12, 0)?,
+        with_cond(encode_b(RENDER_GATE_ADDR + 0x0C, RENDER_RETURN_ADDR)?, 1),
+        encode_bl(RENDER_GATE_ADDR + 0x10, PROCESS_LIST_EXECUTE_ADDR)?,
+        encode_b(RENDER_GATE_ADDR + 0x14, RENDER_RETURN_ADDR)?,
+        GAME_TICK_PROBE_ACTIVE_ADDR,
+    ];
+
+    ensure_zero_arm9_words(rom, LOOP_GATE_ADDR, loop_gate.len())?;
+    ensure_zero_arm9_words(rom, FONT_GATE_ADDR, font_gate.len())?;
+    ensure_zero_arm9_words(rom, RENDER_GATE_ADDR, render_gate.len())?;
+    ensure_zero_arm9_words(rom, GAME_TICK_PROBE_REQUEST_ADDR, 2)?;
+    ensure_zero_arm9_words(rom, GAME_TICK_PROBE_MAGIC_ADDR, 1)?;
+    patch_arm9_words(rom, LOOP_GATE_ADDR, &loop_gate)?;
+    patch_arm9_words(rom, FONT_GATE_ADDR, &font_gate)?;
+    patch_arm9_words(rom, RENDER_GATE_ADDR, &render_gate)?;
+    patch_arm9_words(rom, GAME_TICK_PROBE_REQUEST_ADDR, &[0, 0])?;
+    patch_arm9_words(rom, GAME_TICK_PROBE_MAGIC_ADDR, &[GAME_TICK_PROBE_MAGIC])?;
+
+    patch_arm9_word_checked(
+        rom,
+        FONT_HOOK_ADDR,
+        encode_bl(FONT_HOOK_ADDR, FONT_UPDATE_ADDR)?,
+        encode_b(FONT_HOOK_ADDR, FONT_GATE_ADDR)?,
+        "game-tick font gate",
+    )?;
+    patch_arm9_word_checked(
+        rom,
+        COUNTER_TAIL_HOOK_ADDR,
+        encode_bl(COUNTER_TAIL_HOOK_ADDR, OS_TICK_ADDR)?,
+        encode_b(COUNTER_TAIL_HOOK_ADDR, LOOP_GATE_ADDR)?,
+        "game-tick loop gate",
+    )?;
+    patch_arm9_word_checked(
+        rom,
+        RENDER_HOOK_ADDR,
+        encode_bl(RENDER_HOOK_ADDR, PROCESS_LIST_EXECUTE_ADDR)?,
+        encode_b(RENDER_HOOK_ADDR, RENDER_GATE_ADDR)?,
+        "game-tick render gate",
+    )?;
+    Ok(())
+}
+
 fn patch_mvl_load_thread_entrance_ids(rom: &mut RomImage) -> Result<()> {
     for (addr, word) in [
         (0x0215_2D64, encode_mov_imm(0, 1)?),
@@ -891,6 +989,38 @@ fn patch_arm9_words(rom: &mut RomImage, addr: u32, words: &[u32]) -> Result<Vec<
         .ok_or_else(|| anyhow!("address 0x{addr:08x} is not in an ARM9 data section"))?;
     let off = section.file_off + (addr - section.ram_addr) as usize;
     patch_words(&mut rom.arm9, off, words)
+}
+
+fn ensure_zero_arm9_words(rom: &RomImage, addr: u32, count: usize) -> Result<()> {
+    let section = rom
+        .arm9_sections
+        .iter()
+        .find(|section| addr >= section.ram_addr && addr < section.ram_addr + section.size as u32)
+        .ok_or_else(|| anyhow!("address 0x{addr:08x} is not in an ARM9 data section"))?;
+    let off = section.file_off + (addr - section.ram_addr) as usize;
+    let len = count
+        .checked_mul(4)
+        .ok_or_else(|| anyhow!("ARM9 zero check length overflow"))?;
+    let bytes = slice(&rom.arm9, off, len, "ARM9 zero cave")?;
+    if bytes.iter().any(|byte| *byte != 0) {
+        bail!("ARM9 code cave @ 0x{addr:08x} is not empty");
+    }
+    Ok(())
+}
+
+fn patch_arm9_word_checked(
+    rom: &mut RomImage,
+    addr: u32,
+    expected: u32,
+    replacement: u32,
+    label: &str,
+) -> Result<()> {
+    let old = patch_arm9_words(rom, addr, &[replacement])?;
+    let old_word = u32::from_le_bytes(old[..4].try_into()?);
+    if old_word != expected {
+        bail!("{label} @ 0x{addr:08x} expected 0x{expected:08x}, got 0x{old_word:08x}");
+    }
+    Ok(())
 }
 
 fn patch_overlay_words(rom: &mut RomImage, addr: u32, words: &[u32]) -> Result<Vec<u8>> {

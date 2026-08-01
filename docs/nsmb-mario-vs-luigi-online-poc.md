@@ -1,5 +1,14 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Slippi-style ROM game-loop rollback probe - 2026-08-01
+
+- 完了: `tools/bigstar-rom`へ診断専用`--game-tick-probe`を追加した。通常のstable ROM生成とGUI生成は既定で無効のまま維持し、診断ROMだけがARM9メインループ、render process list、font updateへ分岐gateを入れる。追加tickはNSMB自身の入力更新、scene/game helper、delete/create/update process list、priority更新、frame counter更新を通常順で通り、rollback-loop中だけrender listとfont updateを省く。
+- 完了: `scripts/run-nsmb-mvl-rom-game-tick-probe.ps1`へ、診断ROM生成、2-process interpreter走行、全4 MiB Main RAM比較、probe cave／既知packet-input ringを除いたcurated比較、renderless host対normal clientの同一tick A/B、次の通常render後の回復比較を実装した。
+- 検証: `logs/slippi-rom-loop-poc-loop-aligned`では追加tickと通常replayがともにgame counter `729 -> 730`となり、既知gameplay traceはframe 990まで同期した。curatedな即時差は`434 bytes / 12 pages`で、full RAM exact一致ではない。
+- 検証: `logs/slippi-rom-loop-poc-renderless-recovery`ではcross-peer curated差がtick前`445 bytes / 17 pages`、renderless直後`759 / 22`、次の通常render後`404 / 17`となった。増分の中心はOAMとactor render/cache pageで、一回の通常render後にbaseline以下へ戻る。tested movement routeでは永続gameplay divergenceを検出していない。
+- 現在のblocker: packet/input履歴の保持とhistorical input注入、`2-7`連続tick、item/contact/death/result/restart、duplicate sound/network、IRQ/DMA/timer/IPC/ARM7副作用、JITからのrequest制御、実rollback性能は未検証である。ROM-loop方式は継続価値ありだが、現行rollbackへはまだ接続しない。
+- 次: disposable render rangeをevent routeで再確認してcurated gameplay digestを固定し、historical inputを使う`2-7`tick transactionを先に通す。
+
 ## NsmbMvlNetplayRuntime リファクタ調査 - 2026-07-15
 
 - 現状: composition rootは`src/frontend/qt_sdl/NsmbMvlNetplayRuntime.cpp` 1,794行、namespaceは`NsmbMvlNetplay`である。リファクタ開始前の`NsmbNetplayPoC.cpp` 21,253行から19,459行（約91.6%）減り、39行の共有`State G`、RuleAI adapter、型付きContext／hook、初期化、frame orchestrationだけが残る。正式な有効化変数は`MELONDS_NSML_NETPLAY`で、旧`MELONDS_NSML_POC`は新変数未指定時だけ読む互換aliasとする。4,261行のAI observation／feature／imitation推論は、学習logとruntime推論のcanonicalな意味関数を共有する1 subsystemとして維持する。

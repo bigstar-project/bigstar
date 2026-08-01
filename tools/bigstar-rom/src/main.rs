@@ -33,6 +33,8 @@ enum Command {
         scene_settings: Option<String>,
         #[arg(long, default_value = "tools/bigstar-rom/resources/symbols9.x")]
         symbols: PathBuf,
+        #[arg(long)]
+        game_tick_probe: bool,
     },
 }
 
@@ -56,6 +58,7 @@ fn main() -> Result<()> {
             course_mode,
             scene_settings,
             symbols,
+            game_tick_probe,
         } => {
             let options = StableRomOptions {
                 source_rom,
@@ -71,6 +74,7 @@ fn main() -> Result<()> {
                 },
                 scene_settings,
                 symbols,
+                game_tick_probe,
             };
             let result = generate_stable_roms(&options)?;
             println!("wrote stable host ROM: {}", result.host_rom.display());
