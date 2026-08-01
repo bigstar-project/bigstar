@@ -41,6 +41,9 @@ melonDS::u32 ClampResimulationMismatch(melonDS::u32 mismatchFrame,
 bool IsResimulationDelayElapsed(melonDS::u32 currentFrame,
                                 std::optional<melonDS::u32> observedFrame,
                                 int delayFrames);
+bool ShouldSaveResimulationCheckpoint(melonDS::u32 completedFrame,
+                                      melonDS::u32 currentFrame,
+                                      bool skipIntermediate);
 
 struct StatisticsSnapshot {
   melonDS::u32 RestoreCount = 0;

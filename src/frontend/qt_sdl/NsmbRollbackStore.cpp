@@ -39,6 +39,12 @@ bool IsResimulationDelayElapsed(melonDS::u32 currentFrame,
              *observedFrame + static_cast<melonDS::u32>(delayFrames);
 }
 
+bool ShouldSaveResimulationCheckpoint(melonDS::u32 completedFrame,
+                                      melonDS::u32 currentFrame,
+                                      bool skipIntermediate) {
+  return completedFrame < currentFrame && !skipIntermediate;
+}
+
 std::size_t StatisticsSnapshot::AverageCheckpointBytes() const {
   return CheckpointSaveCount == 0
              ? 0

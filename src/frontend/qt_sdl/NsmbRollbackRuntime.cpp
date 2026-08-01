@@ -592,9 +592,13 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
     hooks.ApplyPostFramePatches(resimFrame + 1, nds);
     resimulated++;
 
+    // The ordinary before-frame path saves `frame` after resimulation returns.
+    // Saving the final replayed frame here only serializes the same checkpoint
+    // twice; retain intermediate checkpoints solely when explicitly requested.
     const bool saveResimCheckpoint =
-        !context.Config.SkipIntermediateResimCheckpoints ||
-        (resimFrame + 1) == frame;
+        RollbackStorage::ShouldSaveResimulationCheckpoint(
+            resimFrame + 1, frame,
+            context.Config.SkipIntermediateResimCheckpoints);
     if (saveResimCheckpoint) {
       const auto checkpointSaveStart = std::chrono::steady_clock::now();
       {

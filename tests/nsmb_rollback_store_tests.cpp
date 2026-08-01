@@ -12,6 +12,7 @@ using NsmbMvlNetplay::RollbackStorage::ClampResimulationMismatch;
 using NsmbMvlNetplay::RollbackStorage::DeltaMode;
 using NsmbMvlNetplay::RollbackStorage::IsResimulationDelayElapsed;
 using NsmbMvlNetplay::RollbackStorage::ShouldSaveCheckpoint;
+using NsmbMvlNetplay::RollbackStorage::ShouldSaveResimulationCheckpoint;
 using NsmbMvlNetplay::RollbackStorage::Store;
 using NsmbMvlNetplay::RollbackStorage::StoredState;
 using NsmbMvlNetplay::RollbackStorage::Statistics;
@@ -83,6 +84,13 @@ void TestRollbackPolicies() {
   Require(!IsResimulationDelayElapsed(104, 100, 5) &&
               IsResimulationDelayElapsed(105, 100, 5),
           "resimulation waits through the configured observed-frame delay");
+
+  Require(ShouldSaveResimulationCheckpoint(99, 100, false) &&
+              !ShouldSaveResimulationCheckpoint(99, 100, true),
+          "only requested intermediate resimulation checkpoints should save");
+  Require(!ShouldSaveResimulationCheckpoint(100, 100, false) &&
+              !ShouldSaveResimulationCheckpoint(101, 100, false),
+          "the ordinary before-frame path should own the final checkpoint");
 }
 
 void TestRestoreChain() {
