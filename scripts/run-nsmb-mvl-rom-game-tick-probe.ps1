@@ -16,6 +16,7 @@ param(
     [switch]$StageTrace,
     [switch]$JitBlockProfile,
     [switch]$ExactBlockChain,
+    [switch]$SelfLoopFastPath,
     [ValidateRange(0, 1000)] [double]$MaxTargetHistoryRunMs = 0,
     [ValidateRange(0, 1000)] [double]$MaxTargetHistoryFrameMs = 0,
     [ValidateRange(0, 1000000)] [int]$ScreenshotInterval = 0,
@@ -42,6 +43,9 @@ if ($JitBlockProfile -and (-not $FrameBoundary -or -not $AllowJit)) {
 }
 if ($ExactBlockChain -and (-not $FrameBoundary -or -not $AllowJit)) {
     throw "ExactBlockChain requires FrameBoundary and AllowJit"
+}
+if ($SelfLoopFastPath -and -not $ExactBlockChain) {
+    throw "SelfLoopFastPath requires ExactBlockChain"
 }
 
 function Get-StageTimingSummary {
@@ -428,6 +432,7 @@ if (!$AnalyzeExisting) {
     $oldJitExecutionProfile = $env:MELONDS_NSML_JIT_EXECUTION_PROFILE
     $oldJitExactBlockChain = $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN
     $oldJitExactBlockChainRomProbe = $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE
+    $oldJitSelfLoopFastPath = $env:MELONDS_NSML_JIT_SELF_LOOP_FAST_PATH
     $oldHistoryBaseTick = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_BASE_TICK
     $oldHistoryStartOffset = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_OFFSET
     try {
@@ -445,6 +450,7 @@ if (!$AnalyzeExisting) {
         $env:MELONDS_NSML_JIT_EXECUTION_PROFILE = if ($JitBlockProfile) { "1" } else { $null }
         $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN = if ($ExactBlockChain) { "1" } else { $null }
         $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE = if ($ExactBlockChain) { "1" } else { $null }
+        $env:MELONDS_NSML_JIT_SELF_LOOP_FAST_PATH = if ($SelfLoopFastPath) { "1" } else { $null }
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_BASE_TICK = "0x$($HistoryBaseTick.ToString('X4'))"
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_OFFSET = "$HistoryStartOffset"
 
@@ -490,6 +496,7 @@ if (!$AnalyzeExisting) {
         $env:MELONDS_NSML_JIT_EXECUTION_PROFILE = $oldJitExecutionProfile
         $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN = $oldJitExactBlockChain
         $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE = $oldJitExactBlockChainRomProbe
+        $env:MELONDS_NSML_JIT_SELF_LOOP_FAST_PATH = $oldJitSelfLoopFastPath
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_BASE_TICK = $oldHistoryBaseTick
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_OFFSET = $oldHistoryStartOffset
     }

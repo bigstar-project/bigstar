@@ -33,12 +33,19 @@ using namespace Gen;
 using namespace Common;
 
 extern "C" void ARM_Ret();
+extern "C" const u8 ARM_JitExactBlockChainEnabled;
 
 namespace melonDS
 {
 static bool ExecutionProfileEnabled()
 {
     const char* value = std::getenv("MELONDS_NSML_JIT_EXECUTION_PROFILE");
+    return value && value[0] && value[0] != '0';
+}
+
+static bool SelfLoopFastPathEnabled()
+{
+    const char* value = std::getenv("MELONDS_NSML_JIT_SELF_LOOP_FAST_PATH");
     return value && value[0] && value[0] != '0';
 }
 
@@ -659,6 +666,32 @@ bool Compiler::IsJITFault(const u8* addr)
 
 void Compiler::Comp_SpecialBranchBehaviour(bool taken)
 {
+    if (taken && CurrentSelfLoop)
+    {
+        MOV(32, MDisp(RCPU, offsetof(ARM, CPSR)), R(RCPSR));
+
+        if (ConstantCycles)
+            ADD(32, MDisp(RCPU, offsetof(ARM, Cycles)), Imm32(ConstantCycles));
+
+        CMP(32, MDisp(RCPU, offsetof(ARM, StopExecution)), Imm8(0));
+        FixupBranch stopRequested = J_CC(CC_NZ);
+
+        MOVSX(64, 32, RSCRATCH, MDisp(RCPU, offsetof(ARM, Cycles)));
+        MOV(32, MDisp(RCPU, offsetof(ARM, Cycles)), Imm32(0));
+        MOV(64, R(RSCRATCH2), MDisp(RCPU, offsetof(ARM, NDS)));
+        ADD(64, MDisp(RSCRATCH2, offsetof(melonDS::NDS, ARM9Timestamp)), R(RSCRATCH));
+        MOV(64, R(RSCRATCH), MDisp(RSCRATCH2, offsetof(melonDS::NDS, ARM9Timestamp)));
+        CMP(64, R(RSCRATCH), MDisp(RSCRATCH2, offsetof(melonDS::NDS, ARM9Target)));
+        FixupBranch schedulerReached = J_CC(CC_AE);
+
+        JMP(CurrentBlockEntry, true);
+
+        SetJumpTarget(stopRequested);
+        SetJumpTarget(schedulerReached);
+        ABI_TailCall(ARM_Ret);
+        return;
+    }
+
     if (taken && CurInstr.BranchFlags & branch_IdleBranch)
         OR(8, MDisp(RCPU, offsetof(ARM, IdleLoop)), Imm8(0x1));
 
@@ -717,6 +750,7 @@ JitBlockEntry Compiler::CompileBlock(ARM* cpu, bool thumb, FetchedInstr instrs[]
     CPSRDirty = false;
 
     JitBlockEntry res = (JitBlockEntry)GetWritableCodePtr();
+    CurrentBlockEntry = reinterpret_cast<const u8*>(res);
 
     if (ExecutionProfileEnabled())
     {
@@ -740,6 +774,16 @@ JitBlockEntry Compiler::CompileBlock(ARM* cpu, bool thumb, FetchedInstr instrs[]
             ? T_Comp[CurInstr.Info.Kind]
             : A_Comp[CurInstr.Info.Kind];
 
+        CurrentSelfLoop = false;
+        if (SelfLoopFastPathEnabled() && ARM_JitExactBlockChainEnabled && Num == 0 && !Thumb
+            && i == instrsCount - 1
+            && CurInstr.Info.Kind == ARMInstrInfo::ak_B && CurInstr.Cond() < 0xE
+            && !(CurInstr.BranchFlags & branch_IdleBranch))
+        {
+            const s32 offset = static_cast<s32>(CurInstr.Instr << 8) >> 6;
+            CurrentSelfLoop = R15 + offset == instrs[0].Addr;
+        }
+
         bool isConditional = Thumb ? CurInstr.Info.Kind == ARMInstrInfo::tk_BCOND : CurInstr.Cond() < 0xE;
         if (comp == NULL || (CurInstr.BranchFlags & branch_FollowCondTaken) || (i == instrsCount - 1 && (!CurInstr.Info.Branches() || isConditional)))
         {
@@ -756,6 +800,9 @@ JitBlockEntry Compiler::CompileBlock(ARM* cpu, bool thumb, FetchedInstr instrs[]
         if (comp != NULL)
             RegCache.Prepare(Thumb, i);
         else
+            RegCache.Flush();
+
+        if (CurrentSelfLoop)
             RegCache.Flush();
 
         if (Thumb)

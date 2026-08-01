@@ -280,6 +280,9 @@ public:
 
     u32 ConstantCycles {};
 
+    const u8* CurrentBlockEntry {};
+    bool CurrentSelfLoop {};
+
     ARM* CurCPU {};
 };
 
