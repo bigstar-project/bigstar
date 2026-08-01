@@ -40,6 +40,7 @@ const GAME_TICK_PROBE_MAGIC: u32 = 0x5250_5447; // "GTPR", little endian
 const GAME_TICK_PROBE_PACKET_TICK_ADDR: u32 = 0x0208_88E0;
 const GAME_TICK_PROBE_JIT_SCRATCH_TICK_ADDR: u32 = 0x023C_1200;
 const GAME_TICK_PROBE_GAME_FRAME_ADDR: u32 = 0x0208_B668;
+const GAME_TICK_PROBE_STAGE_MARKER_ADDR: u32 = 0x04FF_FA28;
 
 #[derive(Debug, Clone)]
 pub struct StableRomOptions {
@@ -763,23 +764,27 @@ fn patch_game_tick_probe(rom: &mut RomImage) -> Result<()> {
     const INPUT_UPDATE_ADDR: u32 = 0x0200_5230;
 
     let loop_gate = [
-        encode_ldr_pc_literal(3, LOOP_GATE_ADDR, LOOP_GATE_ADDR + 0x3C, 0xE)?,
+        encode_ldr_pc_literal(3, LOOP_GATE_ADDR, LOOP_GATE_ADDR + 0x50, 0xE)?,
+        encode_mov_imm(12, 6)?,
+        encode_str_imm(12, 3, 0)?,
+        encode_ldr_pc_literal(3, LOOP_GATE_ADDR + 0x0C, LOOP_GATE_ADDR + 0x48, 0xE)?,
         encode_ldr_imm(12, 3, 0)?,
         encode_cmp_imm(12, 0)?,
-        with_cond(encode_b(LOOP_GATE_ADDR + 0x0C, LOOP_GATE_ADDR + 0x28)?, 0),
+        with_cond(encode_b(LOOP_GATE_ADDR + 0x18, LOOP_GATE_ADDR + 0x34)?, 0),
         encode_sub_imm(12, 12, 1)?,
         encode_str_imm(12, 3, 0)?,
-        encode_ldr_pc_literal(3, LOOP_GATE_ADDR + 0x18, LOOP_GATE_ADDR + 0x40, 0xE)?,
+        encode_ldr_pc_literal(3, LOOP_GATE_ADDR + 0x24, LOOP_GATE_ADDR + 0x4C, 0xE)?,
         encode_mov_imm(12, 1)?,
         encode_str_imm(12, 3, 0)?,
-        encode_b(LOOP_GATE_ADDR + 0x24, LOOP_START_ADDR)?,
-        encode_ldr_pc_literal(3, LOOP_GATE_ADDR + 0x28, LOOP_GATE_ADDR + 0x40, 0xE)?,
+        encode_b(LOOP_GATE_ADDR + 0x30, LOOP_START_ADDR)?,
+        encode_ldr_pc_literal(3, LOOP_GATE_ADDR + 0x34, LOOP_GATE_ADDR + 0x4C, 0xE)?,
         encode_mov_imm(12, 0)?,
         encode_str_imm(12, 3, 0)?,
-        encode_bl(LOOP_GATE_ADDR + 0x34, OS_TICK_ADDR)?,
-        encode_b(LOOP_GATE_ADDR + 0x38, COUNTER_TAIL_RETURN_ADDR)?,
+        encode_bl(LOOP_GATE_ADDR + 0x40, OS_TICK_ADDR)?,
+        encode_b(LOOP_GATE_ADDR + 0x44, COUNTER_TAIL_RETURN_ADDR)?,
         GAME_TICK_PROBE_REQUEST_ADDR,
         GAME_TICK_PROBE_ACTIVE_ADDR,
+        GAME_TICK_PROBE_STAGE_MARKER_ADDR,
     ];
     let font_gate = [
         encode_ldr_pc_literal(12, FONT_GATE_ADDR, FONT_GATE_ADDR + 0x18, 0xE)?,
@@ -791,12 +796,22 @@ fn patch_game_tick_probe(rom: &mut RomImage) -> Result<()> {
         GAME_TICK_PROBE_ACTIVE_ADDR,
     ];
     let render_gate = [
-        encode_ldr_pc_literal(12, RENDER_GATE_ADDR, RENDER_GATE_ADDR + 0x18, 0xE)?,
+        encode_ldr_pc_literal(3, RENDER_GATE_ADDR, RENDER_GATE_ADDR + 0x30, 0xE)?,
+        encode_mov_imm(12, 4)?,
+        encode_str_imm(12, 3, 0)?,
+        encode_ldr_pc_literal(12, RENDER_GATE_ADDR + 0x0C, RENDER_GATE_ADDR + 0x34, 0xE)?,
         encode_ldr_imm(12, 12, 0)?,
         encode_cmp_imm(12, 0)?,
-        with_cond(encode_b(RENDER_GATE_ADDR + 0x0C, RENDER_RETURN_ADDR)?, 1),
-        encode_bl(RENDER_GATE_ADDR + 0x10, PROCESS_LIST_EXECUTE_ADDR)?,
-        encode_b(RENDER_GATE_ADDR + 0x14, RENDER_RETURN_ADDR)?,
+        with_cond(
+            encode_b(RENDER_GATE_ADDR + 0x18, RENDER_GATE_ADDR + 0x20)?,
+            1,
+        ),
+        encode_bl(RENDER_GATE_ADDR + 0x1C, PROCESS_LIST_EXECUTE_ADDR)?,
+        encode_ldr_pc_literal(3, RENDER_GATE_ADDR + 0x20, RENDER_GATE_ADDR + 0x30, 0xE)?,
+        encode_mov_imm(12, 5)?,
+        encode_str_imm(12, 3, 0)?,
+        encode_b(RENDER_GATE_ADDR + 0x2C, RENDER_RETURN_ADDR)?,
+        GAME_TICK_PROBE_STAGE_MARKER_ADDR,
         GAME_TICK_PROBE_ACTIVE_ADDR,
     ];
     let input_gate = build_game_tick_input_gate(INPUT_GATE_ADDR, INPUT_UPDATE_ADDR)?;
@@ -892,6 +907,9 @@ fn build_game_tick_input_gate(start_addr: u32, input_update_addr: u32) -> Result
     words.push(encode_cmp_reg(2, 1));
     let wrong_frame_branch = words.len();
     words.push(0);
+    emit(&mut words, 2, GAME_TICK_PROBE_STAGE_MARKER_ADDR);
+    words.push(encode_mov_imm(1, 1)?);
+    words.push(encode_str_imm(1, 2, 0)?);
     let target_check_index = words.len();
     emit(&mut words, 2, GAME_TICK_PROBE_HISTORY_TARGET_ADDR);
     words.push(encode_ldr_imm(1, 2, 0)?);
@@ -925,6 +943,9 @@ fn build_game_tick_input_gate(start_addr: u32, input_update_addr: u32) -> Result
     words.push(encode_mov_imm(1, 0)?);
     words.push(encode_str_imm(1, 0, 0)?);
     let history_load_index = words.len();
+    emit(&mut words, 2, GAME_TICK_PROBE_STAGE_MARKER_ADDR);
+    words.push(encode_mov_imm(1, 2)?);
+    words.push(encode_str_imm(1, 2, 0)?);
     emit(&mut words, 2, GAME_TICK_PROBE_HISTORY_ADDR);
     words.push(encode_add_reg_lsl(2, 2, 12, 3)?);
     words.push(encode_ldrh_imm(0, 2, 0)?);
@@ -948,6 +969,9 @@ fn build_game_tick_input_gate(start_addr: u32, input_update_addr: u32) -> Result
         start_addr + call_index as u32 * 4,
         input_update_addr,
     )?);
+    emit(&mut words, 2, GAME_TICK_PROBE_STAGE_MARKER_ADDR);
+    words.push(encode_mov_imm(1, 3)?);
+    words.push(encode_str_imm(1, 2, 0)?);
     words.push(encode_b(start_addr + words.len() as u32 * 4, 0x0200_4ECC)?);
     let spin_index = words.len();
     words.push(encode_b(start_addr + spin_index as u32 * 4, start_addr)?);

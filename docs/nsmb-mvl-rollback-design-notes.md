@@ -10,7 +10,7 @@ This is not an exact rollback implementation or a playability claim. Per the per
 
 **Current blocker:** the full-render endpoint crosses two emulated display frames for the tested immediate depth `1-4` transactions and for depth `7`. In the offset-2 symmetric runs, depth 4 took `23.978/26.262ms` and depth 7 took `39.657/34.341ms` on the two local peers. Even depth 1 exceeded `16.667ms` in one of eight role samples across four repetitions (`18.159ms` worst). Fixed-seed, fixed-input same-role screenshots also retained character-region differences after the endpoint and after one normal recovery tick. These failures take precedence over production integration.
 
-**Next action:** profile where the catch-up crosses VBlank and separate guest update, peer wait, final render, and presentation costs. A replacement must first keep the corrected endpoint inside one presentation interval with repeatable margin and make the final same-role image converge. Only after those gates pass should `InputTimeline::ResolveReplayFrameInputs()` be serialized into the guest table or a real mismatch restore be connected.
+**Next action:** split the measured `~168k` ARM-system-cycle depth-4 pre-render update into its native process-list/game-helper phases and identify a smaller title-specific update kernel. The current boundary cannot fit depth 4 before VBlank even on an infinitely fast host: only about `138.8k` emulated cycles remain when the transaction starts, while completion needs about `265.4-265.9k`. Presentation/VBlank deferral must therefore be designed alongside host-time reduction. A replacement must first keep the corrected endpoint inside one presentation interval with repeatable margin and make the final same-role image converge. Only after those gates pass should `InputTimeline::ResolveReplayFrameInputs()` be serialized into the guest table or a real mismatch restore be connected.
 
 ### Performance and corrected-presentation gate
 
@@ -33,6 +33,16 @@ The corrected image gate used identical match seed `0x12345678`, history base ti
 An attempted optimization kept `Font::updateFont()` suppressed on the final catch-up tick while restoring only the process-list render. It preserved the 172-field semantic result but worsened the symmetric depth-4 measurement to `37.273/34.389ms` and carried extra stale-UI risk. That variant was rejected and reverted; the retained patch fully renders the final catch-up tick.
 
 The retained performance evidence is under `logs/slippi-perf-symmetric-depth*-run*` and `logs/slippi-perf-immediate-symmetric-depth*`; the fixed-condition image evidence is under `logs/slippi-visual-fixedtick-depth4-host-{target,control}*`.
+
+### JIT-safe stage profile
+
+The diagnostic ROM now writes six stage markers through an otherwise-unused NO$GBA debug-register slot: tick begin, input begin/end, render begin/end, and tick end. melonDS timestamps these writes with a host monotonic clock and ARM-system clock under JIT; frame-begin/end markers make VBlank crossings explicit. Stage tracing is opt-in through the frame-boundary harness and ordinary stable ROMs never contain these writes.
+
+In `logs/slippi-stage-profile-depth1-run3`, the symmetric depth-1 transaction used `136,607/137,120` emulated cycles and touched one display frame. Only `138,799/138,790` cycles remained from transaction start to that frame's end, leaving about `1.7-2.2k` cycles of emulated margin. Host/client input took `103/129us`, pre-render game update `4,315/4,570us`, final guest render-process execution `7,068/7,799us`, and the post-render tail `174/216us`. The large render segment is ARM9-side render-list work, not the previously measured `~1.1ms` software GPU rasterizer alone.
+
+In `logs/slippi-stage-profile-depth4-run2`, both roles deterministically needed two display frames. Completion consumed `265,360/265,873` emulated cycles versus the same `~138.8k` first-frame remainder. Input was only `285/242us`; four pre-render updates totaled `14,988/13,993us` and `168,316` cycles; the render segments totaled `6,549/7,923us`, of which the final render alone was `6,540/7,917us` and about `92k` cycles. Intermediate skipped-render markers consumed only tens of cycles. Host wall time varied with two-process contention, but the nearly identical emulated-cycle result proves that the display-frame spill is architectural rather than a slow-PC artifact. The logger records rows only while the history transaction/recovery gate is active, avoiding pre-probe CSV contention.
+
+The no-stage-log depth-4 control at `logs/slippi-stage-profile-depth4-notrace-run1` still consumed two display frames, so CSV formatting is not the reason for the crossing. The asymmetric regression at `logs/slippi-stage-profile-depth4-semantic` consumed all four historical inputs and matched all `172` gameplay fields both at the endpoint and after recovery. Stage marker register use therefore passes the current semantic gate; it remains diagnostic and is not a production mechanism.
 
 ### Why DS emulation has little rollback headroom
 

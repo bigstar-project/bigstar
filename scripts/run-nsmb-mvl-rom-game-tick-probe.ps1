@@ -13,6 +13,7 @@ param(
     [switch]$HistoricalInputAB,
     [switch]$GuestOwnedHistoryAB,
     [switch]$FrameBoundary,
+    [switch]$StageTrace,
     [ValidateRange(0, 1000)] [double]$MaxTargetHistoryRunMs = 0,
     [ValidateRange(0, 1000)] [double]$MaxTargetHistoryFrameMs = 0,
     [ValidateRange(0, 1000000)] [int]$ScreenshotInterval = 0,
@@ -30,6 +31,110 @@ if ($GuestOwnedHistoryAB -and -not $HistoricalInputAB) {
 }
 if ($FrameBoundary -and -not $GuestOwnedHistoryAB) {
     throw "FrameBoundary requires GuestOwnedHistoryAB"
+}
+if ($StageTrace -and -not $FrameBoundary) {
+    throw "StageTrace requires FrameBoundary"
+}
+
+function Get-StageTimingSummary {
+    param(
+        [string]$Root,
+        [string]$Role,
+        [int]$TickCount
+    )
+
+    $path = Join-Path $Root "rom-game-tick-stages-$Role.csv"
+    if (!(Test-Path -LiteralPath $path)) {
+        return $null
+    }
+    $rows = @(Import-Csv -LiteralPath $path | Sort-Object { [uint64]$_.sequence })
+    $start = @($rows | Where-Object {
+        $_.stage -eq "tick_begin" -and [uint32]$_.history_enabled -eq 1 -and
+        [uint32]$_.history_index -eq 0
+    } | Select-Object -First 1)
+    if ($start.Count -ne 1) {
+        throw "$Role stage trace has no unique transaction start"
+    }
+    $startRow = $start[0]
+    $end = @($rows | Where-Object {
+        [uint64]$_.sequence -gt [uint64]$startRow.sequence -and $_.stage -eq "tick_end" -and
+        [uint32]$_.history_index -ge $TickCount
+    } | Select-Object -First 1)
+    if ($end.Count -ne 1) {
+        throw "$Role stage trace has no transaction end"
+    }
+    $endRow = $end[0]
+    $window = @($rows | Where-Object {
+        [uint64]$_.sequence -ge [uint64]$startRow.sequence -and
+        [uint64]$_.sequence -le [uint64]$endRow.sequence
+    })
+
+    $segmentTotals = @{
+        InputWallUs = [uint64]0
+        InputCycles = [uint64]0
+        UpdateWallUs = [uint64]0
+        UpdateCycles = [uint64]0
+        RenderWallUs = [uint64]0
+        RenderCycles = [uint64]0
+        TailWallUs = [uint64]0
+        TailCycles = [uint64]0
+    }
+    $pairs = @(
+        [pscustomobject]@{ Start = "input_begin"; End = "input_end"; Wall = "InputWallUs"; Cycles = "InputCycles" },
+        [pscustomobject]@{ Start = "input_end"; End = "render_begin"; Wall = "UpdateWallUs"; Cycles = "UpdateCycles" },
+        [pscustomobject]@{ Start = "render_begin"; End = "render_end"; Wall = "RenderWallUs"; Cycles = "RenderCycles" },
+        [pscustomobject]@{ Start = "render_end"; End = "tick_end"; Wall = "TailWallUs"; Cycles = "TailCycles" }
+    )
+    foreach ($pair in $pairs) {
+        foreach ($segmentStart in @($window | Where-Object { $_.stage -eq $pair.Start })) {
+            $segmentEnd = @($window | Where-Object {
+                [uint64]$_.sequence -gt [uint64]$segmentStart.sequence -and $_.stage -eq $pair.End
+            } | Select-Object -First 1)
+            if ($segmentEnd.Count -ne 1) {
+                continue
+            }
+            $segmentTotals[$pair.Wall] += [uint64]$segmentEnd[0].wall_us - [uint64]$segmentStart.wall_us
+            $segmentTotals[$pair.Cycles] += [uint64]$segmentEnd[0].sys_timestamp - [uint64]$segmentStart.sys_timestamp
+        }
+    }
+
+    $finalRenderBegin = @($window | Where-Object {
+        $_.stage -eq "render_begin" -and [uint32]$_.history_index -ge $TickCount
+    } | Select-Object -First 1)
+    $finalRenderWallUs = [uint64]0
+    $finalRenderCycles = [uint64]0
+    if ($finalRenderBegin.Count -eq 1) {
+        $finalRenderEnd = @($window | Where-Object {
+            [uint64]$_.sequence -gt [uint64]$finalRenderBegin[0].sequence -and $_.stage -eq "render_end"
+        } | Select-Object -First 1)
+        if ($finalRenderEnd.Count -eq 1) {
+            $finalRenderWallUs = [uint64]$finalRenderEnd[0].wall_us - [uint64]$finalRenderBegin[0].wall_us
+            $finalRenderCycles = [uint64]$finalRenderEnd[0].sys_timestamp - [uint64]$finalRenderBegin[0].sys_timestamp
+        }
+    }
+
+    $firstFrameEnd = @($rows | Where-Object {
+        [uint64]$_.sequence -gt [uint64]$startRow.sequence -and $_.stage -eq "frame_end"
+    } | Select-Object -First 1)
+    return [pscustomobject]@{
+        Role = $Role
+        ExtraTicks = $TickCount
+        TransactionWallUs = [uint64]$endRow.wall_us - [uint64]$startRow.wall_us
+        TransactionCycles = [uint64]$endRow.sys_timestamp - [uint64]$startRow.sys_timestamp
+        DisplayFramesTouched = [uint32]$endRow.display_frame - [uint32]$startRow.display_frame + 1
+        FirstFrameRemainingWallUs = if ($firstFrameEnd.Count -eq 1) { [uint64]$firstFrameEnd[0].wall_us - [uint64]$startRow.wall_us } else { 0 }
+        FirstFrameRemainingCycles = if ($firstFrameEnd.Count -eq 1) { [uint64]$firstFrameEnd[0].sys_timestamp - [uint64]$startRow.sys_timestamp } else { 0 }
+        InputWallUs = $segmentTotals.InputWallUs
+        InputCycles = $segmentTotals.InputCycles
+        UpdateWallUs = $segmentTotals.UpdateWallUs
+        UpdateCycles = $segmentTotals.UpdateCycles
+        RenderWallUs = $segmentTotals.RenderWallUs
+        RenderCycles = $segmentTotals.RenderCycles
+        FinalRenderWallUs = $finalRenderWallUs
+        FinalRenderCycles = $finalRenderCycles
+        TailWallUs = $segmentTotals.TailWallUs
+        TailCycles = $segmentTotals.TailCycles
+    }
 }
 
 function Get-IncludedRanges {
@@ -296,6 +401,7 @@ if (!$AnalyzeExisting) {
     $oldHistoricalInputAB = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_HISTORICAL_INPUT_AB
     $oldGuestOwnedHistoryAB = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GUEST_HISTORY_AB
     $oldFrameBoundary = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY
+    $oldStageTrace = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE
     $oldHistoryBaseTick = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_BASE_TICK
     $oldHistoryStartOffset = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_OFFSET
     try {
@@ -309,6 +415,7 @@ if (!$AnalyzeExisting) {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_HISTORICAL_INPUT_AB = if ($HistoricalInputAB) { "1" } else { $null }
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GUEST_HISTORY_AB = if ($GuestOwnedHistoryAB) { "1" } else { $null }
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY = if ($FrameBoundary) { "1" } else { $null }
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE = if ($StageTrace) { "1" } else { $null }
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_BASE_TICK = "0x$($HistoryBaseTick.ToString('X4'))"
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_OFFSET = "$HistoryStartOffset"
 
@@ -350,6 +457,7 @@ if (!$AnalyzeExisting) {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_HISTORICAL_INPUT_AB = $oldHistoricalInputAB
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GUEST_HISTORY_AB = $oldGuestOwnedHistoryAB
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY = $oldFrameBoundary
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE = $oldStageTrace
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_BASE_TICK = $oldHistoryBaseTick
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_OFFSET = $oldHistoryStartOffset
     }
@@ -395,6 +503,15 @@ if ($RenderlessAB) {
         }
         $roleSummaries | Export-Csv -LiteralPath (Join-Path $resolvedLogDir "summary.csv") -NoTypeInformation -Encoding UTF8
         $roleSummaries | Format-Table -AutoSize
+        $stageSummaries = @(
+            foreach ($role in @("host", "client")) {
+                Get-StageTimingSummary -Root $resolvedLogDir -Role $role -TickCount $ExtraTicks
+            }
+        ) | Where-Object { $null -ne $_ }
+        if ($stageSummaries.Count -gt 0) {
+            $stageSummaries | Export-Csv -LiteralPath (Join-Path $resolvedLogDir "stage-summary.csv") -NoTypeInformation -Encoding UTF8
+            $stageSummaries | Format-Table -AutoSize
+        }
         foreach ($roleSummary in $roleSummaries) {
             if ($roleSummary.ExtraTicksSeen -ne $ExtraTicks -or $roleSummary.HistoryIndex -ne $ExtraTicks) {
                 throw "$($roleSummary.Role) did not consume the full symmetric history"

@@ -1460,6 +1460,90 @@ void NDS::RunSystemSleep(u64 timestamp)
     }
 }
 
+static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
+{
+    constexpr u32 activeAddr = 0x02001AC4;
+    constexpr u32 historyEnabledAddr = 0x02001ACC;
+    constexpr u32 historyIndexAddr = 0x02001AD0;
+    constexpr u32 historyCountAddr = 0x02001AD4;
+    constexpr u32 gameFrameAddr = 0x0208B668;
+    constexpr u32 frameBeginMarker = 0x100;
+    constexpr u32 frameEndMarker = 0x101;
+
+    const char* stage = nullptr;
+    switch (marker)
+    {
+    case 1: stage = "tick_begin"; break;
+    case 2: stage = "input_begin"; break;
+    case 3: stage = "input_end"; break;
+    case 4: stage = "render_begin"; break;
+    case 5: stage = "render_end"; break;
+    case 6: stage = "tick_end"; break;
+    case frameBeginMarker: stage = "frame_begin"; break;
+    case frameEndMarker: stage = "frame_end"; break;
+    default: return;
+    }
+
+    struct Config
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        std::string Role = "local";
+        std::string OutputDir;
+        FILE* LogFile = nullptr;
+    };
+    struct State
+    {
+        bool HasOrigin = false;
+        u64 Sequence = 0;
+        std::chrono::steady_clock::time_point Origin;
+    };
+    static Config cfg;
+    static State state;
+    if (!cfg.Checked)
+    {
+        cfg.Enabled = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE") != nullptr;
+        if (const char* role = getenv("MELONDS_NSML_ROLE"))
+            cfg.Role = role;
+        if (const char* outputDir = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_DIR"))
+            cfg.OutputDir = outputDir;
+        if (cfg.Enabled && !cfg.OutputDir.empty())
+        {
+            const std::string logPath = cfg.OutputDir + "/rom-game-tick-stages-" + cfg.Role + ".csv";
+            cfg.LogFile = fopen(logPath.c_str(), "w");
+            if (cfg.LogFile)
+            {
+                fprintf(cfg.LogFile,
+                    "role,sequence,stage,marker,display_frame,game_frame,history_enabled,history_index,history_count,active,wall_us,sys_timestamp,arm9_timestamp,arm7_timestamp\n");
+            }
+        }
+        cfg.Checked = true;
+    }
+    if (!cfg.Enabled || !cfg.LogFile || !nds)
+        return;
+    const u32 historyEnabled = nds->ARM9Read32(historyEnabledAddr);
+    if (!historyEnabled)
+        return;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (!state.HasOrigin)
+    {
+        state.Origin = now;
+        state.HasOrigin = true;
+    }
+    const auto wallUs = std::chrono::duration_cast<std::chrono::microseconds>(now - state.Origin);
+    fprintf(cfg.LogFile, "%s,%llu,%s,%u,%u,%u,%u,%u,%u,%u,%lld,%llu,%llu,%llu\n",
+        cfg.Role.c_str(), static_cast<unsigned long long>(state.Sequence++), stage, marker,
+        nds->NumFrames, nds->ARM9Read32(gameFrameAddr), historyEnabled,
+        nds->ARM9Read32(historyIndexAddr), nds->ARM9Read32(historyCountAddr),
+        nds->ARM9Read32(activeAddr), static_cast<long long>(wallUs.count()),
+        static_cast<unsigned long long>(nds->GetSysClockCycles(0)),
+        static_cast<unsigned long long>(nds->ARM9Timestamp),
+        static_cast<unsigned long long>(nds->ARM7Timestamp));
+    if (marker == frameEndMarker)
+        fflush(cfg.LogFile);
+}
+
 static void HandleNSMLRomGameTickProbeFrameBoundary(NDS* nds, bool beforeFrame)
 {
     constexpr u32 requestAddr = 0x02001AC0;
@@ -1700,6 +1784,7 @@ template <CPUExecuteMode cpuMode>
 u32 NDS::RunFrame()
 {
     HandleNSMLRomGameTickProbeFrameBoundary(this, true);
+    RecordNSMLRomGameTickProbeStage(this, 0x100);
     Current = this;
 
     FrameStartTimestamp = SysTimestamp;
@@ -1836,6 +1921,7 @@ u32 NDS::RunFrame()
 
     // Ensure the last audio samples produced for this frame are available to the frontend immediately
     SPU.BufferAudio();
+    RecordNSMLRomGameTickProbeStage(this, 0x101);
 
     // In the context of TASes, frame count is traditionally the primary measure of emulated time,
     // so it needs to be tracked even if NDS is powered off.
@@ -4416,6 +4502,10 @@ void NDS::ARM9IOWrite32(u32 addr, u32 val)
 
     // NO$GBA debug register "Char Out"
         case 0x04FFFA1C: Log(LogLevel::Debug, "%c", val & 0xFF); return;
+
+    // Diagnostic-only NSMB rollback stage marker.  Stable ROMs never write this
+    // otherwise-unused NO$GBA debug-register slot.
+    case 0x04FFFA28: RecordNSMLRomGameTickProbeStage(this, val); return;
     }
 
     if (addr >= 0x04000000 && addr < 0x04000060)
