@@ -1497,11 +1497,14 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
         bool Enabled = false;
         bool StageEnabled = false;
         bool JitProfileEnabled = false;
+        bool JitRenderProfileEnabled = false;
+        bool JitRenderStateDumpEnabled = false;
         bool DeferLCD = false;
         std::string Role = "local";
         std::string OutputDir;
         FILE* LogFile = nullptr;
         FILE* JitProfileFile = nullptr;
+        FILE* JitRenderStateFile = nullptr;
     };
     struct State
     {
@@ -1517,6 +1520,8 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
     {
         cfg.StageEnabled = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE") != nullptr;
         cfg.JitProfileEnabled = getenv("MELONDS_NSML_JIT_EXECUTION_PROFILE") != nullptr;
+        cfg.JitRenderProfileEnabled = getenv("MELONDS_NSML_JIT_RENDER_EXECUTION_PROFILE") != nullptr;
+        cfg.JitRenderStateDumpEnabled = getenv("MELONDS_NSML_JIT_RENDER_STATE_DUMP") != nullptr;
         cfg.DeferLCD = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_DEFER_LCD") != nullptr;
         cfg.Enabled = cfg.StageEnabled || cfg.JitProfileEnabled || cfg.DeferLCD;
         if (const char* role = getenv("MELONDS_NSML_ROLE"))
@@ -1535,13 +1540,27 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
         }
         if (cfg.JitProfileEnabled && !cfg.OutputDir.empty())
         {
-            const std::string profilePath =
-                cfg.OutputDir + "/rom-game-tick-jit-blocks-" + cfg.Role + ".csv";
+            const std::string profilePath = cfg.OutputDir +
+                (cfg.JitRenderProfileEnabled ? "/rom-game-tick-jit-render-blocks-" :
+                                               "/rom-game-tick-jit-blocks-") +
+                cfg.Role + ".csv";
             cfg.JitProfileFile = fopen(profilePath.c_str(), "w");
             if (cfg.JitProfileFile)
             {
                 fprintf(cfg.JitProfileFile,
                     "role,cpu,address,mode,first_instruction,block_instructions,count,dynamic_instructions\n");
+            }
+        }
+        if (cfg.JitRenderStateDumpEnabled && !cfg.OutputDir.empty())
+        {
+            const std::string statePath = cfg.OutputDir + "/rom-game-tick-render-state-" + cfg.Role + ".csv";
+            cfg.JitRenderStateFile = fopen(statePath.c_str(), "w");
+            if (cfg.JitRenderStateFile)
+            {
+                fprintf(cfg.JitRenderStateFile,
+                    "role,stage,display_frame,vcount,total_scanlines,back_buffer,dispstat9,dispstat7,"
+                    "oam_hash,palette_hash,vram_hash,gxstat,gpu3d_timestamp,cycle_count,cmd_fifo,cmd_pipe,"
+                    "cur_ram_bank,num_vertices,num_polygons,render_num_polygons,flush_request\n");
             }
         }
         cfg.Checked = true;
@@ -1569,10 +1588,76 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
             state.LCDDeferred = false;
         }
     }
-    if (cfg.JitProfileEnabled && marker == 11 && historyIndex == 1)
-        nds->JIT.ResetExecutionProfile();
-    if (cfg.JitProfileEnabled && marker == 12 && historyIndex >= historyCount)
-        nds->JIT.DumpExecutionProfile(cfg.JitProfileFile, cfg.Role.c_str());
+    if (cfg.JitProfileEnabled)
+    {
+        if (cfg.JitRenderProfileEnabled)
+        {
+            if (marker == 4 && historyIndex >= historyCount)
+                nds->JIT.ResetExecutionProfile();
+            if (marker == 5 && historyIndex >= historyCount)
+                nds->JIT.DumpExecutionProfile(cfg.JitProfileFile, cfg.Role.c_str());
+        }
+        else
+        {
+            if (marker == 11 && historyIndex == 1)
+                nds->JIT.ResetExecutionProfile();
+            if (marker == 12 && historyIndex >= historyCount)
+                nds->JIT.DumpExecutionProfile(cfg.JitProfileFile, cfg.Role.c_str());
+        }
+    }
+    if (cfg.JitRenderStateDumpEnabled && historyIndex >= historyCount &&
+        (marker == 4 || marker == 5) && !cfg.OutputDir.empty() && nds->MainRAM)
+    {
+        auto hashBytes = [](const u8* data, size_t length)
+        {
+            u64 hash = 1469598103934665603ULL;
+            for (size_t i = 0; i < length; i++)
+            {
+                hash ^= data[i];
+                hash *= 1099511628211ULL;
+            }
+            return hash;
+        };
+        u64 vramHash = 1469598103934665603ULL;
+        for (int bank = 0; bank < 9; bank++)
+        {
+            vramHash ^= hashBytes(nds->GPU.VRAM[bank], nds->GPU.VRAMMask[bank] + 1);
+            vramHash *= 1099511628211ULL;
+        }
+        if (cfg.JitRenderStateFile)
+        {
+            const auto& gpu3d = nds->GPU.GPU3D;
+            fprintf(cfg.JitRenderStateFile,
+                "%s,%s,%u,%u,%u,%d,%04X,%04X,%016llX,%016llX,%016llX,%08X,%llu,%d,%u,%u,%u,%u,%u,%u,%u\n",
+                cfg.Role.c_str(), marker == 4 ? "begin" : "end", nds->NumFrames,
+                nds->GPU.VCount, nds->GPU.TotalScanlines, nds->GPU.GetRenderer().GetBackBufferIndex(),
+                nds->GPU.DispStat[0], nds->GPU.DispStat[1],
+                static_cast<unsigned long long>(hashBytes(nds->GPU.OAM, sizeof(nds->GPU.OAM))),
+                static_cast<unsigned long long>(hashBytes(nds->GPU.Palette, sizeof(nds->GPU.Palette))),
+                static_cast<unsigned long long>(vramHash), gpu3d.GXStat,
+                static_cast<unsigned long long>(gpu3d.Timestamp), gpu3d.CycleCount,
+                gpu3d.CmdFIFO.Level(), gpu3d.CmdPIPE.Level(), gpu3d.CurRAMBank,
+                gpu3d.NumVertices, gpu3d.NumPolygons, gpu3d.RenderNumPolygons, gpu3d.FlushRequest);
+            fflush(cfg.JitRenderStateFile);
+        }
+        const std::string dumpPath = cfg.OutputDir + "/rom-game-tick-render-frame" +
+            std::to_string(nds->NumFrames) + "-" + (marker == 4 ? "begin-" : "end-") +
+            cfg.Role + ".bin";
+        if (FILE* file = fopen(dumpPath.c_str(), "wb"))
+        {
+            const u32 length = std::min(nds->MainRAMMask + 1, 0x400000u);
+            fwrite(nds->MainRAM, 1, length, file);
+            fclose(file);
+        }
+        const std::string oamPath = cfg.OutputDir + "/rom-game-tick-render-frame" +
+            std::to_string(nds->NumFrames) + "-" + (marker == 4 ? "begin-" : "end-") +
+            cfg.Role + "-oam.bin";
+        if (FILE* file = fopen(oamPath.c_str(), "wb"))
+        {
+            fwrite(nds->GPU.OAM, 1, sizeof(nds->GPU.OAM), file);
+            fclose(file);
+        }
+    }
     if (!cfg.StageEnabled || !cfg.LogFile)
         return;
 

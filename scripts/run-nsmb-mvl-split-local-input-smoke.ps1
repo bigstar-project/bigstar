@@ -134,6 +134,8 @@ param(
     [int]$ForcePlayerInventoryPowerup0 = 0,
     [int]$ForcePlayerInventoryPowerup1 = 0,
     [int]$HostStartupDelayMs = 1200,
+    [UInt64]$HostProcessAffinityMask = 0,
+    [UInt64]$ClientProcessAffinityMask = 0,
     [string]$LogDir = "logs\nsmb-mvl-split-local-input-smoke",
     [string]$HostPacketReplayFile = "",
     [string]$ClientPacketReplayFile = "",
@@ -551,6 +553,9 @@ $hostArgs = @(
     "-InputScript", $HostInputScript,
     "-LogDir", $hostLog
 )
+if ($HostProcessAffinityMask -ne 0) {
+    $hostArgs += @("-ProcessAffinityMask", "$HostProcessAffinityMask")
+}
 if ($HostPacketReplayFile -ne "") {
     $hostArgs += @("-HostPacketReplayFile", $HostPacketReplayFile)
 }
@@ -569,6 +574,9 @@ $clientArgs = @(
     "-InputScript", $ClientInputScript,
     "-LogDir", $clientLog
 )
+if ($ClientProcessAffinityMask -ne 0) {
+    $clientArgs += @("-ProcessAffinityMask", "$ClientProcessAffinityMask")
+}
 if ($ClientPacketReplayFile -ne "") {
     $clientArgs += @("-ClientPacketReplayFile", $ClientPacketReplayFile)
 }

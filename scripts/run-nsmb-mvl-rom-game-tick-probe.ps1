@@ -15,12 +15,16 @@ param(
     [switch]$FrameBoundary,
     [switch]$StageTrace,
     [switch]$JitBlockProfile,
+    [switch]$JitRenderProfile,
+    [switch]$JitRenderStateDump,
     [switch]$ExactBlockChain,
     [switch]$SelfLoopFastPath,
     [switch]$DeferLCD,
     [ValidateRange(0, 1000)] [double]$MaxTargetHistoryRunMs = 0,
     [ValidateRange(0, 1000)] [double]$MaxTargetHistoryFrameMs = 0,
     [ValidateRange(0, 1000000)] [int]$ScreenshotInterval = 0,
+    [UInt64]$HostProcessAffinityMask = 0,
+    [UInt64]$ClientProcessAffinityMask = 0,
     [switch]$AnalyzeExisting,
     [string]$LogDir = "logs\nsmb-mvl-rom-game-tick-probe"
 )
@@ -41,6 +45,15 @@ if ($StageTrace -and -not $FrameBoundary) {
 }
 if ($JitBlockProfile -and (-not $FrameBoundary -or -not $AllowJit)) {
     throw "JitBlockProfile requires FrameBoundary and AllowJit"
+}
+if ($JitRenderProfile -and (-not $FrameBoundary -or -not $AllowJit)) {
+    throw "JitRenderProfile requires FrameBoundary and AllowJit"
+}
+if ($JitBlockProfile -and $JitRenderProfile) {
+    throw "JitBlockProfile and JitRenderProfile are mutually exclusive"
+}
+if ($JitRenderStateDump -and -not $JitRenderProfile) {
+    throw "JitRenderStateDump requires JitRenderProfile"
 }
 if ($ExactBlockChain -and (-not $FrameBoundary -or -not $AllowJit)) {
     throw "ExactBlockChain requires FrameBoundary and AllowJit"
@@ -434,6 +447,8 @@ if (!$AnalyzeExisting) {
     $oldFrameBoundary = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY
     $oldStageTrace = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE
     $oldJitExecutionProfile = $env:MELONDS_NSML_JIT_EXECUTION_PROFILE
+    $oldJitRenderExecutionProfile = $env:MELONDS_NSML_JIT_RENDER_EXECUTION_PROFILE
+    $oldJitRenderStateDump = $env:MELONDS_NSML_JIT_RENDER_STATE_DUMP
     $oldJitExactBlockChain = $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN
     $oldJitExactBlockChainRomProbe = $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE
     $oldJitSelfLoopFastPath = $env:MELONDS_NSML_JIT_SELF_LOOP_FAST_PATH
@@ -452,7 +467,9 @@ if (!$AnalyzeExisting) {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GUEST_HISTORY_AB = if ($GuestOwnedHistoryAB) { "1" } else { $null }
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY = if ($FrameBoundary) { "1" } else { $null }
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE = if ($StageTrace) { "1" } else { $null }
-        $env:MELONDS_NSML_JIT_EXECUTION_PROFILE = if ($JitBlockProfile) { "1" } else { $null }
+        $env:MELONDS_NSML_JIT_EXECUTION_PROFILE = if ($JitBlockProfile -or $JitRenderProfile) { "1" } else { $null }
+        $env:MELONDS_NSML_JIT_RENDER_EXECUTION_PROFILE = if ($JitRenderProfile) { "1" } else { $null }
+        $env:MELONDS_NSML_JIT_RENDER_STATE_DUMP = if ($JitRenderStateDump) { "1" } else { $null }
         $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN = if ($ExactBlockChain) { "1" } else { $null }
         $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE = if ($ExactBlockChain) { "1" } else { $null }
         $env:MELONDS_NSML_JIT_SELF_LOOP_FAST_PATH = if ($SelfLoopFastPath) { "1" } else { $null }
@@ -476,6 +493,8 @@ if (!$AnalyzeExisting) {
             FixedFrameTime = $true
             NoAudioSync = $true
             LogDir = Join-Path $resolvedLogDir "split"
+            HostProcessAffinityMask = $HostProcessAffinityMask
+            ClientProcessAffinityMask = $ClientProcessAffinityMask
         }
         if ($ScreenshotInterval -gt 0) {
             $smokeArgs.ScreenshotInterval = $ScreenshotInterval
@@ -500,6 +519,8 @@ if (!$AnalyzeExisting) {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY = $oldFrameBoundary
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE = $oldStageTrace
         $env:MELONDS_NSML_JIT_EXECUTION_PROFILE = $oldJitExecutionProfile
+        $env:MELONDS_NSML_JIT_RENDER_EXECUTION_PROFILE = $oldJitRenderExecutionProfile
+        $env:MELONDS_NSML_JIT_RENDER_STATE_DUMP = $oldJitRenderStateDump
         $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN = $oldJitExactBlockChain
         $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE = $oldJitExactBlockChainRomProbe
         $env:MELONDS_NSML_JIT_SELF_LOOP_FAST_PATH = $oldJitSelfLoopFastPath
