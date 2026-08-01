@@ -1,16 +1,89 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
+> 現在の判断は直下の 2026-08-02 節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
+
+## 2026-08-02 external rollback implementations and full-history audit
+
+### 結論
+
+ロールバックという方式自体や、Slippi から得た着想を捨てたわけではない。今回中止するのは、現在の melonDS JIT と NSMB ROM 内ループのまま、快適な exact rollback を小さな最適化の積み重ねで製品化する作業である。
+
+Tango/Slippi 以外の実装、過去の rollback / offline replay / software renderer ブランチ、関連 Codex タスクの原ログを監査したが、現行構成で「訂正が発生しても描画を乱さず、表示を止めずに 60 fps」を満たせる根拠は得られなかった。外部実装にも、重いエミュレータの再実行を不要にする一般解はなかった。
+
+実現可能性は次のように分けて判断する。
+
+| 目標 | 現在の判断 | 根拠 |
+| --- | --- | --- |
+| 現行 melonDS の full-frame exact rollback を訂正時も hitch なしで 60 fps | **低い** | 1F 訂正処理だけで p95 `20.626ms`。その外側に通常フレーム、checkpoint、未計測のコピーが残る |
+| Slippi 相当の 2F 以上の快適な rollback window | **非常に低い** | ROM loop depth 2 は `16.720-28.513ms`、full-frame はさらに通常フレームが必要。depth 4 は描画位相も不一致 |
+| input delay/pacing で訂正をほぼ防ぎ、稀な 1F 訂正時だけ短い hitch を許す hybrid | **技術的には可能性あり** | exact 1F の選択入力と 1,250F semantic gate は通る。ただし「常時快適な rollback」ではない |
+| trace/superblock 級 JIT 刷新後の再評価 | **不明** | ARM9 支配は確認済みだが、別規模のエミュレータ開発で成功保証がない |
+
+### 外部実装で確認できた方式
+
+確認した実装はいずれも、Slippi のようにゲーム固有更新関数だけを進める方式ではない。正しい機械状態を復元し、通常のエミュレーションフレームを現在まで再実行し、再実行中の host 映像・音声・pacing だけを抑止する。内部の CPU、GPU、音源、割り込み、タイマーは進める。
+
+- [GGPO](https://github.com/pond3r/ggpo/blob/master/src/lib/ggpo/sync.cpp) は、最古の誤予測 state を load し、`advance_frame` callback を現在まで繰り返す制御ライブラリである。エミュレーションを速くする機能は持たない。
+- [Fightcade FBNeo](https://github.com/fightcadeorg/fightcade-fbneo/blob/c95950140e2424643a0bb589dc444f0defe03155/src/burner/win32/fbn_ggpo.cpp#L264-L378) は全登録 state を毎フレームコピーし、rollback 中も `RunFrame(0, 0, 0)` でアーケード機械全体を進める。古いアーケード core が十分軽いから成立する例である。
+- [RetroArch Netplay](https://github.com/libretro/RetroArch/blob/3f2664303bf46c75174b0c5e89e2c6787794b8b4/network/netplay/README#L61-L83) は core 全 state の ring、予測入力、unserialize、`core_run()` replay、stall/fast-forward/input latency を組み合わせる。melonDS の現行 full-frame route と同じ系統である。
+- [bsnes-netplay](https://github.com/HeatXD/bsnes-netplay/blob/0715c67e70a3201708518ac5650c27c478f9ab97/bsnes/target-bsnes/program/netplay.cpp#L172-L201) も SNES 全 state を復元して `emulator->run()` を繰り返し、host PPU/DSP 出力だけを止める。軽い機械全体を再実行する例であり、第三者 fork の成熟度には留保がある。
+- [RMG-K](https://github.com/Jay-Day/RMG-K/blob/0f249b52b968637424d6910d9ee880f27334a95f/Source/3rdParty/mupen64plus-core/src/main/main.c#L1103-L1185) は N64 の CPU と機械イベントを次の VI まで実行し、Video/Audio/Pacing/Input の host 出力を無効にする。約 8.4MiB の state を事前確保 buffer に直接保存する新しい実装であり、「複雑な機械でも十分な core 速度があれば full-frame rollback は可能」という証拠にはなるが、長期成熟の証拠にはしない。
+
+最も移植価値があるのは [Flycast Dojo](https://github.com/blueminder/flycast-dojo/blob/d0e47e572b1e7b355e88bda8308c89d0c5156cbf/core/network/ggpo.cpp#L255-L313) である。Dreamcast/Naomi 全体を `emu.run()` で 1F 再実行する点は同じだが、RAM/VRAM/AICA RAM は 4KiB page の write fault で最初の書き込み前 image だけを保存し、rollback 時に dirty-page preimage を逆順適用する。[write-protection/COW 実装](https://github.com/blueminder/flycast-dojo/blob/d0e47e572b1e7b355e88bda8308c89d0c5156cbf/core/hw/mem/mem_watch.h#L32-L94) と、VRAM 復元前に [threaded renderer の safe point を待つ処理](https://github.com/blueminder/flycast-dojo/blob/d0e47e572b1e7b355e88bda8308c89d0c5156cbf/core/hw/pvr/Renderer_if.cpp#L490-L508) は参考になる。
+
+melonDS の `tinycorepreimage` は、各 checkpoint で 4MiB Main RAM 全域を前 frame shadow と `memcmp` し、最後に shadow 全体を再コピーする。restore では最新 shadow 4MiB をまず全コピーし、preimage page を逆適用した後、Main RAM 全域について JIT invalidation を走らせる。Flycast 型 dirty-page tracking ならこの save/restore 部分を減らせる可能性がある。しかし current exact-1F の p95 は restore `3.882ms` に対して replay `RunFrame()` `16.401ms` であり、restore をゼロにしても replay 単体で表示予算をほぼ使い切る。したがって、この移植だけでは製品判定は変わらない。
+
+### 過去ブランチ・Codex タスクから確定したこと
+
+Git 履歴と 2026-05-25 以降の関連 Codex session 原ログを監査した。初期 full savestate、`corelite`/`coredelta`/`tinycore`、Plan-D、shadow NDS、authority sync、offline replay、software renderer、今回の Slippi 型まで、成功報告が後の強い測定で覆った箇所も含めて確認した。
+
+- 初期 full savestate は再収束する経路があったが、19MiB 級 restore と複数 `RunFrame()` で手動停止感が出た。RAM だけへ縮めると CPU/timer/scheduler 不足で分岐した。
+- `corelite`/`coredelta` は state が大きく restore が重い。`tinycore` は約 269KiB まで縮んだが、長時間・実 rollback で低 FPS または state 不足が出た。「軽くすると不完全、完全にすると重い」という境界は変わっていない。
+- Plan-D と AuthorityOwnerEvents は短い route では軽かったが、死亡・復帰・hazard・spawn/item・remote actor で永続不一致を起こした。後者は正式な world replication へ設計し直せば別製品方式になり得るが、exact rollback ではない。
+- `codex/software-renderer-60fps` の controlled 2-process 測定では software GPU 全体が約 `1.1ms/frame`、通常 `RunFrame()` が約 `13.5-14.6ms`。描画 backend は主因ではない。
+- `codex/offline-replay-3x` は network、restore、Qt presentation のない有利な条件でも、正しい gameplay の再現値が約 `80fps`、過去最良約 `88.7fps` だった。ARM9/JIT が `86.54%` を占め、180fps は未達。広い render/GXFIFO/scheduler skip は効果なし、回帰、または早期 state mismatch だった。
+- 今回の ROM loop は selected 172 fields と depth-1 endpoint image を一致させたが、depth 1 kernel `12.624-14.470ms` は通常 full-frame replay `9.145-12.249ms` より遅い。depth 2 は budget 不合格、depth 4 は endpoint `762` pixel、通常 recovery 後も `322` pixel の差を残した。LCD/OAM/VBlank 位相を消せていない。
+- exact full-frame 1F probe は全 20 回 `frames=1`、confirmed input replay、1,250F semantic comparison を通した。しかし affinity-isolated p50/p95/max は `17.442/20.626/21.543ms` で、20 件中 15 件が `16.667ms` を超えた。
+
+### 60 fps 判定の訂正
+
+これまでの top-level note は「1F correction total が `16.667ms` 未満」を promotion gate としていた。この基準は快適性を過大評価するため撤回する。
+
+コード上、`ResimulateIfNeeded()` は before-frame hook 内で過去 frame を `RunFrame()` して current state まで戻した後に return する。その後、同じ通常経路が current frame の checkpoint を保存し、さらに通常の current `RunFrame()` と presentation を行う。また、記録される `rollbackTotalUs` は `BuildPreimageRestore()` 内の state/vector copy、rollback 後の 4MiB shadow refresh、通常 checkpoint save、通常 current frame を含まない。
+
+したがって `20.626ms` は「訂正を含む表示 interval」ではなく、その中に追加される correction 部分だけの楽観値である。仮に exact-chain/self-loop や Flycast 型 COW で correction を `16ms` 未満へ下げても、通常 frame 約 `13.5-14.6ms` と host/checkpoint 負荷が別に続くため、hitch なし 60 fps にはならない。通常 frame の残り時間は数 ms 以下であり、offline replay 最良の 1F 約 `11.3ms` ですらそこへ入らない。
+
+これは「平均 60fps」や「訂正処理が 1 display interval 未満」と、「訂正が起きた表示 frame も止まらない」を分ける証拠である。今後、後者を主張する場合は present-to-present の corrected interval 全体を測る必要がある。
+
+### 現行方針と停止条件
+
+性能優先という要件に従い、次の実装は進めない。
+
+- current full-frame probe への小規模 JIT tweak の追加
+- Flycast 型 dirty-page COW の製品実装
+- ROM history table の production serialization
+- Plan-D の field repair 追加、guest render/collision の個別 skip
+
+いずれも独立には `RunFrame()` 支配を解消せず、60 fps を満たさない状態の周辺を磨く作業になるためである。既存 branch は研究証拠として保持し、rollback は既定無効のままにする。
+
+再開するなら、次のどちらかを別規模の研究として明示的に選ぶ。
+
+1. trace/superblock など ARM9 JIT backend を刷新し、まず rollback 無しの strict offline gameplay で最低 `120fps`、実用上は restore/host 余裕を含めてそれ以上を安定達成する。その時点で full-frame exact rollback を再評価する。
+2. Slippi に近い、DS hardware timeline から独立したさらに小さい NSMB game-state update boundary を新たに特定する。最初の milestone は 1 tick を通常 frame の空き時間へ収めることと、死亡・復帰・土管・hazard・item・audio を含む semantic/visual recovery gate であり、現 ROM loop の延長を production 化することではない。
+
+どちらも成功保証はなく、現時点では推奨する短期ロードマップではない。短期の製品方針は input delay/pacing を主とする。稀な訂正時の 1F hitch を許容する要件へ変更するなら、exact full-frame route を hybrid fallback として再検討できるが、それを Slippi 相当の快適な rollback とは呼ばない。
+
 ## 2026-08-01 ROM-side renderless game-loop PoC
 
-### Current judgment
+### Historical judgment (superseded by the 2026-08-02 audit)
 
 The ROM-side loop is semantically more promising than the direct `ProcessList::execute()` experiment, but it is no longer the recommended production path. A diagnostic ROM patch loops through NSMB's own main game path, advances `Math::frameCounter` naturally, and skips the render process list plus `Font::updateFont()` on intermediate catch-up ticks. A guest-owned seven-entry input table drives the loop without an interpreter instruction hook, including under JIT. The tested transactions matched all 172 selected gameplay fields, and the depth-1 endpoint image was exact. Nevertheless, the depth-1 ROM kernel alone takes `12.624-14.470ms`, while the existing full-frame resimulation measured `9.145-12.249ms`; adding the required restore makes the ROM path slower before it gains any multi-frame capability. Depth 2 and above already fail the host-frame budget.
 
 This is not an exact rollback implementation or a playability claim. Per the performance-first gate, production input-table serialization and network-facing activation are deliberately paused. The network-facing rollback runtime and GUI defaults remain unchanged.
 
-**Current blocker:** the existing full-frame path now has a correctness-preserving exact-one-frame probe, and it fails the stable `16.667ms` gate. Twenty corrections under `logs/slippi-exact-one-frame-probe-samples-run2` had total p50/p95/max of `17.732/20.160/21.044ms`; 17 of 20 exceeded budget. Pinning the two peers to separate logical CPUs under `logs/slippi-exact-one-frame-probe-affinity-run1` did not rescue it: p50/p95/max were `17.442/20.626/21.543ms`, with 15 of 20 over budget. The affinity-isolated p95 components were `3.882ms` restore and `16.401ms` `RunFrame()`. Restore variance matters, but even a zero-cost restore would leave almost no p95 margin for the rest of the host frame.
+**Blocker found at this stage:** the existing full-frame path has a correctness-preserving exact-one-frame probe, and even its correction-only timing fails `16.667ms`. Twenty corrections under `logs/slippi-exact-one-frame-probe-samples-run2` had total p50/p95/max of `17.732/20.160/21.044ms`; 17 of 20 exceeded budget. Pinning the two peers to separate logical CPUs under `logs/slippi-exact-one-frame-probe-affinity-run1` did not rescue it: p50/p95/max were `17.442/20.626/21.543ms`, with 15 of 20 over budget. The affinity-isolated p95 components were `3.882ms` restore and `16.401ms` `RunFrame()`. The later audit above found that this timer also excludes the normal current frame and other outer work, so it was not a sufficient stable-60-FPS gate.
 
-**Next action:** keep the ROM loop as research evidence and the existing full-frame rollback as a correctness fallback, not as a stable-60-FPS result. Use the exact-one-frame probe for one bounded test of the retained x64 exact-block-chain/self-loop JIT paths, because `RunFrame()` is now the measured p95 bottleneck. Promotion requires the 1,250-frame semantic gate and p95 below `16.667ms` with real restore included. If that fails, stop micro-optimizing the current paths: a different trace/superblock JIT backend is the remaining technical route, while a practical product must prevent most corrections through input delay/pacing and accept a hitch or fallback for the rest. Do not serialize the guest history table into production.
+**Disposition after the 2026-08-02 audit:** the planned exact-block-chain/self-loop micro-benchmark is cancelled as a production gate. Even a correction-only result below `16.667ms` would leave the following normal frame outside the measurement. Keep the ROM loop as research evidence and the existing full-frame route only as a possible hitch-tolerant fallback. Do not serialize the guest history table into production.
 
 ### Performance and corrected-presentation gate
 
@@ -203,7 +276,7 @@ This failed variant is important evidence: suppressing scheduler delivery withou
 - Measured runs are retained under `logs/slippi-game-tick-poc-*`; the decisive negative run is `logs/slippi-game-tick-poc-frozen-scheduler-restored`.
 - Gate result: control-flow feasibility **PASS**; one-tick exact equivalence **FAIL**; multi-tick, side-effect, performance, and WAN gates **NOT RUN** because promotion stops at the first correctness failure.
 
-## 2026-08-01 Slippi architecture review and current recommendation
+## 2026-08-01 Slippi architecture review and historical recommendation
 
 ### Historical judgment at the start of the review (superseded)
 
@@ -211,7 +284,7 @@ The user's assessment that the existing rollback path is not yet fully comfortab
 
 At this point in the review, the recommended research target was a **Slippi-style game-loop rollback kernel**, not another full-emulator savestate variant and not a return to Plan-D semantic state repair. The transferable idea was to restore broad game RAM and re-enter only the title's gameplay update loop inside the current display frame while suppressing render, audio, input sampling, VBlank, network, and other one-shot side effects. The ROM-loop experiments above completed that bounded test and rejected it for production: depth 1 is slower than a normal replay `RunFrame()`, depth 2 misses budget, and depth 4 also fails the image gate.
 
-The review led to the direct-call and ROM-side experiments documented above. The GUI default remains rollback disabled with `delay4/lead4`. This section records the reasoning that motivated those experiments; the current recommendation and next action are maintained at the top of this document.
+The review led to the direct-call and ROM-side experiments documented above. The GUI default remains rollback disabled with `delay4/lead4`. This section records the reasoning that motivated those experiments; the authoritative current decision is maintained at the top of this document.
 
 ### What Slippi actually does
 
