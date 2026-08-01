@@ -80,11 +80,57 @@ ARM_Dispatch:
 #ifdef __APPLE__
 .global _ARM_Ret
 _ARM_Ret:
+#define ARM_JIT_CHAIN_ENABLED _ARM_JitExactBlockChainEnabled
 #else
 .global ARM_Ret
 ARM_Ret:
+#define ARM_JIT_CHAIN_ENABLED ARM_JitExactBlockChainEnabled
 #endif
     mov [RCPU + ARM_CPSR_offset], RCPSR
+
+    cmp byte ptr [rip + ARM_JIT_CHAIN_ENABLED], 0
+    je .Larm_ret_unwind
+
+    cmp dword ptr [RCPU + ARM_Num_offset], 0
+    jne .Larm_ret_unwind
+
+    cmp dword ptr [RCPU + ARM_StopExecution_offset], 0
+    jne .Larm_ret_unwind
+
+    movsxd rax, dword ptr [RCPU + ARM_Cycles_offset]
+    mov dword ptr [RCPU + ARM_Cycles_offset], 0
+    mov rdx, [RCPU + ARM_NDS_offset]
+    add qword ptr [rdx + NDS_ARM9Timestamp_offset], rax
+    mov rax, [rdx + NDS_ARM9Timestamp_offset]
+    cmp rax, [rdx + NDS_ARM9Target_offset]
+    jae .Larm_ret_unwind
+
+    mov r8d, [RCPU + ARM_R15_offset]
+    test RCPSR, 0x20
+    jz .Larm_ret_arm
+    sub r8d, 2
+    jmp .Larm_ret_have_pc
+.Larm_ret_arm:
+    sub r8d, 4
+.Larm_ret_have_pc:
+    mov ecx, r8d
+    sub ecx, [RCPU + ARM_FastBlockLookupStart_offset]
+    cmp ecx, [RCPU + ARM_FastBlockLookupSize_offset]
+    jae .Larm_ret_unwind
+
+    mov rdx, [RCPU + ARM_FastBlockLookup_offset]
+    mov rdx, [rdx + rcx * 4]
+    mov r9, rdx
+    shr r9, 32
+    cmp r9d, r8d
+    jne .Larm_ret_unwind
+
+    mov edx, edx
+    mov rax, [RCPU + ARM_JitCodeBase_offset]
+    add rax, rdx
+    jmp rax
+
+.Larm_ret_unwind:
 
 #ifdef _WIN64
     add rsp, 0x28

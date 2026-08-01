@@ -37,6 +37,9 @@
 #include "Platform.h"
 #include "GPU.h"
 #include "ARMJIT_Memory.h"
+#if defined(JIT_ENABLED) && defined(__x86_64__)
+#include "ARMJIT_x64/ARMJIT_Offsets.h"
+#endif
 
 namespace melonDS
 {
@@ -3165,6 +3168,7 @@ void ARM::Reset()
     FastBlockLookup = NULL;
     FastBlockLookupStart = 0;
     FastBlockLookupSize = 0;
+    JitCodeBase = reinterpret_cast<u8*>(NDS.JIT.JITCompiler.AddEntryOffset(0));
 #endif
 
 #ifdef GDBSTUB_ENABLED
@@ -3731,6 +3735,27 @@ void ARM::CheckGdbIncoming()
 {
     GdbCheckA();
 }
+
+#ifdef JIT_ENABLED
+extern "C" const u8 ARM_JitExactBlockChainEnabled = [] {
+    const bool allowRomProbe = NSMLEnvFlag("MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE")
+        && NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY");
+    return NSMLEnvFlag("MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN")
+        && (!NSMLRuntimeHooksMaybeEnabled() || allowRomProbe) ? u8{1} : u8{0};
+}();
+
+#if defined(__x86_64__)
+static_assert(offsetof(ARM, Num) == ARM_Num_offset);
+static_assert(offsetof(ARM, R[15]) == ARM_R15_offset);
+static_assert(offsetof(ARM, FastBlockLookupStart) == ARM_FastBlockLookupStart_offset);
+static_assert(offsetof(ARM, FastBlockLookupSize) == ARM_FastBlockLookupSize_offset);
+static_assert(offsetof(ARM, FastBlockLookup) == ARM_FastBlockLookup_offset);
+static_assert(offsetof(ARM, JitCodeBase) == ARM_JitCodeBase_offset);
+static_assert(offsetof(ARM, NDS) == ARM_NDS_offset);
+static_assert(offsetof(NDS, ARM9Timestamp) == NDS_ARM9Timestamp_offset);
+static_assert(offsetof(NDS, ARM9Target) == NDS_ARM9Target_offset);
+#endif
+#endif
 
 template <CPUExecuteMode mode>
 void ARMv5::Execute()

@@ -188,6 +188,7 @@ public:
 #ifdef JIT_ENABLED
     u32 FastBlockLookupStart, FastBlockLookupSize;
     u64* FastBlockLookup;
+    u8* JitCodeBase;
 #endif
 
     static const u32 ConditionTable[16];

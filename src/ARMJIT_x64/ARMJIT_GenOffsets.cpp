@@ -17,6 +17,7 @@
 */
 
 #include "../ARM.h"
+#include "../NDS.h"
 using namespace melonDS;
 int main(int argc, char* argv[])
 {
@@ -25,8 +26,17 @@ int main(int argc, char* argv[])
         fprintf(f, "#define ARM_" #field "_offset 0x%x\n", offsetof(ARM, field))
 
     writeOffset(CPSR);
+    writeOffset(Num);
     writeOffset(Cycles);
     writeOffset(StopExecution);
+    fprintf(f, "#define ARM_R15_offset 0x%x\n", offsetof(ARM, R[15]));
+    writeOffset(FastBlockLookupStart);
+    writeOffset(FastBlockLookupSize);
+    writeOffset(FastBlockLookup);
+    writeOffset(JitCodeBase);
+    writeOffset(NDS);
+    fprintf(f, "#define NDS_ARM9Timestamp_offset 0x%x\n", offsetof(NDS, ARM9Timestamp));
+    fprintf(f, "#define NDS_ARM9Target_offset 0x%x\n", offsetof(NDS, ARM9Target));
 
     fclose(f);
     return 0;
