@@ -1494,9 +1494,12 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
     {
         bool Checked = false;
         bool Enabled = false;
+        bool StageEnabled = false;
+        bool JitProfileEnabled = false;
         std::string Role = "local";
         std::string OutputDir;
         FILE* LogFile = nullptr;
+        FILE* JitProfileFile = nullptr;
     };
     struct State
     {
@@ -1508,12 +1511,14 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
     static State state;
     if (!cfg.Checked)
     {
-        cfg.Enabled = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE") != nullptr;
+        cfg.StageEnabled = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE") != nullptr;
+        cfg.JitProfileEnabled = getenv("MELONDS_NSML_JIT_EXECUTION_PROFILE") != nullptr;
+        cfg.Enabled = cfg.StageEnabled || cfg.JitProfileEnabled;
         if (const char* role = getenv("MELONDS_NSML_ROLE"))
             cfg.Role = role;
         if (const char* outputDir = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_DIR"))
             cfg.OutputDir = outputDir;
-        if (cfg.Enabled && !cfg.OutputDir.empty())
+        if (cfg.StageEnabled && !cfg.OutputDir.empty())
         {
             const std::string logPath = cfg.OutputDir + "/rom-game-tick-stages-" + cfg.Role + ".csv";
             cfg.LogFile = fopen(logPath.c_str(), "w");
@@ -1523,12 +1528,31 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
                     "role,sequence,stage,marker,display_frame,game_frame,history_enabled,history_index,history_count,active,wall_us,sys_timestamp,arm9_timestamp,arm7_timestamp\n");
             }
         }
+        if (cfg.JitProfileEnabled && !cfg.OutputDir.empty())
+        {
+            const std::string profilePath =
+                cfg.OutputDir + "/rom-game-tick-jit-blocks-" + cfg.Role + ".csv";
+            cfg.JitProfileFile = fopen(profilePath.c_str(), "w");
+            if (cfg.JitProfileFile)
+            {
+                fprintf(cfg.JitProfileFile,
+                    "role,cpu,address,mode,first_instruction,block_instructions,count,dynamic_instructions\n");
+            }
+        }
         cfg.Checked = true;
     }
-    if (!cfg.Enabled || !cfg.LogFile || !nds)
+    if (!cfg.Enabled || !nds)
         return;
     const u32 historyEnabled = nds->ARM9Read32(historyEnabledAddr);
     if (!historyEnabled)
+        return;
+    const u32 historyIndex = nds->ARM9Read32(historyIndexAddr);
+    const u32 historyCount = nds->ARM9Read32(historyCountAddr);
+    if (cfg.JitProfileEnabled && marker == 11 && historyIndex == 1)
+        nds->JIT.ResetExecutionProfile();
+    if (cfg.JitProfileEnabled && marker == 12 && historyIndex >= historyCount)
+        nds->JIT.DumpExecutionProfile(cfg.JitProfileFile, cfg.Role.c_str());
+    if (!cfg.StageEnabled || !cfg.LogFile)
         return;
 
     const auto now = std::chrono::steady_clock::now();
@@ -1541,7 +1565,7 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
     fprintf(cfg.LogFile, "%s,%llu,%s,%u,%u,%u,%u,%u,%u,%u,%lld,%llu,%llu,%llu\n",
         cfg.Role.c_str(), static_cast<unsigned long long>(state.Sequence++), stage, marker,
         nds->NumFrames, nds->ARM9Read32(gameFrameAddr), historyEnabled,
-        nds->ARM9Read32(historyIndexAddr), nds->ARM9Read32(historyCountAddr),
+        historyIndex, historyCount,
         nds->ARM9Read32(activeAddr), static_cast<long long>(wallUs.count()),
         static_cast<unsigned long long>(nds->GetSysClockCycles(0)),
         static_cast<unsigned long long>(nds->ARM9Timestamp),

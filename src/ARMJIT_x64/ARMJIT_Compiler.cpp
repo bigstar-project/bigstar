@@ -24,6 +24,7 @@
 #include "../ARMJIT_Global.h"
 
 #include <assert.h>
+#include <cstdlib>
 #include <stdarg.h>
 
 #include "../dolphin/CommonFuncs.h"
@@ -35,6 +36,12 @@ extern "C" void ARM_Ret();
 
 namespace melonDS
 {
+static bool ExecutionProfileEnabled()
+{
+    const char* value = std::getenv("MELONDS_NSML_JIT_EXECUTION_PROFILE");
+    return value && value[0] && value[0] != '0';
+}
+
 template <>
 const X64Reg RegisterCache<Compiler, X64Reg>::NativeRegAllocOrder[] =
 {
@@ -710,6 +717,14 @@ JitBlockEntry Compiler::CompileBlock(ARM* cpu, bool thumb, FetchedInstr instrs[]
     CPSRDirty = false;
 
     JitBlockEntry res = (JitBlockEntry)GetWritableCodePtr();
+
+    if (ExecutionProfileEnabled())
+    {
+        u64* counter = NDS.JIT.GetExecutionProfileCounter(
+            Num, instrs[0].Addr, instrsCount, thumb, instrs[0].Instr);
+        MOV(64, R(RSCRATCH), ImmPtr(counter));
+        ADD(64, MatR(RSCRATCH), Imm8(1));
+    }
 
     RegCache = RegisterCache<Compiler, X64Reg>(this, instrs, instrsCount);
 

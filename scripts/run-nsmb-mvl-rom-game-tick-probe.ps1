@@ -14,6 +14,7 @@ param(
     [switch]$GuestOwnedHistoryAB,
     [switch]$FrameBoundary,
     [switch]$StageTrace,
+    [switch]$JitBlockProfile,
     [ValidateRange(0, 1000)] [double]$MaxTargetHistoryRunMs = 0,
     [ValidateRange(0, 1000)] [double]$MaxTargetHistoryFrameMs = 0,
     [ValidateRange(0, 1000000)] [int]$ScreenshotInterval = 0,
@@ -34,6 +35,9 @@ if ($FrameBoundary -and -not $GuestOwnedHistoryAB) {
 }
 if ($StageTrace -and -not $FrameBoundary) {
     throw "StageTrace requires FrameBoundary"
+}
+if ($JitBlockProfile -and (-not $FrameBoundary -or -not $AllowJit)) {
+    throw "JitBlockProfile requires FrameBoundary and AllowJit"
 }
 
 function Get-StageTimingSummary {
@@ -417,6 +421,7 @@ if (!$AnalyzeExisting) {
     $oldGuestOwnedHistoryAB = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GUEST_HISTORY_AB
     $oldFrameBoundary = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY
     $oldStageTrace = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE
+    $oldJitExecutionProfile = $env:MELONDS_NSML_JIT_EXECUTION_PROFILE
     $oldHistoryBaseTick = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_BASE_TICK
     $oldHistoryStartOffset = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_OFFSET
     try {
@@ -431,6 +436,7 @@ if (!$AnalyzeExisting) {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GUEST_HISTORY_AB = if ($GuestOwnedHistoryAB) { "1" } else { $null }
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY = if ($FrameBoundary) { "1" } else { $null }
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE = if ($StageTrace) { "1" } else { $null }
+        $env:MELONDS_NSML_JIT_EXECUTION_PROFILE = if ($JitBlockProfile) { "1" } else { $null }
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_BASE_TICK = "0x$($HistoryBaseTick.ToString('X4'))"
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_OFFSET = "$HistoryStartOffset"
 
@@ -473,6 +479,7 @@ if (!$AnalyzeExisting) {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GUEST_HISTORY_AB = $oldGuestOwnedHistoryAB
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY = $oldFrameBoundary
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE = $oldStageTrace
+        $env:MELONDS_NSML_JIT_EXECUTION_PROFILE = $oldJitExecutionProfile
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_BASE_TICK = $oldHistoryBaseTick
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_OFFSET = $oldHistoryStartOffset
     }

@@ -20,7 +20,9 @@
 #include "ARMJIT_Memory.h"
 #include <string.h>
 #include <assert.h>
+#include <algorithm>
 #include <unordered_map>
+#include <vector>
 
 #define XXH_STATIC_LINKING_ONLY
 #include "xxhash/xxhash.h"
@@ -229,6 +231,49 @@ void SlowBlockTransfer7(u32 addr, u64* data, u32 num)
 
 INSTANTIATE_SLOWMEM(0)
 INSTANTIATE_SLOWMEM(1)
+
+u64* ARMJIT::GetExecutionProfileCounter(
+    u32 num, u32 addr, u32 instructions, bool thumb, u32 firstInstruction) noexcept
+{
+    ExecutionProfileEntry& entry = ExecutionProfile[(static_cast<u64>(num) << 32) | addr];
+    entry.Instructions = instructions;
+    entry.Thumb = thumb;
+    entry.FirstInstruction = firstInstruction;
+    return &entry.Count;
+}
+
+void ARMJIT::ResetExecutionProfile() noexcept
+{
+    for (auto& [key, entry] : ExecutionProfile)
+        entry.Count = 0;
+}
+
+void ARMJIT::DumpExecutionProfile(FILE* file, const char* role) noexcept
+{
+    if (!file)
+        return;
+    std::vector<std::pair<u64, u64>> counts;
+    counts.reserve(ExecutionProfile.size());
+    for (const auto& [key, entry] : ExecutionProfile)
+    {
+        if (entry.Count != 0)
+            counts.emplace_back(entry.Count * entry.Instructions, key);
+    }
+    std::sort(counts.begin(), counts.end(), std::greater<>());
+    const size_t limit = std::min<size_t>(counts.size(), 256);
+    for (size_t i = 0; i < limit; i++)
+    {
+        const u64 key = counts[i].second;
+        const ExecutionProfileEntry& entry = ExecutionProfile.find(key)->second;
+        fprintf(file, "%s,%u,%08X,%s,%08X,%u,%llu,%llu\n",
+            role ? role : "local", static_cast<u32>(key >> 32) ? 7 : 9,
+            static_cast<u32>(key), entry.Thumb ? "thumb" : "arm",
+            entry.FirstInstruction, entry.Instructions,
+            static_cast<unsigned long long>(entry.Count),
+            static_cast<unsigned long long>(counts[i].first));
+    }
+    fflush(file);
+}
 
 ARMJIT::~ARMJIT() noexcept
 {

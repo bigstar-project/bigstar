@@ -20,6 +20,7 @@
 #define ARMJIT_H
 
 #include <algorithm>
+#include <cstdio>
 #include <optional>
 #include <memory>
 #include "types.h"
@@ -54,6 +55,10 @@ public:
     void JitEnableExecute() noexcept;
     void CompileBlock(ARM* cpu) noexcept;
     void ResetBlockCache() noexcept;
+    u64* GetExecutionProfileCounter(
+        u32 num, u32 addr, u32 instructions, bool thumb, u32 firstInstruction) noexcept;
+    void ResetExecutionProfile() noexcept;
+    void DumpExecutionProfile(FILE* file, const char* role) noexcept;
 
     template <u32 num, int region>
     void CheckAndInvalidate(u32 addr) noexcept
@@ -96,6 +101,15 @@ public:
     std::unordered_map<u32, JitBlock*> JitBlocks7 {};
 
     std::unordered_map<u32, JitBlock*> RestoreCandidates {};
+
+    struct ExecutionProfileEntry
+    {
+        u64 Count = 0;
+        u32 Instructions = 0;
+        bool Thumb = false;
+        u32 FirstInstruction = 0;
+    };
+    std::unordered_map<u64, ExecutionProfileEntry> ExecutionProfile {};
 
 
     AddressRange CodeIndexITCM[ITCMPhysicalSize / 512] {};
@@ -194,6 +208,8 @@ public:
     void JitEnableExecute() noexcept {}
     void CompileBlock(ARM*) noexcept {}
     void ResetBlockCache() noexcept {}
+    void ResetExecutionProfile() noexcept {}
+    void DumpExecutionProfile(FILE*, const char*) noexcept {}
     template <u32, int>
     void CheckAndInvalidate(u32 addr) noexcept {}
 
