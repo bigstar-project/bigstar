@@ -113,8 +113,12 @@ bool TraceNSMLWatchWrite(NDS* nds, const char* cpu, u32 pc, u32 addr, u32 width,
 
 static bool NSMLWatchWriteMaybeEnabled()
 {
+#ifdef NSML_CORE_RUNTIME_HOOKS_DISABLED
+    return false;
+#else
     static const bool enabled = getenv("MELONDS_NSML_WATCH_ADDR") != nullptr;
     return enabled;
+#endif
 }
 
 static bool NSMLRollbackSkipJITReset()

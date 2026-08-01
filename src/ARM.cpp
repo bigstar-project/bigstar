@@ -90,6 +90,9 @@ static u32 NSMLMvlStage()
 
 static bool NSMLRuntimeHooksMaybeEnabled()
 {
+#ifdef NSML_CORE_RUNTIME_HOOKS_DISABLED
+    return false;
+#else
     static const bool enabled =
         NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE") ||
         NSMLEnvFlag("MELONDS_NSML_PACKET_CAPTURE_LOG") ||
@@ -109,6 +112,7 @@ static bool NSMLRuntimeHooksMaybeEnabled()
         NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_BYPASS_NET_DISCONNECT") ||
         NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_TRANSFER_RESULT");
     return enabled;
+#endif
 }
 
 static u32 NSMLPacketBridgeEnvFrame(const char* name, u32 fallback);
@@ -2109,8 +2113,12 @@ static void TraceNSMLWrite(ARM* cpu, u32 addr, u32 value, u32 size)
 
 static bool NSMLWriteTraceMaybeEnabled()
 {
+#ifdef NSML_CORE_RUNTIME_HOOKS_DISABLED
+    return false;
+#else
     static const bool enabled = getenv("MELONDS_NSML_WRITE_TRACE") != nullptr;
     return enabled;
+#endif
 }
 
 static bool TraceNSMLCallImpl(ARM* cpu, u32 instrAddr)

@@ -111,6 +111,8 @@ if (ENABLE_GDBSTUB)
     add_definitions(-DGDBSTUB_ENABLED)
 endif()
 
+option(NSML_ENABLE_CORE_RUNTIME_HOOKS "Compile NSML diagnostics into core execution and memory hot paths" ON)
+
 option(BUILD_QT_SDL "Build Qt/SDL frontend" ON)
 
 add_subdirectory(src)

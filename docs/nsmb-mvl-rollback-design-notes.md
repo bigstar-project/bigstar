@@ -17,6 +17,7 @@ Tango/Slippi 以外の実装、過去の rollback / offline replay / software re
 | 現行 melonDS の full-frame exact rollback を訂正時も hitch なしで 60 fps | **低い** | 1F 訂正処理だけで p95 `20.626ms`。その外側に通常フレーム、checkpoint、未計測のコピーが残る |
 | Slippi 相当の 2F 以上の快適な rollback window | **非常に低い** | ROM loop depth 2 は `16.720-28.513ms`、full-frame はさらに通常フレームが必要。depth 4 は描画位相も不一致 |
 | input delay/pacing で訂正をほぼ防ぎ、稀な 1F 訂正時だけ短い hitch を許す hybrid | **技術的には可能性あり** | exact 1F の選択入力と 1,250F semantic gate は通る。ただし「常時快適な rollback」ではない |
+| official 1.1 相当の軽い core へ現機能を移して再評価 | **不明だが優先調査価値あり** | official 1.1 の実 single-player は no-JIT 中央値 `143fps`、JIT 中央値 `297fps`。ただし patched MvL と rollback restore は未測定 |
 | 別の DS core または trace/superblock 級 JIT 刷新後の再評価 | **不明** | ARM9 支配は確認済み。DeSmuME だけは別 JIT の実測価値があるが、現時点で同一条件の性能・決定性データはない |
 
 ### ROM patch と emulator fork の性能分離
@@ -25,9 +26,13 @@ Tango/Slippi 以外の実装、過去の rollback / offline replay / software re
 
 一方、patched ROMで実際のMvL gameplayへ入ったframes 900-1499はJIT off `22.57fps`、JIT on `92.89fps`だった。state traceでscene `0x3`と両player actorを確認済みである。これはgameplay routeがcommon bootより重い証拠だが、unmodified ROMには同じ二人対戦sceneへのcontrol routeがないため、「native MvL scene」と「追加patch code」の内訳は未確定である。
 
-official melonDS 1.1のunmodified ROMは、JIT off・frame limiter offのGUI title sampleで概ね`108-126fps`へ達した。したがって、過去の「通常ROMはJITなしでも60fpsだった」という記憶は今回のPC上でも支持される。current `src/ARM.cpp`はtag `1.1`比で`+3293/-9`行で、interpreter loop内のper-instruction runtime-hook branch／instruction address処理と`BusWrite8/16/32`のtrace-enable checkを持つ。このsource差とcurrent-forkのunmodified ROM低速化は、fork固有のinterpreter hot-path汚染を強く示す。ただしcompile-time hook除外buildはisolated worktreeのvcpkg再構築が時間内に終わらず、直接A/Bは未完了である。
+official melonDS 1.1のunmodified ROMを通常GUIから実single-player gameplayまで自動遷移させると、software renderer／frame limiter offでJIT offは最後の9 sampleが`134-152fps`、中央値`143fps`、JIT onは`273-308fps`、中央値`297fps`だった。画面captureでも実gameplayを確認した。一方、current forkを同じGUI入力・software renderer・JIT offで走らせると、同じ実gameplay画面が`19fps`だった。
 
-この証拠により、「DS emulation自体が常にぎりぎり」という表現は撤回する。ただしrollback判断はまだ覆らない。現行rollbackはJITを使い、common pathでのROM差は約`1%`、actual MvL gameplayのforward-only値は`92.89fps`である。no-JIT interpreterをcleanに戻すだけではJIT rollbackの余裕は増えない。次の性能作業は、まずNSML hookをcompile-timeに除外できるbuild境界を作ってstandalone regressionを確定し、並行ではなくその後にJIT-enabled MvL gameplayのsample profilerでshared hook、memory helper、scheduler、ARM9 compiled codeの内訳を測る。JIT経路が最低`120fps`へ届く具体的候補がなければ、現行coreのrollback最適化は再開しない。
+前段階では、current `src/ARM.cpp`のtag `1.1`比`+3293/-9`行とper-instruction runtime hookから、fork固有のdiagnostic branchを主因と推定した。しかし新しいcompile-time A/Bがこの判断を覆した。ARM runtime/trace gateとNDS watch-write gateを定数falseへ構造的に落としても、actual MvLはcompute rendererでJIT off `21.68fps` / JIT on `91.90fps`、software rendererで`21.03fps` / `87.22fps`だった。phase breakdownはno-JITの`NDS::RunFrame()`が`44.632ms`、before/after hook合計が約`0.010ms`である。rendererを揃えたunmodified scene `0x4`も`15.35fps`のままであり、診断branch、frontend hook、renderer、改造ROMだけでは公式版との大差を説明できない。
+
+この証拠により、「DS emulation自体が常にぎりぎり」という表現は撤回する。ただしno-JIT rollbackを速度解として採用する結論は導けない。公式版でもJITはinterpreterの約2.1倍速い。no-JIT中央値`143fps`から単純換算した通常1F+訂正1Fは約`14.0ms`で、現restore p95 `3.882ms`を足すだけで約`17.9ms`となり、checkpoint/presentation前に60fps予算を超える。しかもこれは軽いsingle-playerで、actual MvLのclean-core値ではない。no-JITの利点はJIT cache復元を避けられる正しさ・実装単純性であり、forward/replay性能ではない。
+
+現時点の優先調査は、tag `1.1`相当coreとcurrent branchの間をvisible single-player no-JIT gateでbisectまたはcomponent transplantし、`NDS::RunFrame()`内の性能退行を特定することに変える。回復候補が見つかった場合だけpatched MvLのfixed-frame/state-trace matrixへ上げ、strict forward-onlyで最低`150fps`へ届くかを判定する。届かなければno-JIT exact rollbackは実装しない。JITを含むclean core移植とDeSmuME phase-zero benchmarkは、その結果と移植費用を比較して次順位を決める。
 
 ### 代替 DS emulator core の監査
 
@@ -95,10 +100,11 @@ Git 履歴と 2026-05-25 以降の関連 Codex session 原ログを監査した�
 
 再開するなら、次のいずれかを別規模の研究として明示的に選ぶ。
 
-1. まずcurrent forkでNSML hookをcompile-time除外できるbuild境界を作り、unmodified/patched × JIT off/on matrixでfork固有regressionを確定する。続いてJIT-enabled MvL gameplayをsample profileし、shared hot-path除去だけでstrict forward-only `120fps`へ届く具体的候補があるか判定する。
-2. 1で届かなければDeSmuME JITのphase-zero forward-only benchmarkだけを行い、上記`120fps` / p95 / hash gateで即時判定する。通った場合だけrollback stateとmelonDS固有機能の移植可能性を調べる。
-3. trace/superblockなどmelonDSのARM9 JIT backendを刷新し、まずrollback無しのstrict offline gameplayで最低`120fps`、実用上はrestore/host余裕を含めてそれ以上を安定達成する。その時点でfull-frame exact rollbackを再評価する。
-4. Slippiに近い、DS hardware timelineから独立したさらに小さいNSMB game-state update boundaryを新たに特定する。最初のmilestoneは1 tickを通常frameの空き時間へ収めることと、死亡・復帰・土管・hazard・item・audioを含むsemantic/visual recovery gateであり、現ROM loopの延長をproduction化することではない。
+1. tag `1.1`相当coreとcurrent branchの性能差を、visible single-player no-JIT gateでbisectまたはcomponent transplantする。回復した最小候補だけをpatched MvL fixed-frame gateへ上げ、JIT off/onの双方を測る。
+2. clean-core patched MvLがstrict forward-only `150fps`へ届いた場合だけ、no-JITのcomplete in-memory restoreとpresent-to-present exact-1F訂正を試す。届かなければno-JIT案はそこで停止する。
+3. melonDS内で届かなければDeSmuME JITのphase-zero forward-only benchmarkだけを行い、上記`120fps` / p95 / hash gateで即時判定する。通った場合だけrollback stateとmelonDS固有機能の移植可能性を調べる。
+4. trace/superblockなどmelonDSのARM9 JIT backendを刷新し、まずrollback無しのstrict offline gameplayで最低`120fps`、実用上はrestore/host余裕を含めてそれ以上を安定達成する。その時点でfull-frame exact rollbackを再評価する。
+5. Slippiに近い、DS hardware timelineから独立したさらに小さいNSMB game-state update boundaryを新たに特定する。最初のmilestoneは1 tickを通常frameの空き時間へ収めることと、死亡・復帰・土管・hazard・item・audioを含むsemantic/visual recovery gateであり、現ROM loopの延長をproduction化することではない。
 
 いずれも成功保証はなく、現時点では推奨する短期ロードマップではない。短期の製品方針は input delay/pacing を主とする。稀な訂正時の 1F hitch を許容する要件へ変更するなら、exact full-frame route を hybrid fallback として再検討できるが、それを Slippi 相当の快適な rollback とは呼ばない。
 
