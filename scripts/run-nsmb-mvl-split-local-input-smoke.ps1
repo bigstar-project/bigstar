@@ -47,6 +47,7 @@ param(
     [int]$RollbackPredictionProbeStartFrame = 0,
     [int]$RollbackPredictionProbeEndFrame = 0,
     [string]$RollbackPredictionProbeKeyMask = "",
+    [switch]$RollbackPredictionProbeConfirmAfterOneFrame,
     [int]$RollbackInputWaitUs = 0,
     [int]$RollbackSettleFrames = 0,
     [switch]$IgnoreSpeculativeInputFields,
@@ -219,6 +220,11 @@ if ($RollbackPredictionProbeModulo -gt 0) {
     if ($RollbackPredictionProbeKeyMask -ne "") {
         $env:MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK = "$RollbackPredictionProbeKeyMask"
     }
+    if ($RollbackPredictionProbeConfirmAfterOneFrame) {
+        $env:MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_AFTER_ONE_FRAME = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_AFTER_ONE_FRAME -ErrorAction SilentlyContinue
+    }
 } else {
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_MODULO -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_OFFSET -ErrorAction SilentlyContinue
@@ -226,6 +232,7 @@ if ($RollbackPredictionProbeModulo -gt 0) {
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_START_FRAME -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_END_FRAME -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_AFTER_ONE_FRAME -ErrorAction SilentlyContinue
 }
 
 if ($RollbackInputWaitUs -gt 0) {

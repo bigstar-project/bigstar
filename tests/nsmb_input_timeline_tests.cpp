@@ -127,6 +127,7 @@ void TestPredictionProbeAndPrune()
     probe.StartFrame = 5;
     probe.EndFrame = 9;
     probe.KeyMask = 0x1001;
+    probe.ConfirmAfterOneFrame = true;
 
     CHECK(SameInput(timeline.Resolve(4, confirmed, neutral, probe).Input, neutral));
     CHECK(timeline.Resolve(5, confirmed, neutral, probe).Input.KeyMask == 0xFFE);
@@ -135,6 +136,14 @@ void TestPredictionProbeAndPrune()
     timeline.Resolve(8, confirmed, neutral, probe);
     CHECK(SameInput(timeline.Resolve(9, confirmed, neutral, probe).Input, neutral));
     CHECK(timeline.PredictionProbeCount() == 2);
+    const auto firstConfirmation = timeline.TakePredictionProbeConfirmation(5);
+    CHECK(firstConfirmation.has_value());
+    CHECK(SameInput(*firstConfirmation, neutral));
+    CHECK(!timeline.TakePredictionProbeConfirmation(5));
+
+    const auto secondConfirmation = timeline.Confirm(7, neutral, 8);
+    CHECK(!secondConfirmation.Mismatch);
+    CHECK(!timeline.TakePredictionProbeConfirmation(7));
 
     confirmed.emplace(4, neutral);
     confirmed.emplace(5, neutral);
@@ -142,6 +151,34 @@ void TestPredictionProbeAndPrune()
     CHECK(timeline.Predictions().count(4) == 0);
     CHECK(timeline.Predictions().count(5) == 0);
     CHECK(timeline.Predictions().count(7) == 1);
+
+    PredictionRuntime forcedTimeline;
+    PredictionRuntime::InputMap forcedConfirmed;
+    forcedConfirmed.emplace(12, Input(0xFFB));
+    PredictionProbe forcedProbe;
+    forcedProbe.Modulo = 1;
+    forcedProbe.Limit = 1;
+    forcedProbe.StartFrame = 12;
+    forcedProbe.EndFrame = 12;
+    forcedProbe.KeyMask = 1;
+    forcedProbe.ConfirmAfterOneFrame = true;
+    const auto forced = forcedTimeline.Resolve(
+        12, forcedConfirmed, neutral, forcedProbe);
+    CHECK(forced.Predicted);
+    CHECK(forced.Input.KeyMask == 0xFFA);
+    const auto forcedConfirmation =
+        forcedTimeline.TakePredictionProbeConfirmation(12);
+    CHECK(forcedConfirmation.has_value());
+    CHECK(forcedConfirmation->KeyMask == 0xFFB);
+    const auto forcedStored = forcedTimeline.Confirm(
+        12, *forcedConfirmation, 13);
+    CHECK(forcedStored.Mismatch);
+    CHECK(forcedStored.FrameAlreadySimulated);
+    forcedProbe.ConfirmAfterOneFrame = false;
+    const auto replayed = forcedTimeline.Resolve(
+        12, forcedConfirmed, neutral, forcedProbe);
+    CHECK(!replayed.Predicted);
+    CHECK(replayed.Input.KeyMask == 0xFFB);
 }
 
 void TestRuntimeRemoteStorePrimeAndPrune()

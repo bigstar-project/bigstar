@@ -32,6 +32,7 @@ struct PredictionProbe
     melonDS::u32 StartFrame = 0;
     std::optional<melonDS::u32> EndFrame;
     melonDS::u32 KeyMask = 1;
+    bool ConfirmAfterOneFrame = false;
 };
 
 struct PredictedInput
@@ -66,6 +67,8 @@ public:
         melonDS::u32 window,
         const InputMap& confirmedInputs);
     void ClearPredictions();
+    std::optional<InputState> TakePredictionProbeConfirmation(
+        melonDS::u32 frame);
 
     const InputMap& Predictions() const;
     std::optional<melonDS::u32> PendingRollbackFrame() const;
@@ -79,6 +82,7 @@ public:
 
 private:
     InputMap Predictions_;
+    InputMap PredictionProbeConfirmations_;
     std::optional<InputState> LastConfirmedInput_;
     std::optional<melonDS::u32> PendingRollbackFrame_;
     std::optional<melonDS::u32> PendingRollbackObservedFrame_;

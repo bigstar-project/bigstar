@@ -239,7 +239,12 @@ ConfirmedInputResult PredictionRuntime::Confirm(
             }
         }
         Predictions_.erase(Predictions_.lower_bound(frame), Predictions_.end());
+        PredictionProbeConfirmations_.erase(
+            PredictionProbeConfirmations_.lower_bound(frame),
+            PredictionProbeConfirmations_.end());
     }
+
+    PredictionProbeConfirmations_.erase(frame);
 
     LastConfirmedInput_ = input;
     return result;
@@ -251,9 +256,31 @@ PredictedInput PredictionRuntime::Resolve(
     const InputState& neutralInput,
     const PredictionProbe& probe)
 {
+    const bool belowProbeLimit = probe.Limit < 0
+        || PredictionProbeCount_ < static_cast<melonDS::u32>(probe.Limit);
+    const bool insideProbeRange = frame >= probe.StartFrame
+        && (!probe.EndFrame || frame <= *probe.EndFrame);
+    const bool applyProbe = probe.Modulo > 0
+        && belowProbeLimit
+        && insideProbeRange
+        && (frame % static_cast<melonDS::u32>(probe.Modulo))
+            == static_cast<melonDS::u32>(probe.Offset);
+
     const auto confirmed = confirmedInputs.find(frame);
     if (confirmed != confirmedInputs.end())
+    {
+        if (applyProbe && probe.ConfirmAfterOneFrame)
+        {
+            InputState input = confirmed->second;
+            PredictionProbeConfirmations_[frame] = input;
+            input.KeyMask ^= probe.KeyMask & 0xFFFu;
+            Predictions_[frame] = input;
+            PredictionProbeCount_++;
+            PredictionCount_++;
+            return { input, true };
+        }
         return { confirmed->second, false };
+    }
 
     const auto existing = Predictions_.find(frame);
     if (existing != Predictions_.end())
@@ -268,16 +295,10 @@ PredictedInput PredictionRuntime::Resolve(
     else if (LastConfirmedInput_)
         input = *LastConfirmedInput_;
 
-    const bool belowProbeLimit = probe.Limit < 0
-        || PredictionProbeCount_ < static_cast<melonDS::u32>(probe.Limit);
-    const bool insideProbeRange = frame >= probe.StartFrame
-        && (!probe.EndFrame || frame <= *probe.EndFrame);
-    if (probe.Modulo > 0
-        && belowProbeLimit
-        && insideProbeRange
-        && (frame % static_cast<melonDS::u32>(probe.Modulo))
-            == static_cast<melonDS::u32>(probe.Offset))
+    if (applyProbe)
     {
+        if (probe.ConfirmAfterOneFrame)
+            PredictionProbeConfirmations_.emplace(frame, input);
         input.KeyMask ^= probe.KeyMask & 0xFFFu;
         PredictionProbeCount_++;
     }
@@ -310,6 +331,19 @@ void PredictionRuntime::Prune(
 void PredictionRuntime::ClearPredictions()
 {
     Predictions_.clear();
+    PredictionProbeConfirmations_.clear();
+}
+
+std::optional<InputState> PredictionRuntime::TakePredictionProbeConfirmation(
+    melonDS::u32 frame)
+{
+    const auto confirmation = PredictionProbeConfirmations_.find(frame);
+    if (confirmation == PredictionProbeConfirmations_.end())
+        return std::nullopt;
+
+    const InputState input = confirmation->second;
+    PredictionProbeConfirmations_.erase(confirmation);
+    return input;
 }
 
 const PredictionRuntime::InputMap& PredictionRuntime::Predictions() const

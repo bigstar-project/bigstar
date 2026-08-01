@@ -33,6 +33,7 @@ InputTimeline::PredictionProbe PredictionProbe(
   if (config.PredictionProbeEndFrame != kNoFrame)
     probe.EndFrame = config.PredictionProbeEndFrame;
   probe.KeyMask = config.PredictionProbeKeyMask;
+  probe.ConfirmAfterOneFrame = config.PredictionProbeConfirmAfterOneFrame;
   return probe;
 }
 
@@ -469,6 +470,23 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
   std::vector<melonDS::u8> latestMainRAM;
   {
     std::lock_guard<std::mutex> lock(context.Mutex);
+    if (context.Config.PredictionProbeConfirmAfterOneFrame && frame > 0) {
+      const melonDS::u32 confirmationFrame = frame - 1;
+      const auto confirmation = context.Inputs.RollbackInputs
+                                    .TakePredictionProbeConfirmation(
+                                        confirmationFrame);
+      if (confirmation) {
+        const auto stored = context.Inputs.StoreRemote(
+            confirmationFrame, *confirmation, frame, true, kNoFrame);
+        if (context.Input.NetplayTrace && stored.Confirmation.Mismatch) {
+          std::printf(
+              "NSMB Rollback: one-frame prediction probe confirmed "
+              "frame=%u current=%u\n",
+              confirmationFrame, frame);
+          std::fflush(stdout);
+        }
+      }
+    }
     const auto pendingFrame =
         context.Inputs.RollbackInputs.PendingRollbackFrame();
     if (!pendingFrame)
@@ -557,8 +575,11 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
     InputTimeline::ReplayFrameInputs replayInputs;
     {
       std::lock_guard<std::mutex> lock(context.Mutex);
-      const InputTimeline::PredictionProbe probe =
-          PredictionProbe(context.Config);
+      InputTimeline::PredictionProbe probe = PredictionProbe(context.Config);
+      // A forced one-frame probe exists only to create the original bad
+      // prediction. Replay must consume the confirmed input that triggered
+      // rollback, not inject the diagnostic error a second time.
+      probe.ConfirmAfterOneFrame = false;
       const auto resolved = InputTimeline::ResolveReplayFrameInputs(
           context.Inputs, resimFrame, localPlayer, NeutralInput(), probe);
       if (!resolved)

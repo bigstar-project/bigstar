@@ -526,6 +526,9 @@ RollbackConfig LoadRollbackConfig(const Environment &environment) {
       ReadInt(environment, "MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK",
               0x1),
       1, 0xFFF));
+  config.PredictionProbeConfirmAfterOneFrame = ReadFlag(
+      environment,
+      "MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_AFTER_ONE_FRAME");
 
   const char *backend =
       ReadCString(environment, "MELONDS_NSML_ROLLBACK_BACKEND", "savestate");
