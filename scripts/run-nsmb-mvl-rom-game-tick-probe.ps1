@@ -1,7 +1,10 @@
 param(
     [int]$Frames = 1080,
     [int]$ProbeStartFrame = 951,
-    [ValidateSet("host", "client")] [string]$TargetRole = "host",
+    [ValidateSet("host", "client", "both")] [string]$TargetRole = "host",
+    [string]$MvlMatchSeed = "0x12345678",
+    [ValidateRange(0, 65535)] [int]$HistoryBaseTick = 0x51,
+    [ValidateRange(1, 4)] [int]$HistoryStartOffset = 2,
     [ValidateRange(1, 7)] [int]$ExtraTicks = 1,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$SourceRom = "roms\nsmb-us.nds",
@@ -10,6 +13,9 @@ param(
     [switch]$HistoricalInputAB,
     [switch]$GuestOwnedHistoryAB,
     [switch]$FrameBoundary,
+    [ValidateRange(0, 1000)] [double]$MaxTargetHistoryRunMs = 0,
+    [ValidateRange(0, 1000)] [double]$MaxTargetHistoryFrameMs = 0,
+    [ValidateRange(0, 1000000)] [int]$ScreenshotInterval = 0,
     [switch]$AnalyzeExisting,
     [string]$LogDir = "logs\nsmb-mvl-rom-game-tick-probe"
 )
@@ -290,6 +296,8 @@ if (!$AnalyzeExisting) {
     $oldHistoricalInputAB = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_HISTORICAL_INPUT_AB
     $oldGuestOwnedHistoryAB = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GUEST_HISTORY_AB
     $oldFrameBoundary = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY
+    $oldHistoryBaseTick = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_BASE_TICK
+    $oldHistoryStartOffset = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_OFFSET
     try {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE = "1"
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_FRAME = "$ProbeStartFrame"
@@ -301,6 +309,8 @@ if (!$AnalyzeExisting) {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_HISTORICAL_INPUT_AB = if ($HistoricalInputAB) { "1" } else { $null }
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GUEST_HISTORY_AB = if ($GuestOwnedHistoryAB) { "1" } else { $null }
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY = if ($FrameBoundary) { "1" } else { $null }
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_BASE_TICK = "0x$($HistoryBaseTick.ToString('X4'))"
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_OFFSET = "$HistoryStartOffset"
 
         $smokeArgs = @{
             Frames = $Frames
@@ -310,14 +320,20 @@ if (!$AnalyzeExisting) {
             SkipRomEnsure = $true
             InputDelayFrames = 4
             InputMaxFrameLead = 2
+            MvlMatchSeed = $MvlMatchSeed
             GameStateTraceInterval = 30
             GameStateTraceStartFrame = 900
             SkipGameStateComparison = $true
             NoFrameLimit = $true
             FixedFrameTime = $true
-            NoDrawScreen = $true
             NoAudioSync = $true
             LogDir = Join-Path $resolvedLogDir "split"
+        }
+        if ($ScreenshotInterval -gt 0) {
+            $smokeArgs.ScreenshotInterval = $ScreenshotInterval
+            $smokeArgs.SoftwareRenderer = $true
+        } else {
+            $smokeArgs.NoDrawScreen = $true
         }
         if ($AllowJit) {
             $smokeArgs.AllowJit = $true
@@ -334,18 +350,68 @@ if (!$AnalyzeExisting) {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_HISTORICAL_INPUT_AB = $oldHistoricalInputAB
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GUEST_HISTORY_AB = $oldGuestOwnedHistoryAB
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY = $oldFrameBoundary
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_BASE_TICK = $oldHistoryBaseTick
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_OFFSET = $oldHistoryStartOffset
     }
 }
 
 $controlRole = if ($TargetRole -eq "host") { "client" } else { "host" }
-$targetRows = Import-Csv -LiteralPath (Join-Path $resolvedLogDir "rom-game-tick-probe-$TargetRole.csv")
-$controlRows = Import-Csv -LiteralPath (Join-Path $resolvedLogDir "rom-game-tick-probe-$controlRole.csv")
+$targetRows = if ($TargetRole -ne "both") {
+    Import-Csv -LiteralPath (Join-Path $resolvedLogDir "rom-game-tick-probe-$TargetRole.csv")
+} else { @() }
+$controlRows = if ($TargetRole -ne "both") {
+    Import-Csv -LiteralPath (Join-Path $resolvedLogDir "rom-game-tick-probe-$controlRole.csv")
+} else { @() }
 $excludedRanges = @(
     [pscustomobject]@{ Start = 0x000019C0; End = 0x00001D00 },
     [pscustomobject]@{ Start = 0x00288000; End = 0x0028A000 }
 )
 
 if ($RenderlessAB) {
+    if ($TargetRole -eq "both") {
+        $roleSummaries = foreach ($role in @("host", "client")) {
+            $rows = Import-Csv -LiteralPath (Join-Path $resolvedLogDir "rom-game-tick-probe-$role.csv")
+            $beforeRows = @($rows | Where-Object { $_.phase -eq "before-renderless-ab-tick" })
+            $afterRows = @($rows | Where-Object { $_.phase -eq "after-renderless-tick" })
+            if ($beforeRows.Count -ne 1 -or $afterRows.Count -ne 1) {
+                throw "$role symmetric phase missing or duplicated: before=$($beforeRows.Count) after=$($afterRows.Count)"
+            }
+            [pscustomobject]@{
+                Role = $role
+                ExtraTicksRequested = $ExtraTicks
+                ExtraTicksSeen = [uint32]$afterRows[0].extra_ticks_seen
+                InputSequenceHash = $afterRows[0].input_sequence_hash
+                HistoryIndex = [uint32]$afterRows[0].history_index
+                HistoryRunWallUs = [uint64]$afterRows[0].history_run_wall_us
+                HistoryRunMaxUs = [uint64]$afterRows[0].history_run_max_us
+                HistoryRunFrames = [uint32]$afterRows[0].history_run_frames
+                HistoryUsPerTick = [math]::Round([uint64]$afterRows[0].history_run_wall_us / $ExtraTicks, 2)
+                BeforeDisplayFrame = [uint32]$beforeRows[0].frame
+                AfterDisplayFrame = [uint32]$afterRows[0].frame
+                BeforeGameFrame = [uint32]$beforeRows[0].game_frame_counter
+                AfterGameFrame = [uint32]$afterRows[0].game_frame_counter
+                GameFrameAdvance = [uint32]$afterRows[0].game_frame_counter - [uint32]$beforeRows[0].game_frame_counter
+            }
+        }
+        $roleSummaries | Export-Csv -LiteralPath (Join-Path $resolvedLogDir "summary.csv") -NoTypeInformation -Encoding UTF8
+        $roleSummaries | Format-Table -AutoSize
+        foreach ($roleSummary in $roleSummaries) {
+            if ($roleSummary.ExtraTicksSeen -ne $ExtraTicks -or $roleSummary.HistoryIndex -ne $ExtraTicks) {
+                throw "$($roleSummary.Role) did not consume the full symmetric history"
+            }
+            if ($MaxTargetHistoryRunMs -gt 0 -and $roleSummary.HistoryRunWallUs -gt $MaxTargetHistoryRunMs * 1000) {
+                throw "$($roleSummary.Role) symmetric history transaction exceeded budget: actualUs=$($roleSummary.HistoryRunWallUs) budgetMs=$MaxTargetHistoryRunMs"
+            }
+            if ($MaxTargetHistoryFrameMs -gt 0 -and $roleSummary.HistoryRunMaxUs -gt $MaxTargetHistoryFrameMs * 1000) {
+                throw "$($roleSummary.Role) symmetric history frame exceeded budget: actualUs=$($roleSummary.HistoryRunMaxUs) budgetMs=$MaxTargetHistoryFrameMs"
+            }
+        }
+        if (($roleSummaries.InputSequenceHash | Select-Object -Unique).Count -ne 1) {
+            throw "symmetric input sequence hashes differ between roles"
+        }
+        Write-Host "NSMB MvL symmetric ROM history performance probe completed: log=$resolvedLogDir"
+        return
+    }
     $targetBeforeRows = @($targetRows | Where-Object { $_.phase -eq "before-renderless-ab-tick" })
     $targetAfterRows = @($targetRows | Where-Object { $_.phase -eq "after-renderless-tick" })
     $targetRecoveryRows = @($targetRows | Where-Object { $_.phase -eq "after-recovery-normal-tick" })
@@ -393,6 +459,16 @@ if ($RenderlessAB) {
         GuestHistoryConsumed = if ($GuestOwnedHistoryAB) {
             [uint32]$targetAfterRows[0].history_index -eq $ExtraTicks -and [uint32]$controlAfterRows[0].history_index -eq $ExtraTicks
         } else { $false }
+        TargetHistoryRunWallUs = [uint64]$targetAfterRows[0].history_run_wall_us
+        ControlHistoryRunWallUs = [uint64]$controlAfterRows[0].history_run_wall_us
+        TargetHistoryRunMaxUs = [uint64]$targetAfterRows[0].history_run_max_us
+        ControlHistoryRunMaxUs = [uint64]$controlAfterRows[0].history_run_max_us
+        TargetHistoryRunFrames = [uint32]$targetAfterRows[0].history_run_frames
+        ControlHistoryRunFrames = [uint32]$controlAfterRows[0].history_run_frames
+        TargetHistoryUsPerTick = [math]::Round([uint64]$targetAfterRows[0].history_run_wall_us / $ExtraTicks, 2)
+        GuestHistoryWallSpeedup = if ([uint64]$targetAfterRows[0].history_run_wall_us -gt 0) {
+            [math]::Round([uint64]$controlAfterRows[0].history_run_wall_us / [uint64]$targetAfterRows[0].history_run_wall_us, 2)
+        } else { 0 }
         TargetRole = $TargetRole
         ControlRole = $controlRole
         TargetBeforeFrame = [int]$targetBeforeRows[0].frame
@@ -435,6 +511,12 @@ if ($RenderlessAB) {
     }
     $summary | Export-Csv -LiteralPath (Join-Path $resolvedLogDir "summary.csv") -NoTypeInformation -Encoding UTF8
     $summary | Format-List
+    if ($MaxTargetHistoryRunMs -gt 0 -and $summary.TargetHistoryRunWallUs -gt $MaxTargetHistoryRunMs * 1000) {
+        throw "target guest-history transaction exceeded budget: actualUs=$($summary.TargetHistoryRunWallUs) budgetMs=$MaxTargetHistoryRunMs"
+    }
+    if ($MaxTargetHistoryFrameMs -gt 0 -and $summary.TargetHistoryRunMaxUs -gt $MaxTargetHistoryFrameMs * 1000) {
+        throw "target guest-history frame exceeded budget: actualUs=$($summary.TargetHistoryRunMaxUs) budgetMs=$MaxTargetHistoryFrameMs"
+    }
     Write-Host "NSMB MvL ROM renderless A/B probe completed: log=$resolvedLogDir"
     return
 }

@@ -11,8 +11,12 @@
 - 完了: tick別入力をguest RAM上の7-entry history/control blockへ移し、ROM input gate自身がpacket tickと両player keysを順にJIT scratchへ適用するようにした。共有game counterで開始し、履歴消費後は解除可能なguest loopへparkするため、instruction hookなしで正確なtransaction終端を観測できる。
 - 検証: JITを有効にした`logs/slippi-rom-loop-poc-jit-guest-recovery-7tick`で、両peerはgame counter `709`から同じ入力列hash `1A24E475`の7 entryを消費し、counter `718`で停止した。renderless targetはdisplay frame `954`、normal controlは`959`で同じ終端へ到達し、172 semantic fieldは差分0だった。さらに同一の確定入力1tickで解除した回復後も差分0。curated RAM差は前`405 bytes / 18 pages`、直後と回復後が`587 / 23`であり、full RAM exact一致はしていない。
 - 完了: productionの1 replay frameについて、local input、confirmed/predicted remote input、prediction flag、local player 0/1に応じた両player順序を一度に解決する`InputTimeline::ResolveReplayFrameInputs()`を追加した。既存full-`RunFrame()` rollbackもこの共通境界を使う。単体testに加え、`logs/slippi-production-input-resolution-rollback`のpacket loss付き1,250-frame rollback checkpoint/golden tierがpassした。
-- 現在のblocker: guest-owned/JIT loop制御とproduction入力選択は個別に通ったが、選択結果をguest history tableへserializeしてcheckpoint restore後に起動する接続は未実装である。item/contact/death/result/restart、duplicate sound/network、IRQ/DMA/timer/IPC/ARM7副作用、実rollback性能も未検証なので、現行rollbackへはまだ接続しない。
-- 次: 共通入力解決結果からguest history tableを組み立て、既知のprediction mismatchでcheckpoint restore→最大7tick catch-upを実行する。その後、event routeごとにsemantic digest、音声／network重複、disposable render rangeを再確認する。
+- 完了: frame-boundary probeへguest history transactionのwall time合計、単一`NDS::RunFrame()`最大値、消費display frame数、任意の性能上限を追加した。両peerを同時にrenderless catch-upさせる`TargetRole=both`も追加し、片側normal-control待ちと本番に近い両側補正を分離できる。cross-run描画比較用にmatch seedとhistory base tickを固定し、スクリーンショット時だけsoftware rendererを使う。
+- 検証: offset 2の両側同時JIT runでは、depth 2=`25.569/19.329ms`、depth 3=`23.292/31.966ms`、depth 4=`23.978/26.262ms`、depth 7=`39.657/34.341ms`で、いずれもtransactionが2 display frameへまたがった。depth 1は4回・両roleの8 sample中1 sampleが16.667msを超え、worstは`18.159ms`だった。最短実行可能なoffset 1でもdepth 1-4は2 display frameとなり、depth 4=`25.981/25.852ms`だった。offset 0は入力gate到達時にcounterを通過して開始不能なのでrunnerでは許可しない。
+- 検証: fixed seed `0x12345678`、fixed base tick `0x0051`、同一入力hash `7C3924A2`でhost target/control画像を比較した。depth 4終端は`281/98,304 pixels`（`0.285848%`）、通常描画1tick後も`292/98,304`（`0.297038%`）が異なる。空画面や背景崩壊はなく主に両player sprite領域の位相差だが、回復後もexact convergenceしないため描画gateはfailとする。
+- 却下: 最終catch-up tickでfont更新を省きprocess-list描画だけ戻す案は172 semantic fieldを維持したが、両側depth 4が`37.273/34.389ms`へ悪化し、UI stale riskも増えるためrevertした。retained variantは最終tickでfontとprocess-listを通常描画する。
+- 現在のblocker: guest-owned/JIT loopの意味状態はtested movement routeで一致する一方、60 FPSの1 presentation intervalとcorrected image convergenceを満たしていない。ユーザー指定どおり、このgate未達のままproduction入力serialize、checkpoint接続、event-route拡張をブラッシュアップしない。
+- 次: catch-upがVBlankをまたぐ位置を計測し、guest update、peer wait、最終font/render、presentationのコストを分離する。1 presentation intervalへrepeatableな余裕を持って収まり、fixed-seed same-role画像が収束する候補だけを残す。その後に限りproduction input table接続へ進む。
 
 ## NsmbMvlNetplayRuntime リファクタ調査 - 2026-07-15
 

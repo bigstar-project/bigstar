@@ -4,13 +4,35 @@
 
 ### Current judgment
 
-The next Slippi-style step is materially more promising than the direct `ProcessList::execute()` experiment. A diagnostic ROM patch now loops through NSMB's own main game path, advances `Math::frameCounter` naturally, and skips only the render process list plus `Font::updateFont()` while the rollback-loop flag is active. A guest-owned seven-entry input table now drives the loop without an interpreter instruction hook, including under JIT. The tested seven-tick transaction and one deterministic recovery tick matched all 172 selected gameplay fields across the two peers.
+The ROM-side loop remains semantically more promising than the direct `ProcessList::execute()` experiment, but it does **not** currently pass the playability gate. A diagnostic ROM patch loops through NSMB's own main game path, advances `Math::frameCounter` naturally, and skips the render process list plus `Font::updateFont()` on intermediate catch-up ticks. A guest-owned seven-entry input table drives the loop without an interpreter instruction hook, including under JIT. The tested transactions still matched all 172 selected gameplay fields across the two peers, but corrected presentation and 60 FPS headroom are not yet adequate.
 
-This is not yet an exact rollback implementation or a playability claim. The result changes the recommendation from “the direct process-list shortcut is insufficient” to “continue with the ROM-side loop, but only behind correctness gates.” The network-facing rollback runtime and GUI defaults remain unchanged.
+This is not an exact rollback implementation or a playability claim. Per the performance-first gate, production input-table serialization and network-facing activation are deliberately paused. The network-facing rollback runtime and GUI defaults remain unchanged.
 
-**Current blocker:** the immediate full-Main-RAM image is intentionally not equal when rendering is omitted, and each extra guest tick still consumes ARM9 cycles while DS timers, events, and ARM7 advance. The guest table currently contains a diagnostic fixed sequence; a production kernel must source it from the real confirmed/predicted history, restore a real mismatch checkpoint, preserve the packet/input ring, and define how IRQ/DMA/timer/IPC/audio work is handled.
+**Current blocker:** the full-render endpoint crosses two emulated display frames for the tested immediate depth `1-4` transactions and for depth `7`. In the offset-2 symmetric runs, depth 4 took `23.978/26.262ms` and depth 7 took `39.657/34.341ms` on the two local peers. Even depth 1 exceeded `16.667ms` in one of eight role samples across four repetitions (`18.159ms` worst). Fixed-seed, fixed-input same-role screenshots also retained character-region differences after the endpoint and after one normal recovery tick. These failures take precedence over production integration.
 
-**Next action:** serialize the new production `InputTimeline::ResolveReplayFrameInputs()` results into the proven guest history/control block, then perform a forced prediction-mismatch restore plus catch-up. Run movement, contact, item, death/respawn, result/restart, and sound-side-effect routes before enabling the path for ordinary matches.
+**Next action:** profile where the catch-up crosses VBlank and separate guest update, peer wait, final render, and presentation costs. A replacement must first keep the corrected endpoint inside one presentation interval with repeatable margin and make the final same-role image converge. Only after those gates pass should `InputTimeline::ResolveReplayFrameInputs()` be serialized into the guest table or a real mismatch restore be connected.
+
+### Performance and corrected-presentation gate
+
+The frame-boundary probe now records total wall time, maximum `NDS::RunFrame()` wall time, and the number of emulated display frames involved in each history transaction. It supports a symmetric mode where both peers run the renderless catch-up, avoiding the artificial case where one corrected peer waits on a normally advancing peer. The input sequence and match seed are fixed for cross-run image checks, and screenshot runs use the software renderer because the headless compute renderer exposes no framebuffer to the test hook.
+
+The offset-2 symmetric JIT measurements were:
+
+| Catch-up depth | Host total | Client total | Display frames | Result |
+| ---: | ---: | ---: | ---: | --- |
+| 1 | `12.452-18.159ms` across four repetitions | `12.118-16.546ms` across four repetitions | 1 | unstable; one role sample exceeded `16.667ms` |
+| 2 | `25.569ms` | `19.329ms` | 2 | fail |
+| 3 | `23.292ms` | `31.966ms` | 2 | fail |
+| 4 | `23.978ms` | `26.262ms` | 2 | fail |
+| 7 | `39.657ms` | `34.341ms` | 2 | fail; each peer also had a single-frame segment above `21ms` |
+
+Offset 1 is the earliest viable guest-history start; offset 0 misses the exact counter gate and never starts. Offset 1 did not fix the gate: depth 1 through 4 all crossed two display frames, and symmetric depth 4 was `25.981/25.852ms`. The earlier offset-2 measurements are therefore not rejected as mere reservation-wait overhead; alignment changes the result, but neither tested viable alignment provides a robust one-frame correction window.
+
+The corrected image gate used identical match seed `0x12345678`, history base tick `0x0051`, and input hash `7C3924A2`. Comparing the host role against a separately run normal-control host found `281/98,304` changed pixels (`0.285848%`, bounding box limited to the two character rows) at the completed depth-4 endpoint. After one normal recovery tick, `292/98,304` pixels (`0.297038%`) still differed and the bounds also reached a small lower-screen region. There is no blank frame or large background corruption, but the player sprite/presentation phase does not exactly converge, so the visual gate is not passed.
+
+An attempted optimization kept `Font::updateFont()` suppressed on the final catch-up tick while restoring only the process-list render. It preserved the 172-field semantic result but worsened the symmetric depth-4 measurement to `37.273/34.389ms` and carried extra stale-UI risk. That variant was rejected and reverted; the retained patch fully renders the final catch-up tick.
+
+The retained performance evidence is under `logs/slippi-perf-symmetric-depth*-run*` and `logs/slippi-perf-immediate-symmetric-depth*`; the fixed-condition image evidence is under `logs/slippi-visual-fixedtick-depth4-host-{target,control}*`.
 
 ### ROM patch boundary
 
@@ -62,13 +84,15 @@ The extra tick advanced ARM9 by about `139k` timestamp units and ARM7 by about `
 
 - Native ROM-loop re-entry: **PASS**.
 - One through seven renderless ticks, natural frame counter, known gameplay semantics: **PASS for the tested movement route**.
-- Render-cache recovery after one normal render: **PASS for the tested route**.
+- Historical RAM render-cache recovery after one normal render: **PASS only for the earlier curated-RAM criterion**; fixed-seed screenshot convergence is **FAIL**.
 - Immediate full-RAM equality: **EXPECTED FAIL** because render/OAM and packet-ring state are not equal.
 - Curated gameplay digest: **INCOMPLETE**; current exclusions are diagnostic, not yet promoted.
 - Per-tick distinct input via guest-owned history table: **PASS for seven ticks on the tested route**.
 - Hook-free guest loop control under JIT: **PASS**; emulator-side diagnostic table population and boundary capture remain.
 - Production replay-input selection boundary: **PASS** in unit tests and the existing full-frame rollback regression.
-- Guest-table serialization from that boundary, checkpoint restore plus guest catch-up, event coverage, duplicate audio/network effects, rollback performance, and WAN: **NOT RUN**.
+- Guest catch-up wall-time/presentation gate: **FAIL** for the current implementation; depth 1 is not repeatably below `16.667ms`, and depths 2-7 cross two display frames in the tested viable alignments.
+- Guest-table serialization from the production boundary and checkpoint restore plus guest catch-up: **DEFERRED BY THE PERFORMANCE/VISUAL GATE**.
+- Event coverage, duplicate audio/network effects, and WAN: **NOT RUN**.
 
 ## 2026-08-01 Slippi-style game-tick equivalence PoC
 

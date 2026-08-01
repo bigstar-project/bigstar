@@ -909,6 +909,21 @@ fn build_game_tick_input_gate(start_addr: u32, input_update_addr: u32) -> Result
     words.push(encode_ldr_imm(0, 0, 0)?);
     words.push(encode_sub_imm(0, 0, 1)?);
     words.push(encode_str_imm(0, 1, 0)?);
+    let final_render_check_index = words.len();
+    emit(&mut words, 0, GAME_TICK_PROBE_HISTORY_TARGET_ADDR);
+    words.push(encode_ldr_imm(0, 0, 0)?);
+    words.push(encode_cmp_imm(0, 0)?);
+    let final_render_non_target_branch = words.len();
+    words.push(0);
+    emit(&mut words, 0, GAME_TICK_PROBE_HISTORY_COUNT_ADDR);
+    words.push(encode_ldr_imm(0, 0, 0)?);
+    words.push(encode_sub_imm(0, 0, 1)?);
+    words.push(encode_cmp_reg(12, 0));
+    let final_render_not_last_branch = words.len();
+    words.push(0);
+    emit(&mut words, 0, GAME_TICK_PROBE_ACTIVE_ADDR);
+    words.push(encode_mov_imm(1, 0)?);
+    words.push(encode_str_imm(1, 0, 0)?);
     let history_load_index = words.len();
     emit(&mut words, 2, GAME_TICK_PROBE_HISTORY_ADDR);
     words.push(encode_add_reg_lsl(2, 2, 12, 3)?);
@@ -968,6 +983,20 @@ fn build_game_tick_input_gate(start_addr: u32, input_update_addr: u32) -> Result
     words[already_started_branch] = with_cond(
         encode_b(
             start_addr + already_started_branch as u32 * 4,
+            start_addr + final_render_check_index as u32 * 4,
+        )?,
+        1,
+    );
+    words[final_render_non_target_branch] = with_cond(
+        encode_b(
+            start_addr + final_render_non_target_branch as u32 * 4,
+            history_load_addr,
+        )?,
+        0,
+    );
+    words[final_render_not_last_branch] = with_cond(
+        encode_b(
+            start_addr + final_render_not_last_branch as u32 * 4,
             history_load_addr,
         )?,
         1,
