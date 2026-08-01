@@ -6,8 +6,9 @@
 - 完了: `scripts/run-nsmb-mvl-rom-game-tick-probe.ps1`へ、診断ROM生成、2-process interpreter走行、全4 MiB Main RAM比較、probe cave／既知packet-input ringを除いたcurated比較、renderless host対normal clientの同一tick A/B、次の通常render後の回復比較を実装した。
 - 検証: `logs/slippi-rom-loop-poc-loop-aligned`では追加tickと通常replayがともにgame counter `729 -> 730`となり、既知gameplay traceはframe 990まで同期した。curatedな即時差は`434 bytes / 12 pages`で、full RAM exact一致ではない。
 - 検証: `logs/slippi-rom-loop-poc-renderless-recovery`ではcross-peer curated差がtick前`445 bytes / 17 pages`、renderless直後`759 / 22`、次の通常render後`404 / 17`となった。増分の中心はOAMとactor render/cache pageで、一回の通常render後にbaseline以下へ戻る。tested movement routeでは永続gameplay divergenceを検出していない。
-- 現在のblocker: packet/input履歴の保持とhistorical input注入、`2-7`連続tick、item/contact/death/result/restart、duplicate sound/network、IRQ/DMA/timer/IPC/ARM7副作用、JITからのrequest制御、実rollback性能は未検証である。ROM-loop方式は継続価値ありだが、現行rollbackへはまだ接続しない。
-- 次: disposable render rangeをevent routeで再確認してcurated gameplay digestを固定し、historical inputを使う`2-7`tick transactionを先に通す。
+- 検証: ROM-loopを`2`および`7`連続tickへ拡張した。`logs/slippi-rom-loop-poc-renderless-ab-2tick`は両peerでgame counter `729 -> 731`、curated差は前`448 / 17`、直後`819 / 23`、通常render後`406 / 20`だった。`logs/slippi-rom-loop-poc-renderless-ab-7tick`は`729 -> 736`、前`445 / 17`、直後`907 / 23`、回復後`411 / 20`だった。対象側はどちらもdisplay frameを1だけ進め、control側はそれぞれ2／7進めたため、`1-7`tickのrenderless loop制御と描画回復はtested movement routeで成立した。
+- 現在のblocker: multi-tickは同じcurrent inputを再利用しており、tick別historical input注入は未実装である。加えてitem/contact/death/result/restart、duplicate sound/network、IRQ/DMA/timer/IPC/ARM7副作用、JITからのrequest制御、実rollback性能は未検証である。ROM-loop方式は継続価値ありだが、現行rollbackへはまだ接続しない。
+- 次: packet/input履歴から各再実行tickの入力を選ぶtransactionを実装し、disposable render rangeをevent routeで再確認してcurated gameplay digestを固定する。
 
 ## NsmbMvlNetplayRuntime リファクタ調査 - 2026-07-15
 

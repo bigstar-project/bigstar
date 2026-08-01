@@ -2,7 +2,7 @@ param(
     [int]$Frames = 1080,
     [int]$ProbeStartFrame = 951,
     [ValidateSet("host", "client")] [string]$TargetRole = "host",
-    [ValidateRange(1, 1)] [int]$ExtraTicks = 1,
+    [ValidateRange(1, 7)] [int]$ExtraTicks = 1,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$SourceRom = "roms\nsmb-us.nds",
     [switch]$AllowJit,
@@ -254,6 +254,9 @@ if ($RenderlessAB) {
     $curatedDelta = Compare-ProbeDeltas -LeftBefore $targetBeforePath -LeftAfter $targetAfterPath -RightBefore $controlBeforePath -RightAfter $controlAfterPath -ExcludedRanges $excludedRanges
     $summary = [pscustomobject]@{
         Mode = "renderless-ab"
+        ExtraTicksRequested = $ExtraTicks
+        TargetExtraTicksSeen = [uint32]$targetAfterRows[0].extra_ticks_seen
+        ControlTicksSeen = [uint32]$controlAfterRows[0].extra_ticks_seen
         TargetRole = $TargetRole
         ControlRole = $controlRole
         TargetBeforeFrame = [int]$targetBeforeRows[0].frame
@@ -264,6 +267,8 @@ if ($RenderlessAB) {
         TargetGameFrameAfter = [uint32]$targetAfterRows[0].game_frame_counter
         ControlGameFrameBefore = [uint32]$controlBeforeRows[0].game_frame_counter
         ControlGameFrameAfter = [uint32]$controlAfterRows[0].game_frame_counter
+        TargetGameFrameAdvance = [uint32]$targetAfterRows[0].game_frame_counter - [uint32]$targetBeforeRows[0].game_frame_counter
+        ControlGameFrameAdvance = [uint32]$controlAfterRows[0].game_frame_counter - [uint32]$controlBeforeRows[0].game_frame_counter
         RawCrossPeerBeforeBytes = $rawBeforeCross.DifferentBytes
         RawCrossPeerAfterBytes = $rawAfterCross.DifferentBytes
         CuratedCrossPeerBeforeBytes = $curatedBeforeCross.DifferentBytes
@@ -280,6 +285,9 @@ if ($RenderlessAB) {
         CuratedChangeMaskMismatchBytes = $curatedDelta.ChangeMaskMismatchBytes
         CuratedXorMismatchBytes = $curatedDelta.XorMismatchBytes
         GameFrameCountersMatch = [uint32]$targetAfterRows[0].game_frame_counter -eq [uint32]$controlAfterRows[0].game_frame_counter
+        RequestedGameFrameAdvanceObserved = `
+            ([uint32]$targetAfterRows[0].game_frame_counter - [uint32]$targetBeforeRows[0].game_frame_counter -eq $ExtraTicks) -and `
+            ([uint32]$controlAfterRows[0].game_frame_counter - [uint32]$controlBeforeRows[0].game_frame_counter -eq $ExtraTicks)
     }
     $summary | Export-Csv -LiteralPath (Join-Path $resolvedLogDir "summary.csv") -NoTypeInformation -Encoding UTF8
     $summary | Format-List

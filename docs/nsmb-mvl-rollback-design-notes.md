@@ -8,9 +8,9 @@ The next Slippi-style step is materially more promising than the direct `Process
 
 This is not yet an exact rollback implementation or a playability claim. The result changes the recommendation from “the direct process-list shortcut is insufficient” to “continue with the ROM-side loop, but only behind correctness gates.” The network-facing rollback runtime and GUI defaults remain unchanged.
 
-**Current blocker:** the immediate full-Main-RAM image is intentionally not equal when rendering is omitted, and the extra guest tick still consumes ARM9 cycles while DS timers, events, and ARM7 advance. A production kernel must distinguish gameplay state from disposable render/OAM state, preserve the packet/input ring, inject historical inputs, and define how IRQ/DMA/timer/IPC/audio work is handled across `2-7` catch-up ticks.
+**Current blocker:** the immediate full-Main-RAM image is intentionally not equal when rendering is omitted, and each extra guest tick still consumes ARM9 cycles while DS timers, events, and ARM7 advance. A production kernel must distinguish gameplay state from disposable render/OAM state, preserve the packet/input ring, inject a different historical input for each repeated tick, and define how IRQ/DMA/timer/IPC/audio work is handled.
 
-**Next action:** extend this ROM loop to a controlled `2-7` tick transaction using historical inputs and a curated digest that excludes proven-disposable render buffers but includes actor/process/game globals. Run movement, contact, item, death/respawn, result/restart, and sound-side-effect routes before connecting it to prediction mismatch recovery.
+**Next action:** connect the repeated ROM loop to per-tick historical input selection and a curated digest that excludes proven-disposable render buffers but includes actor/process/game globals. Then run movement, contact, item, death/respawn, result/restart, and sound-side-effect routes before connecting it to prediction mismatch recovery.
 
 ### ROM patch boundary
 
@@ -39,18 +39,25 @@ The stronger same-tick renderless A/B and recovery run at `logs/slippi-rom-loop-
 - after one subsequent normally rendered tick: `404` bytes / `17` pages;
 - both peers advanced the game counter from `729` to `730` and the known gameplay trace stayed aligned.
 
-The temporary increase is concentrated in OAM buffers (`0x02087760-0x020887E7`) and actor render/cache pages around `0x021B5000-0x021B7FFF`. Because the cross-peer difference returned below its pre-test baseline after one normal render, these bytes are evidence of disposable/rebuilt render state in this route, not a persistent gameplay divergence. That inference still needs event-route and multi-tick validation before those ranges can be excluded from a rollback digest.
+The temporary increase is concentrated in OAM buffers (`0x02087760-0x020887E7`) and actor render/cache pages around `0x021B5000-0x021B7FFF`. Because the cross-peer difference returned below its pre-test baseline after one normal render, these bytes are evidence of disposable/rebuilt render state in this route, not a persistent gameplay divergence. The multi-tick results below support that inference, but event-route validation is still required before those ranges can be excluded from a rollback digest.
+
+The repeated-loop A/B runs extended the same boundary to the planned rollback window:
+
+- `logs/slippi-rom-loop-poc-renderless-ab-2tick`: both peers advanced `729 -> 731`; the target used one display frame while the control used two, and the curated cross-peer difference was `448` bytes / `17` pages before, `819` / `23` immediately after, and `406` / `20` after one normal rendered tick.
+- `logs/slippi-rom-loop-poc-renderless-ab-7tick`: both peers advanced `729 -> 736`; the target used one display frame while the control used seven, and the curated difference was `445` / `17` before, `907` / `23` immediately after, and `411` / `20` after recovery.
+
+Thus the native loop can execute the full `1-7` tick diagnostic window without a crash or a persistent increase in the current curated cross-peer difference on the tested movement route. These runs reused the ordinary current input on every repeated tick; they validate loop control and render recovery, not historical-input correctness.
 
 The extra tick advanced ARM9 by about `139k` timestamp units and ARM7 by about `70k`; therefore the ROM loop does not make hardware time disappear. The earlier scheduler-freeze failure remains relevant: hardware handling must be designed rather than globally suppressed.
 
 ### Gate status
 
 - Native ROM-loop re-entry: **PASS**.
-- One renderless tick, natural frame counter, known gameplay semantics: **PASS for the tested movement route**.
+- One through seven renderless ticks, natural frame counter, known gameplay semantics: **PASS for the tested movement route**.
 - Render-cache recovery after one normal render: **PASS for the tested route**.
 - Immediate full-RAM equality: **EXPECTED FAIL** because render/OAM and packet-ring state are not equal.
 - Curated gameplay digest: **INCOMPLETE**; current exclusions are diagnostic, not yet promoted.
-- Multi-tick, event coverage, duplicate audio/network effects, JIT integration, rollback performance, and WAN: **NOT RUN**.
+- Per-tick historical input, event coverage, duplicate audio/network effects, JIT integration, rollback performance, and WAN: **NOT RUN**.
 
 ## 2026-08-01 Slippi-style game-tick equivalence PoC
 

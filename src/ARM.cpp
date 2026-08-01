@@ -325,12 +325,20 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
             state.RenderlessABTickPending = true;
             dump("before-renderless-ab-tick");
             if (isTarget)
+            {
                 cpu->NDS.ARM9Write32(activeAddr, 1);
+                cpu->NDS.ARM9Write32(requestAddr, cfg.ExtraTicks - 1);
+            }
             return false;
         }
         if (instrAddr == loopGateAfterCounter && state.RenderlessABTickPending)
         {
+            state.ExtraTicksSeen++;
+            if (state.ExtraTicksSeen < cfg.ExtraTicks)
+                return false;
+
             dump(isTarget ? "after-renderless-tick" : "after-normal-control-tick");
+            cpu->NDS.ARM9Write32(requestAddr, 0);
             cpu->NDS.ARM9Write32(activeAddr, 0);
             state.RenderlessABTickPending = false;
             state.NeedNextNormalTick = true;
