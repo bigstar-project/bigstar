@@ -3,13 +3,15 @@
 ## Slippi-style ROM game-loop rollback probe - 2026-08-01
 
 - 完了: `tools/bigstar-rom`へ診断専用`--game-tick-probe`を追加した。通常のstable ROM生成とGUI生成は既定で無効のまま維持し、診断ROMだけがARM9メインループ、render process list、font updateへ分岐gateを入れる。追加tickはNSMB自身の入力更新、scene/game helper、delete/create/update process list、priority更新、frame counter更新を通常順で通り、rollback-loop中だけrender listとfont updateを省く。
-- 完了: `scripts/run-nsmb-mvl-rom-game-tick-probe.ps1`へ、診断ROM生成、2-process interpreter走行、全4 MiB Main RAM比較、probe cave／既知packet-input ringを除いたcurated比較、renderless host対normal clientの同一tick A/B、次の通常render後の回復比較を実装した。
+- 完了: `scripts/run-nsmb-mvl-rom-game-tick-probe.ps1`へ、診断ROM生成、2-process interpreter/JIT走行、全4 MiB Main RAM比較、probe cave／既知packet-input ringを除いたcurated比較、renderless host対normal clientの同一tick A/B、回復比較を実装した。
 - 検証: `logs/slippi-rom-loop-poc-loop-aligned`では追加tickと通常replayがともにgame counter `729 -> 730`となり、既知gameplay traceはframe 990まで同期した。curatedな即時差は`434 bytes / 12 pages`で、full RAM exact一致ではない。
 - 検証: `logs/slippi-rom-loop-poc-renderless-recovery`ではcross-peer curated差がtick前`445 bytes / 17 pages`、renderless直後`759 / 22`、次の通常render後`404 / 17`となった。増分の中心はOAMとactor render/cache pageで、一回の通常render後にbaseline以下へ戻る。tested movement routeでは永続gameplay divergenceを検出していない。
 - 検証: ROM-loopを`2`および`7`連続tickへ拡張した。`logs/slippi-rom-loop-poc-renderless-ab-2tick`は両peerでgame counter `729 -> 731`、curated差は前`448 / 17`、直後`819 / 23`、通常render後`406 / 20`だった。`logs/slippi-rom-loop-poc-renderless-ab-7tick`は`729 -> 736`、前`445 / 17`、直後`907 / 23`、回復後`411 / 20`だった。対象側はどちらもdisplay frameを1だけ進め、control側はそれぞれ2／7進めたため、`1-7`tickのrenderless loop制御と描画回復はtested movement routeで成立した。
 - 完了: 診断hookから既存JIT-helper scratchへ、7tickそれぞれ異なるplayer 0/1入力とpacket tickを注入するA/Bを追加した。`logs/slippi-rom-loop-poc-historical-input-7tick`ではtarget/controlの入力列hashがともに`1A24E475`、game counterが`729 -> 736`で一致した。scene/game globals、入力、勝敗、RNG sample、両player actor、star、moving hazardの172 fieldを読むsemantic gateも直後・通常render後とも差分0だった。curated RAM差は前`445 / 17`、直後`1331 / 26`、回復後`445 / 22`で、残差には意図的に変更したscratch pageとnetwork/render-local stateが含まれる。
-- 現在のblocker: tick別入力の境界は通ったが、入力列は診断hookの固定列であり、productionのconfirmed/predicted input履歴とは未接続である。加えてitem/contact/death/result/restart、duplicate sound/network、IRQ/DMA/timer/IPC/ARM7副作用、hook-free/JIT制御、実rollback性能は未検証である。ROM-loop方式は継続価値ありだが、現行rollbackへはまだ接続しない。
-- 次: tick別input/tickをguest-owned control blockから読むROM gateへ移し、instruction hookなしでも動く形にしてproduction input timelineへ接続する。並行してevent routeでsemantic digestとdisposable render rangeを再確認する。
+- 完了: tick別入力をguest RAM上の7-entry history/control blockへ移し、ROM input gate自身がpacket tickと両player keysを順にJIT scratchへ適用するようにした。共有game counterで開始し、履歴消費後は解除可能なguest loopへparkするため、instruction hookなしで正確なtransaction終端を観測できる。
+- 検証: JITを有効にした`logs/slippi-rom-loop-poc-jit-guest-recovery-7tick`で、両peerはgame counter `709`から同じ入力列hash `1A24E475`の7 entryを消費し、counter `718`で停止した。renderless targetはdisplay frame `954`、normal controlは`959`で同じ終端へ到達し、172 semantic fieldは差分0だった。さらに同一の確定入力1tickで解除した回復後も差分0。curated RAM差は前`405 bytes / 18 pages`、直後と回復後が`587 / 23`であり、full RAM exact一致はしていない。
+- 現在のblocker: guest-owned/JIT loop制御は通ったが、履歴列はまだ診断側の固定列で、productionのconfirmed/predicted `InputTimeline`とcheckpoint restoreには未接続である。item/contact/death/result/restart、duplicate sound/network、IRQ/DMA/timer/IPC/ARM7副作用、実rollback性能も未検証なので、現行rollbackへはまだ接続しない。
+- 次: production input timelineからguest history tableを組み立て、既知のprediction mismatchでcheckpoint restore→最大7tick catch-upを実行する。その後、event routeごとにsemantic digest、音声／network重複、disposable render rangeを再確認する。
 
 ## NsmbMvlNetplayRuntime リファクタ調査 - 2026-07-15
 

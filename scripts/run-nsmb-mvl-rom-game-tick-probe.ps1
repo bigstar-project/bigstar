@@ -8,6 +8,8 @@ param(
     [switch]$AllowJit,
     [switch]$RenderlessAB,
     [switch]$HistoricalInputAB,
+    [switch]$GuestOwnedHistoryAB,
+    [switch]$FrameBoundary,
     [switch]$AnalyzeExisting,
     [string]$LogDir = "logs\nsmb-mvl-rom-game-tick-probe"
 )
@@ -16,6 +18,12 @@ $ErrorActionPreference = "Stop"
 
 if ($HistoricalInputAB -and -not $RenderlessAB) {
     throw "HistoricalInputAB requires RenderlessAB"
+}
+if ($GuestOwnedHistoryAB -and -not $HistoricalInputAB) {
+    throw "GuestOwnedHistoryAB requires HistoricalInputAB"
+}
+if ($FrameBoundary -and -not $GuestOwnedHistoryAB) {
+    throw "FrameBoundary requires GuestOwnedHistoryAB"
 }
 
 function Get-IncludedRanges {
@@ -280,6 +288,8 @@ if (!$AnalyzeExisting) {
     $oldTicks = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_EXTRA_TICKS
     $oldRenderlessAB = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_RENDERLESS_AB
     $oldHistoricalInputAB = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_HISTORICAL_INPUT_AB
+    $oldGuestOwnedHistoryAB = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GUEST_HISTORY_AB
+    $oldFrameBoundary = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY
     try {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE = "1"
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_FRAME = "$ProbeStartFrame"
@@ -289,6 +299,8 @@ if (!$AnalyzeExisting) {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_EXTRA_TICKS = "$ExtraTicks"
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_RENDERLESS_AB = if ($RenderlessAB) { "1" } else { $null }
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_HISTORICAL_INPUT_AB = if ($HistoricalInputAB) { "1" } else { $null }
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GUEST_HISTORY_AB = if ($GuestOwnedHistoryAB) { "1" } else { $null }
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY = if ($FrameBoundary) { "1" } else { $null }
 
         $smokeArgs = @{
             Frames = $Frames
@@ -320,6 +332,8 @@ if (!$AnalyzeExisting) {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_EXTRA_TICKS = $oldTicks
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_RENDERLESS_AB = $oldRenderlessAB
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_HISTORICAL_INPUT_AB = $oldHistoricalInputAB
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GUEST_HISTORY_AB = $oldGuestOwnedHistoryAB
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY = $oldFrameBoundary
     }
 }
 
@@ -327,7 +341,7 @@ $controlRole = if ($TargetRole -eq "host") { "client" } else { "host" }
 $targetRows = Import-Csv -LiteralPath (Join-Path $resolvedLogDir "rom-game-tick-probe-$TargetRole.csv")
 $controlRows = Import-Csv -LiteralPath (Join-Path $resolvedLogDir "rom-game-tick-probe-$controlRole.csv")
 $excludedRanges = @(
-    [pscustomobject]@{ Start = 0x000019C0; End = 0x00001B00 },
+    [pscustomobject]@{ Start = 0x000019C0; End = 0x00001D00 },
     [pscustomobject]@{ Start = 0x00288000; End = 0x0028A000 }
 )
 
@@ -367,13 +381,18 @@ if ($RenderlessAB) {
     $rawDelta = Compare-ProbeDeltas -LeftBefore $targetBeforePath -LeftAfter $targetAfterPath -RightBefore $controlBeforePath -RightAfter $controlAfterPath
     $curatedDelta = Compare-ProbeDeltas -LeftBefore $targetBeforePath -LeftAfter $targetAfterPath -RightBefore $controlBeforePath -RightAfter $controlAfterPath -ExcludedRanges $excludedRanges
     $summary = [pscustomobject]@{
-        Mode = if ($HistoricalInputAB) { "renderless-historical-input-ab" } else { "renderless-ab" }
+        Mode = if ($FrameBoundary) { "renderless-frame-boundary-ab" } elseif ($GuestOwnedHistoryAB) { "renderless-guest-history-ab" } elseif ($HistoricalInputAB) { "renderless-historical-input-ab" } else { "renderless-ab" }
         ExtraTicksRequested = $ExtraTicks
         TargetExtraTicksSeen = [uint32]$targetAfterRows[0].extra_ticks_seen
         ControlTicksSeen = [uint32]$controlAfterRows[0].extra_ticks_seen
         TargetInputSequenceHash = $targetAfterRows[0].input_sequence_hash
         ControlInputSequenceHash = $controlAfterRows[0].input_sequence_hash
         InputSequenceHashesMatch = $targetAfterRows[0].input_sequence_hash -eq $controlAfterRows[0].input_sequence_hash
+        TargetHistoryIndex = [uint32]$targetAfterRows[0].history_index
+        ControlHistoryIndex = [uint32]$controlAfterRows[0].history_index
+        GuestHistoryConsumed = if ($GuestOwnedHistoryAB) {
+            [uint32]$targetAfterRows[0].history_index -eq $ExtraTicks -and [uint32]$controlAfterRows[0].history_index -eq $ExtraTicks
+        } else { $false }
         TargetRole = $TargetRole
         ControlRole = $controlRole
         TargetBeforeFrame = [int]$targetBeforeRows[0].frame
@@ -406,9 +425,13 @@ if ($RenderlessAB) {
         CuratedChangeMaskMismatchBytes = $curatedDelta.ChangeMaskMismatchBytes
         CuratedXorMismatchBytes = $curatedDelta.XorMismatchBytes
         GameFrameCountersMatch = [uint32]$targetAfterRows[0].game_frame_counter -eq [uint32]$controlAfterRows[0].game_frame_counter
-        RequestedGameFrameAdvanceObserved = `
+        RequestedGameFrameAdvanceObserved = if ($FrameBoundary) {
+            [uint32]$targetAfterRows[0].game_frame_counter -eq [uint32]$controlAfterRows[0].game_frame_counter -and `
+                [uint32]$targetAfterRows[0].history_index -eq $ExtraTicks -and [uint32]$controlAfterRows[0].history_index -eq $ExtraTicks
+        } else {
             ([uint32]$targetAfterRows[0].game_frame_counter - [uint32]$targetBeforeRows[0].game_frame_counter -eq $ExtraTicks) -and `
-            ([uint32]$controlAfterRows[0].game_frame_counter - [uint32]$controlBeforeRows[0].game_frame_counter -eq $ExtraTicks)
+                ([uint32]$controlAfterRows[0].game_frame_counter - [uint32]$controlBeforeRows[0].game_frame_counter -eq $ExtraTicks)
+        }
     }
     $summary | Export-Csv -LiteralPath (Join-Path $resolvedLogDir "summary.csv") -NoTypeInformation -Encoding UTF8
     $summary | Format-List

@@ -28,7 +28,18 @@ const PLAYER_POWERUP_MEGA: u32 = 3;
 const GAME_TICK_PROBE_REQUEST_ADDR: u32 = 0x0200_1AC0;
 const GAME_TICK_PROBE_ACTIVE_ADDR: u32 = 0x0200_1AC4;
 const GAME_TICK_PROBE_MAGIC_ADDR: u32 = 0x0200_1AC8;
+const GAME_TICK_PROBE_HISTORY_ENABLED_ADDR: u32 = 0x0200_1ACC;
+const GAME_TICK_PROBE_HISTORY_INDEX_ADDR: u32 = 0x0200_1AD0;
+const GAME_TICK_PROBE_HISTORY_COUNT_ADDR: u32 = 0x0200_1AD4;
+const GAME_TICK_PROBE_HISTORY_TARGET_ADDR: u32 = 0x0200_1AD8;
+const GAME_TICK_PROBE_HISTORY_START_FRAME_ADDR: u32 = 0x0200_1ADC;
+const GAME_TICK_PROBE_HISTORY_ADDR: u32 = 0x0200_1AE0;
+const GAME_TICK_PROBE_HISTORY_CAPACITY: usize = 7;
+const GAME_TICK_PROBE_HISTORY_ENTRY_WORDS: usize = 2;
 const GAME_TICK_PROBE_MAGIC: u32 = 0x5250_5447; // "GTPR", little endian
+const GAME_TICK_PROBE_PACKET_TICK_ADDR: u32 = 0x0208_88E0;
+const GAME_TICK_PROBE_JIT_SCRATCH_TICK_ADDR: u32 = 0x023C_1200;
+const GAME_TICK_PROBE_GAME_FRAME_ADDR: u32 = 0x0208_B668;
 
 #[derive(Debug, Clone)]
 pub struct StableRomOptions {
@@ -748,6 +759,8 @@ fn patch_game_tick_probe(rom: &mut RomImage) -> Result<()> {
     const LOOP_GATE_ADDR: u32 = 0x0200_19C0;
     const FONT_GATE_ADDR: u32 = 0x0200_1A20;
     const RENDER_GATE_ADDR: u32 = 0x0200_1A60;
+    const INPUT_GATE_ADDR: u32 = 0x0200_1B40;
+    const INPUT_UPDATE_ADDR: u32 = 0x0200_5230;
 
     let loop_gate = [
         encode_ldr_pc_literal(3, LOOP_GATE_ADDR, LOOP_GATE_ADDR + 0x3C, 0xE)?,
@@ -786,17 +799,40 @@ fn patch_game_tick_probe(rom: &mut RomImage) -> Result<()> {
         encode_b(RENDER_GATE_ADDR + 0x14, RENDER_RETURN_ADDR)?,
         GAME_TICK_PROBE_ACTIVE_ADDR,
     ];
+    let input_gate = build_game_tick_input_gate(INPUT_GATE_ADDR, INPUT_UPDATE_ADDR)?;
 
     ensure_zero_arm9_words(rom, LOOP_GATE_ADDR, loop_gate.len())?;
     ensure_zero_arm9_words(rom, FONT_GATE_ADDR, font_gate.len())?;
     ensure_zero_arm9_words(rom, RENDER_GATE_ADDR, render_gate.len())?;
+    ensure_zero_arm9_words(rom, INPUT_GATE_ADDR, input_gate.len())?;
     ensure_zero_arm9_words(rom, GAME_TICK_PROBE_REQUEST_ADDR, 2)?;
     ensure_zero_arm9_words(rom, GAME_TICK_PROBE_MAGIC_ADDR, 1)?;
+    ensure_zero_arm9_words(rom, GAME_TICK_PROBE_HISTORY_ENABLED_ADDR, 5)?;
+    ensure_zero_arm9_words(
+        rom,
+        GAME_TICK_PROBE_HISTORY_ADDR,
+        GAME_TICK_PROBE_HISTORY_CAPACITY * GAME_TICK_PROBE_HISTORY_ENTRY_WORDS,
+    )?;
     patch_arm9_words(rom, LOOP_GATE_ADDR, &loop_gate)?;
     patch_arm9_words(rom, FONT_GATE_ADDR, &font_gate)?;
     patch_arm9_words(rom, RENDER_GATE_ADDR, &render_gate)?;
+    patch_arm9_words(rom, INPUT_GATE_ADDR, &input_gate)?;
     patch_arm9_words(rom, GAME_TICK_PROBE_REQUEST_ADDR, &[0, 0])?;
     patch_arm9_words(rom, GAME_TICK_PROBE_MAGIC_ADDR, &[GAME_TICK_PROBE_MAGIC])?;
+    patch_arm9_words(rom, GAME_TICK_PROBE_HISTORY_ENABLED_ADDR, &[0, 0, 0, 0, 0])?;
+    patch_arm9_words(
+        rom,
+        GAME_TICK_PROBE_HISTORY_ADDR,
+        &[0; GAME_TICK_PROBE_HISTORY_CAPACITY * GAME_TICK_PROBE_HISTORY_ENTRY_WORDS],
+    )?;
+
+    patch_arm9_word_checked(
+        rom,
+        LOOP_START_ADDR,
+        encode_bl(LOOP_START_ADDR, INPUT_UPDATE_ADDR)?,
+        encode_b(LOOP_START_ADDR, INPUT_GATE_ADDR)?,
+        "game-tick input-history gate",
+    )?;
 
     patch_arm9_word_checked(
         rom,
@@ -820,6 +856,131 @@ fn patch_game_tick_probe(rom: &mut RomImage) -> Result<()> {
         "game-tick render gate",
     )?;
     Ok(())
+}
+
+fn build_game_tick_input_gate(start_addr: u32, input_update_addr: u32) -> Result<Vec<u32>> {
+    let mut words = Vec::new();
+    let mut literals = Vec::new();
+    let mut refs: Vec<(usize, u8, usize, u8)> = Vec::new();
+    let mut emit = |words: &mut Vec<u32>, rd: u8, value: u32| {
+        let literal_index = literals.len();
+        literals.push(value);
+        let word_index = words.len();
+        words.push(0);
+        refs.push((word_index, rd, literal_index, 0xE));
+    };
+
+    emit(&mut words, 3, GAME_TICK_PROBE_HISTORY_ENABLED_ADDR);
+    words.push(encode_ldr_imm(12, 3, 0)?);
+    words.push(encode_cmp_imm(12, 0)?);
+    let inactive_branch = words.len();
+    words.push(0);
+    emit(&mut words, 3, GAME_TICK_PROBE_HISTORY_INDEX_ADDR);
+    words.push(encode_ldr_imm(12, 3, 0)?);
+    emit(&mut words, 2, GAME_TICK_PROBE_HISTORY_COUNT_ADDR);
+    words.push(encode_ldr_imm(2, 2, 0)?);
+    words.push(encode_cmp_reg(12, 2));
+    let exhausted_branch = words.len();
+    words.push(0);
+    words.push(encode_cmp_imm(12, 0)?);
+    let transaction_started_branch = words.len();
+    words.push(0);
+    emit(&mut words, 2, GAME_TICK_PROBE_HISTORY_START_FRAME_ADDR);
+    words.push(encode_ldr_imm(1, 2, 0)?);
+    emit(&mut words, 2, GAME_TICK_PROBE_GAME_FRAME_ADDR);
+    words.push(encode_ldr_imm(2, 2, 0)?);
+    words.push(encode_cmp_reg(2, 1));
+    let wrong_frame_branch = words.len();
+    words.push(0);
+    let target_check_index = words.len();
+    emit(&mut words, 2, GAME_TICK_PROBE_HISTORY_TARGET_ADDR);
+    words.push(encode_ldr_imm(1, 2, 0)?);
+    words.push(encode_cmp_imm(1, 0)?);
+    let non_target_branch = words.len();
+    words.push(0);
+    words.push(encode_cmp_imm(12, 0)?);
+    let already_started_branch = words.len();
+    words.push(0);
+    emit(&mut words, 1, GAME_TICK_PROBE_ACTIVE_ADDR);
+    words.push(encode_mov_imm(0, 1)?);
+    words.push(encode_str_imm(0, 1, 0)?);
+    emit(&mut words, 1, GAME_TICK_PROBE_REQUEST_ADDR);
+    emit(&mut words, 0, GAME_TICK_PROBE_HISTORY_COUNT_ADDR);
+    words.push(encode_ldr_imm(0, 0, 0)?);
+    words.push(encode_sub_imm(0, 0, 1)?);
+    words.push(encode_str_imm(0, 1, 0)?);
+    let history_load_index = words.len();
+    emit(&mut words, 2, GAME_TICK_PROBE_HISTORY_ADDR);
+    words.push(encode_add_reg_lsl(2, 2, 12, 3)?);
+    words.push(encode_ldrh_imm(0, 2, 0)?);
+    words.push(encode_ldrh_imm(1, 2, 2)?);
+    words.push(encode_ldrh_imm(12, 2, 4)?);
+    emit(&mut words, 2, GAME_TICK_PROBE_JIT_SCRATCH_TICK_ADDR);
+    words.push(encode_strh_imm(0, 2, 0)?);
+    words.push(encode_strh_imm(1, 2, 8)?);
+    words.push(encode_strh_imm(12, 2, 10)?);
+    words.push(encode_strh_imm(0, 2, 0x40)?);
+    words.push(encode_strh_imm(1, 2, 0x42)?);
+    words.push(encode_strh_imm(0, 2, 0x80)?);
+    words.push(encode_strh_imm(12, 2, 0x82)?);
+    emit(&mut words, 2, GAME_TICK_PROBE_PACKET_TICK_ADDR);
+    words.push(encode_strh_imm(0, 2, 0)?);
+    words.push(encode_ldr_imm(2, 3, 0)?);
+    words.push(encode_add_imm(2, 2, 1)?);
+    words.push(encode_str_imm(2, 3, 0)?);
+    let call_index = words.len();
+    words.push(encode_bl(
+        start_addr + call_index as u32 * 4,
+        input_update_addr,
+    )?);
+    words.push(encode_b(start_addr + words.len() as u32 * 4, 0x0200_4ECC)?);
+    let spin_index = words.len();
+    words.push(encode_b(start_addr + spin_index as u32 * 4, start_addr)?);
+
+    let call_addr = start_addr + call_index as u32 * 4;
+    words[inactive_branch] = with_cond(
+        encode_b(start_addr + inactive_branch as u32 * 4, call_addr)?,
+        0,
+    );
+    words[exhausted_branch] = with_cond(
+        encode_b(
+            start_addr + exhausted_branch as u32 * 4,
+            start_addr + spin_index as u32 * 4,
+        )?,
+        2,
+    );
+    words[wrong_frame_branch] = with_cond(
+        encode_b(start_addr + wrong_frame_branch as u32 * 4, call_addr)?,
+        1,
+    );
+    words[transaction_started_branch] = with_cond(
+        encode_b(
+            start_addr + transaction_started_branch as u32 * 4,
+            start_addr + target_check_index as u32 * 4,
+        )?,
+        1,
+    );
+    let history_load_addr = start_addr + history_load_index as u32 * 4;
+    words[non_target_branch] = with_cond(
+        encode_b(start_addr + non_target_branch as u32 * 4, history_load_addr)?,
+        0,
+    );
+    words[already_started_branch] = with_cond(
+        encode_b(
+            start_addr + already_started_branch as u32 * 4,
+            history_load_addr,
+        )?,
+        1,
+    );
+
+    let literal_start_addr = start_addr + words.len() as u32 * 4;
+    for (word_index, rd, literal_index, cond) in refs {
+        let instruction_addr = start_addr + word_index as u32 * 4;
+        let literal_addr = literal_start_addr + literal_index as u32 * 4;
+        words[word_index] = encode_ldr_pc_literal(rd, instruction_addr, literal_addr, cond)?;
+    }
+    words.extend(literals);
+    Ok(words)
 }
 
 fn patch_mvl_load_thread_entrance_ids(rom: &mut RomImage) -> Result<()> {

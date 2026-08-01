@@ -216,6 +216,12 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
     constexpr u32 scratchTickAddr = 0x023C1200;
     constexpr u32 scratchKeysAddr = 0x023C1208;
     constexpr u32 scratchPacketsAddr = 0x023C1240;
+    constexpr u32 historyEnabledAddr = 0x02001ACC;
+    constexpr u32 historyIndexAddr = 0x02001AD0;
+    constexpr u32 historyCountAddr = 0x02001AD4;
+    constexpr u32 historyTargetAddr = 0x02001AD8;
+    constexpr u32 historyStartFrameAddr = 0x02001ADC;
+    constexpr u32 historyAddr = 0x02001AE0;
 
     if (instrAddr != loopStart && instrAddr != loopGateAfterCounter)
         return false;
@@ -227,6 +233,7 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
         bool RestoreAfterExtra = false;
         bool RenderlessAB = false;
         bool HistoricalInputAB = false;
+        bool GuestOwnedHistoryAB = false;
         u32 StartFrame = 900;
         u32 ExtraTicks = 1;
         std::string Role;
@@ -256,10 +263,12 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
 
     if (!cfg.Checked)
     {
-        cfg.Enabled = NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE");
+        cfg.Enabled = NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE") &&
+            !NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY");
         cfg.RestoreAfterExtra = NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE_RESTORE_AFTER_EXTRA");
         cfg.RenderlessAB = NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE_RENDERLESS_AB");
         cfg.HistoricalInputAB = NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE_HISTORICAL_INPUT_AB");
+        cfg.GuestOwnedHistoryAB = NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE_GUEST_HISTORY_AB");
         cfg.StartFrame = NSMLEnvU32("MELONDS_NSML_ROM_GAME_TICK_PROBE_START_FRAME", 900);
         cfg.ExtraTicks = std::clamp(
             NSMLEnvU32("MELONDS_NSML_ROM_GAME_TICK_PROBE_EXTRA_TICKS", 1), 1u, 7u);
@@ -278,7 +287,7 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
             if (cfg.LogFile)
             {
                 fprintf(cfg.LogFile,
-                    "role,frame,phase,main_ram_hash,game_frame_counter,arm9_timestamp,arm7_timestamp,request,active,extra_ticks_seen,input_sequence_hash,scratch_tick,scratch_keys0,scratch_keys1\n");
+                    "role,frame,phase,main_ram_hash,game_frame_counter,arm9_timestamp,arm7_timestamp,request,active,extra_ticks_seen,input_sequence_hash,scratch_tick,scratch_keys0,scratch_keys1,history_enabled,history_index,history_count\n");
                 fflush(cfg.LogFile);
             }
         }
@@ -298,7 +307,7 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
         const u64 mainRAMHash = HashNSMLGameTickProbeMainRAM(cpu->NDS);
         if (cfg.LogFile)
         {
-            fprintf(cfg.LogFile, "%s,%u,%s,%016llX,%u,%llu,%llu,%u,%u,%u,%08X,%u,%u,%u\n",
+            fprintf(cfg.LogFile, "%s,%u,%s,%016llX,%u,%llu,%llu,%u,%u,%u,%08X,%u,%u,%u,%u,%u,%u\n",
                 cfg.Role.c_str(),
                 frame,
                 phase,
@@ -312,7 +321,10 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
                 state.InputSequenceHash,
                 cpu->NDS.ARM9Read16(scratchTickAddr),
                 cpu->NDS.ARM9Read16(scratchKeysAddr),
-                cpu->NDS.ARM9Read16(scratchKeysAddr + 2));
+                cpu->NDS.ARM9Read16(scratchKeysAddr + 2),
+                cpu->NDS.ARM9Read32(historyEnabledAddr),
+                cpu->NDS.ARM9Read32(historyIndexAddr),
+                cpu->NDS.ARM9Read32(historyCountAddr));
             fflush(cfg.LogFile);
         }
 
@@ -329,12 +341,22 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
 
     if (cfg.RenderlessAB)
     {
+        constexpr std::array<u16, 7> player0Keys = {0x010, 0x011, 0x000, 0x020, 0x001, 0x810, 0x000};
+        constexpr std::array<u16, 7> player1Keys = {0x020, 0x022, 0x000, 0x010, 0x002, 0x820, 0x000};
+        auto hashHistoricalInput = [&](u16 tick, u16 keys0, u16 keys1)
+        {
+            for (const u16 value : {tick, keys0, keys1})
+            {
+                state.InputSequenceHash ^= value & 0xFF;
+                state.InputSequenceHash *= 16777619u;
+                state.InputSequenceHash ^= value >> 8;
+                state.InputSequenceHash *= 16777619u;
+            }
+        };
         auto applyHistoricalInput = [&]()
         {
             // Deterministic diagnostic history. The JIT helper patch already
             // routes NSMB's per-player key reads through these scratch words.
-            constexpr std::array<u16, 7> player0Keys = {0x010, 0x011, 0x000, 0x020, 0x001, 0x810, 0x000};
-            constexpr std::array<u16, 7> player1Keys = {0x020, 0x022, 0x000, 0x010, 0x002, 0x820, 0x000};
             const u32 index = std::min(state.ExtraTicksSeen, cfg.ExtraTicks - 1);
             const u16 tick = static_cast<u16>((state.HistoricalBaseTick + index) & 0xFFFF);
             const u16 keys0 = player0Keys[index];
@@ -350,13 +372,25 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
                 cpu->NDS.ARM9Write16(packetAddr, tick);
                 cpu->NDS.ARM9Write16(packetAddr + 2, keys);
             }
-            for (const u16 value : {tick, keys0, keys1})
+            hashHistoricalInput(tick, keys0, keys1);
+        };
+        auto prepareGuestHistory = [&]()
+        {
+            cpu->NDS.ARM9Write32(historyIndexAddr, 0);
+            cpu->NDS.ARM9Write32(historyCountAddr, cfg.ExtraTicks);
+            cpu->NDS.ARM9Write32(historyTargetAddr, 0);
+            cpu->NDS.ARM9Write32(historyStartFrameAddr, cpu->NDS.ARM9Read32(0x0208B668));
+            for (u32 index = 0; index < cfg.ExtraTicks; index++)
             {
-                state.InputSequenceHash ^= value & 0xFF;
-                state.InputSequenceHash *= 16777619u;
-                state.InputSequenceHash ^= value >> 8;
-                state.InputSequenceHash *= 16777619u;
+                const u16 tick = static_cast<u16>((state.HistoricalBaseTick + index) & 0xFFFF);
+                const u32 entryAddr = historyAddr + index * 8;
+                cpu->NDS.ARM9Write16(entryAddr, tick);
+                cpu->NDS.ARM9Write16(entryAddr + 2, player0Keys[index]);
+                cpu->NDS.ARM9Write16(entryAddr + 4, player1Keys[index]);
+                cpu->NDS.ARM9Write16(entryAddr + 6, 0);
+                hashHistoricalInput(tick, player0Keys[index], player1Keys[index]);
             }
+            cpu->NDS.ARM9Write32(historyEnabledAddr, 1);
         };
 
         if (instrAddr == loopStart && !state.TargetSeen && !state.Done &&
@@ -368,7 +402,12 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
             dump("before-renderless-ab-tick");
             state.HistoricalBaseTick = cpu->NDS.ARM9Read16(scratchTickAddr);
             if (cfg.HistoricalInputAB)
-                applyHistoricalInput();
+            {
+                if (cfg.GuestOwnedHistoryAB)
+                    prepareGuestHistory();
+                else
+                    applyHistoricalInput();
+            }
             if (isTarget)
             {
                 cpu->NDS.ARM9Write32(activeAddr, 1);
@@ -376,7 +415,8 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
             }
             return false;
         }
-        if (instrAddr == loopStart && state.RenderlessABTickPending && cfg.HistoricalInputAB)
+        if (instrAddr == loopStart && state.RenderlessABTickPending && cfg.HistoricalInputAB &&
+            !cfg.GuestOwnedHistoryAB)
         {
             applyHistoricalInput();
             return false;
@@ -388,6 +428,8 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
                 return false;
 
             dump(isTarget ? "after-renderless-tick" : "after-normal-control-tick");
+            if (cfg.GuestOwnedHistoryAB)
+                cpu->NDS.ARM9Write32(historyEnabledAddr, 0);
             cpu->NDS.ARM9Write32(requestAddr, 0);
             cpu->NDS.ARM9Write32(activeAddr, 0);
             state.RenderlessABTickPending = false;

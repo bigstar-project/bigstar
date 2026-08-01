@@ -18,10 +18,12 @@
 
 #include <assert.h>
 #include <algorithm>
+#include <array>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
+#include <string>
 #include "NDS.h"
 #include "ARM.h"
 #include "NDSCart.h"
@@ -1457,9 +1459,195 @@ void NDS::RunSystemSleep(u64 timestamp)
     }
 }
 
+static void HandleNSMLRomGameTickProbeFrameBoundary(NDS* nds, bool beforeFrame)
+{
+    constexpr u32 requestAddr = 0x02001AC0;
+    constexpr u32 activeAddr = 0x02001AC4;
+    constexpr u32 magicAddr = 0x02001AC8;
+    constexpr u32 historyEnabledAddr = 0x02001ACC;
+    constexpr u32 historyIndexAddr = 0x02001AD0;
+    constexpr u32 historyCountAddr = 0x02001AD4;
+    constexpr u32 historyTargetAddr = 0x02001AD8;
+    constexpr u32 historyStartFrameAddr = 0x02001ADC;
+    constexpr u32 historyAddr = 0x02001AE0;
+    constexpr u32 scratchTickAddr = 0x023C1200;
+    constexpr u32 scratchKeysAddr = 0x023C1208;
+    constexpr u32 magic = 0x52505447;
+    constexpr std::array<u16, 7> player0Keys = {0x010, 0x011, 0x000, 0x020, 0x001, 0x810, 0x000};
+    constexpr std::array<u16, 7> player1Keys = {0x020, 0x022, 0x000, 0x010, 0x002, 0x820, 0x000};
+
+    struct Config
+    {
+        bool Checked = false;
+        bool Enabled = false;
+        u32 StartFrame = 900;
+        u32 ExtraTicks = 1;
+        std::string Role = "local";
+        std::string TargetRole = "host";
+        std::string OutputDir;
+        FILE* LogFile = nullptr;
+    };
+    struct State
+    {
+        bool Armed = false;
+        bool AfterDumped = false;
+        bool BeforeRecoveryDumped = false;
+        bool Done = false;
+        u32 AfterDisplayFrame = 0;
+        u32 AfterGameFrame = 0;
+        u32 InputSequenceHash = 2166136261u;
+    };
+    static Config cfg;
+    static State state;
+    if (!cfg.Checked)
+    {
+        cfg.Enabled = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY") != nullptr;
+        if (const char* value = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_START_FRAME"))
+            cfg.StartFrame = static_cast<u32>(strtoul(value, nullptr, 0));
+        if (const char* value = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_EXTRA_TICKS"))
+            cfg.ExtraTicks = std::clamp(static_cast<u32>(strtoul(value, nullptr, 0)), 1u, 7u);
+        if (const char* value = getenv("MELONDS_NSML_ROLE"))
+            cfg.Role = value;
+        if (const char* value = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_TARGET_ROLE"))
+            cfg.TargetRole = value;
+        if (const char* value = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_DIR"))
+            cfg.OutputDir = value;
+        if (cfg.Enabled && !cfg.OutputDir.empty())
+        {
+            const std::string logPath = cfg.OutputDir + "/rom-game-tick-probe-" + cfg.Role + ".csv";
+            cfg.LogFile = fopen(logPath.c_str(), "w");
+            if (cfg.LogFile)
+            {
+                fprintf(cfg.LogFile,
+                    "role,frame,phase,main_ram_hash,game_frame_counter,arm9_timestamp,arm7_timestamp,request,active,extra_ticks_seen,input_sequence_hash,scratch_tick,scratch_keys0,scratch_keys1,history_enabled,history_index,history_count\n");
+                fflush(cfg.LogFile);
+            }
+        }
+        cfg.Checked = true;
+    }
+    if (!cfg.Enabled || !nds || !nds->MainRAM || cfg.OutputDir.empty() || state.Done)
+        return;
+
+    const bool isTarget = cfg.Role == cfg.TargetRole;
+    auto hashMainRAM = [&]()
+    {
+        u64 hash = 1469598103934665603ull;
+        const u32 length = std::min(nds->MainRAMMask + 1, 0x400000u);
+        for (u32 offset = 0; offset < length; offset++)
+        {
+            hash ^= nds->MainRAM[offset];
+            hash *= 1099511628211ull;
+        }
+        return hash;
+    };
+    auto dump = [&](const char* phase)
+    {
+        if (cfg.LogFile)
+        {
+            fprintf(cfg.LogFile, "%s,%u,%s,%016llX,%u,%llu,%llu,%u,%u,%u,%08X,%u,%u,%u,%u,%u,%u\n",
+                cfg.Role.c_str(), nds->NumFrames, phase,
+                static_cast<unsigned long long>(hashMainRAM()),
+                nds->ARM9Read32(0x0208B668),
+                static_cast<unsigned long long>(nds->ARM9Timestamp),
+                static_cast<unsigned long long>(nds->ARM7Timestamp),
+                nds->ARM9Read32(requestAddr), nds->ARM9Read32(activeAddr),
+                nds->ARM9Read32(historyIndexAddr), state.InputSequenceHash,
+                nds->ARM9Read16(scratchTickAddr), nds->ARM9Read16(scratchKeysAddr),
+                nds->ARM9Read16(scratchKeysAddr + 2), nds->ARM9Read32(historyEnabledAddr),
+                nds->ARM9Read32(historyIndexAddr), nds->ARM9Read32(historyCountAddr));
+            fflush(cfg.LogFile);
+        }
+        char filename[1024];
+        snprintf(filename, sizeof(filename), "%s/rom-game-tick-probe-%s-frame%u-%s.bin",
+            cfg.OutputDir.c_str(), cfg.Role.c_str(), nds->NumFrames, phase);
+        if (FILE* file = fopen(filename, "wb"))
+        {
+            const u32 length = std::min(nds->MainRAMMask + 1, 0x400000u);
+            fwrite(nds->MainRAM, 1, length, file);
+            fclose(file);
+        }
+    };
+
+    if (!state.Armed && beforeFrame && nds->NumFrames >= cfg.StartFrame &&
+        nds->ARM9Read32(magicAddr) == magic && nds->ARM9Read32(0x02085A18) == 9 &&
+        nds->ARM9Read32(0x02085A84) == 1)
+    {
+        state.Armed = true;
+        dump("before-renderless-ab-tick");
+        const u16 baseTick = nds->ARM9Read16(scratchTickAddr);
+        nds->ARM9Write32(historyIndexAddr, 0);
+        nds->ARM9Write32(historyCountAddr, cfg.ExtraTicks);
+        nds->ARM9Write32(historyTargetAddr, isTarget ? 1 : 0);
+        nds->ARM9Write32(historyStartFrameAddr, nds->ARM9Read32(0x0208B668) + 2);
+        for (u32 index = 0; index < cfg.ExtraTicks; index++)
+        {
+            const u16 tick = static_cast<u16>((baseTick + index) & 0xFFFF);
+            const u32 entryAddr = historyAddr + index * 8;
+            nds->ARM9Write16(entryAddr, tick);
+            nds->ARM9Write16(entryAddr + 2, player0Keys[index]);
+            nds->ARM9Write16(entryAddr + 4, player1Keys[index]);
+            nds->ARM9Write16(entryAddr + 6, 0);
+            for (const u16 value : {tick, player0Keys[index], player1Keys[index]})
+            {
+                state.InputSequenceHash ^= value & 0xFF;
+                state.InputSequenceHash *= 16777619u;
+                state.InputSequenceHash ^= value >> 8;
+                state.InputSequenceHash *= 16777619u;
+            }
+        }
+        nds->ARM9Write32(historyEnabledAddr, 1);
+        nds->ARM9Write32(activeAddr, 0);
+        nds->ARM9Write32(requestAddr, 0);
+        return;
+    }
+    if (!state.Armed)
+        return;
+
+    if (!beforeFrame && !state.AfterDumped &&
+        nds->ARM9Read32(historyIndexAddr) >= cfg.ExtraTicks)
+    {
+        dump(isTarget ? "after-renderless-tick" : "after-normal-control-tick");
+        state.AfterDumped = true;
+        state.AfterDisplayFrame = nds->NumFrames;
+        state.AfterGameFrame = nds->ARM9Read32(0x0208B668);
+        return;
+    }
+    if (beforeFrame && state.AfterDumped && !state.BeforeRecoveryDumped &&
+        nds->NumFrames == state.AfterDisplayFrame)
+    {
+        dump("before-recovery-normal-tick");
+        // Run exactly one deterministic recovery tick on both peers.  Letting the
+        // target leave the gate entirely can execute two game loops inside one DS
+        // display frame, which makes a frame-boundary comparison off by one tick.
+        const u16 recoveryTick = static_cast<u16>(nds->ARM9Read16(historyAddr) + cfg.ExtraTicks);
+        nds->ARM9Write16(historyAddr, recoveryTick);
+        nds->ARM9Write16(historyAddr + 2, 0);
+        nds->ARM9Write16(historyAddr + 4, 0);
+        nds->ARM9Write16(historyAddr + 6, 0);
+        nds->ARM9Write32(historyIndexAddr, 0);
+        nds->ARM9Write32(historyCountAddr, 1);
+        nds->ARM9Write32(historyTargetAddr, isTarget ? 1 : 0);
+        nds->ARM9Write32(historyStartFrameAddr, state.AfterGameFrame);
+        nds->ARM9Write32(historyEnabledAddr, 1);
+        nds->ARM9Write32(activeAddr, 0);
+        nds->ARM9Write32(requestAddr, 0);
+        state.BeforeRecoveryDumped = true;
+        return;
+    }
+    if (!beforeFrame && state.BeforeRecoveryDumped &&
+        nds->ARM9Read32(0x0208B668) >= state.AfterGameFrame + 1)
+    {
+        dump(isTarget ? "after-recovery-normal-tick" : "after-second-normal-control-tick");
+        nds->ARM9Write32(historyEnabledAddr, 0);
+        nds->ARM9Write32(historyTargetAddr, 0);
+        state.Done = true;
+    }
+}
+
 template <CPUExecuteMode cpuMode>
 u32 NDS::RunFrame()
 {
+    HandleNSMLRomGameTickProbeFrameBoundary(this, true);
     Current = this;
 
     FrameStartTimestamp = SysTimestamp;
@@ -1600,6 +1788,7 @@ u32 NDS::RunFrame()
     // In the context of TASes, frame count is traditionally the primary measure of emulated time,
     // so it needs to be tracked even if NDS is powered off.
     NumFrames++;
+    HandleNSMLRomGameTickProbeFrameBoundary(this, false);
     if (LagFrameFlag)
         NumLagFrames++;
 

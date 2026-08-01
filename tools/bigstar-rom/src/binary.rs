@@ -103,6 +103,19 @@ pub(crate) fn encode_strb_imm(rd: u8, rn: u8, off: u32) -> Result<u32> {
     Ok(0xE5C0_0000 | ((rn as u32) << 16) | ((rd as u32) << 12) | off)
 }
 
+pub(crate) fn encode_strh_imm(rd: u8, rn: u8, off: u32) -> Result<u32> {
+    if off > 0xff {
+        bail!("STRH offset out of range: 0x{off:x}");
+    }
+    Ok(
+        0xE1C0_00B0
+            | ((rn as u32) << 16)
+            | ((rd as u32) << 12)
+            | ((off & 0xf0) << 4)
+            | (off & 0x0f),
+    )
+}
+
 pub(crate) fn encode_ldr_imm(rd: u8, rn: u8, off: u32) -> Result<u32> {
     if off > 0xfff {
         bail!("LDR offset out of range: 0x{off:x}");
@@ -115,6 +128,19 @@ pub(crate) fn encode_ldrb_imm(rd: u8, rn: u8, off: u32) -> Result<u32> {
         bail!("LDRB offset out of range: 0x{off:x}");
     }
     Ok(0xE5D0_0000 | ((rn as u32) << 16) | ((rd as u32) << 12) | off)
+}
+
+pub(crate) fn encode_ldrh_imm(rd: u8, rn: u8, off: u32) -> Result<u32> {
+    if off > 0xff {
+        bail!("LDRH offset out of range: 0x{off:x}");
+    }
+    Ok(
+        0xE1D0_00B0
+            | ((rn as u32) << 16)
+            | ((rd as u32) << 12)
+            | ((off & 0xf0) << 4)
+            | (off & 0x0f),
+    )
 }
 
 pub(crate) fn encode_ldr_reg_lsl(rd: u8, rn: u8, rm: u8, shift: u8) -> Result<u32> {
@@ -138,6 +164,13 @@ pub(crate) fn encode_mov_reg(rd: u8, rm: u8) -> u32 {
 
 pub(crate) fn encode_add_reg(rd: u8, rn: u8, rm: u8) -> u32 {
     0xE080_0000 | ((rn as u32) << 16) | ((rd as u32) << 12) | rm as u32
+}
+
+pub(crate) fn encode_add_reg_lsl(rd: u8, rn: u8, rm: u8, shift: u8) -> Result<u32> {
+    if shift > 31 {
+        bail!("ADD shift out of range: {shift}");
+    }
+    Ok(0xE080_0000 | ((rn as u32) << 16) | ((rd as u32) << 12) | ((shift as u32) << 7) | rm as u32)
 }
 
 pub(crate) fn encode_rsb_imm(rd: u8, rn: u8, imm: u32) -> Result<u32> {

@@ -4,22 +4,24 @@
 
 ### Current judgment
 
-The next Slippi-style step is materially more promising than the direct `ProcessList::execute()` experiment. A diagnostic ROM patch now loops through NSMB's own main game path, advances `Math::frameCounter` naturally, and skips only the render process list plus `Font::updateFont()` while the rollback-loop flag is active. One renderless tick completed safely, kept the known gameplay state synchronized, and its temporary render-state differences cleared after one ordinary rendered tick.
+The next Slippi-style step is materially more promising than the direct `ProcessList::execute()` experiment. A diagnostic ROM patch now loops through NSMB's own main game path, advances `Math::frameCounter` naturally, and skips only the render process list plus `Font::updateFont()` while the rollback-loop flag is active. A guest-owned seven-entry input table now drives the loop without an interpreter instruction hook, including under JIT. The tested seven-tick transaction and one deterministic recovery tick matched all 172 selected gameplay fields across the two peers.
 
 This is not yet an exact rollback implementation or a playability claim. The result changes the recommendation from “the direct process-list shortcut is insufficient” to “continue with the ROM-side loop, but only behind correctness gates.” The network-facing rollback runtime and GUI defaults remain unchanged.
 
-**Current blocker:** the immediate full-Main-RAM image is intentionally not equal when rendering is omitted, and each extra guest tick still consumes ARM9 cycles while DS timers, events, and ARM7 advance. The diagnostic hook can now inject different player inputs per repeated tick, but a production kernel must source them from the real confirmed/predicted history, preserve the packet/input ring, and define how IRQ/DMA/timer/IPC/audio work is handled.
+**Current blocker:** the immediate full-Main-RAM image is intentionally not equal when rendering is omitted, and each extra guest tick still consumes ARM9 cycles while DS timers, events, and ARM7 advance. The guest table currently contains a diagnostic fixed sequence; a production kernel must source it from the real confirmed/predicted history, restore a real mismatch checkpoint, preserve the packet/input ring, and define how IRQ/DMA/timer/IPC/audio work is handled.
 
-**Next action:** move the proven per-tick selection into a guest-owned history/control block that works without interpreter instruction hooks, then connect that block to the real confirmed/predicted input history. Run movement, contact, item, death/respawn, result/restart, and sound-side-effect routes before connecting it to prediction mismatch recovery.
+**Next action:** connect the proven guest history/control block to the production `InputTimeline` and perform a forced prediction-mismatch restore plus catch-up. Run movement, contact, item, death/respawn, result/restart, and sound-side-effect routes before enabling the path for ordinary matches.
 
 ### ROM patch boundary
 
-The diagnostic generator adds `--game-tick-probe` without changing ordinary stable ROM generation. The patch uses a permanent ARM9 code cave and three gates:
+The diagnostic generator adds `--game-tick-probe` without changing ordinary stable ROM generation. The patch uses a permanent ARM9 code cave, a control/history table, and three gates:
 
 - after the normal frame-counter update, a request counter branches from `0x02004EFC` back to the native loop start at `0x02004EC8`;
 - while active, the render-list call at `0x0204D5EC` is skipped;
 - while active, `Font::updateFont()` at `0x02004EEC` is skipped;
 - input update, scene/game helpers, delete/create/update process lists, priority maintenance, and the native frame-counter update remain on the title's normal path.
+
+The input gate at the native loop start consumes `{packet tick, player 0 keys, player 1 keys}` entries directly from guest RAM, arms the target-side repeat count at a shared game counter, and parks at the gate after the requested count. The park branch rechecks the enable word, so the emulator can release the transaction at a later DS frame boundary. This removes the earlier interpreter-only per-instruction control dependency; it does not yet remove the diagnostic emulator-side table population and snapshot observation.
 
 This is closer to Slippi's game-integrated loop than the earlier emulator-side direct call: the game owns the repeated control flow and all pre-update ordering, while only identified one-shot rendering work is gated.
 
@@ -50,6 +52,8 @@ Thus the native loop can execute the full `1-7` tick diagnostic window without a
 
 `logs/slippi-rom-loop-poc-historical-input-7tick` then injected a distinct seven-entry input/tick sequence into the existing two-player JIT-helper scratch interface at each ROM-loop start. The renderless target and seven-normal-frame control produced the same sequence hash `1A24E475`, advanced `729 -> 736`, and matched all `172` fields in the new gameplay semantic gate both immediately and after one normal rendered tick. The gate covers scene/game counters, player input and match globals, RNG sample, both player actors' transforms/runtime flags, battle-star transform, and moving-hazard transform. Curated full-RAM differences were `445` bytes / `17` pages before, `1,331` / `26` immediately after, and `445` / `22` after recovery; the remaining page-count increase includes the deliberately modified JIT scratch page and network/render-local state. This is a positive historical-input boundary result, but the sequence is still generated by the diagnostic instruction hook rather than the production input timeline.
 
+`logs/slippi-rom-loop-poc-jit-guest-recovery-7tick` moves that sequence into the guest-owned table and runs with JIT enabled and emulator observation only at DS frame boundaries. Both peers armed from game counter `709`, consumed all seven entries with sequence hash `1A24E475`, and stopped at the same comparison counter `718`; all `172` semantic fields matched. A further deterministic guest-table recovery tick also matched all `172` fields. The renderless target reached the transaction endpoint at display frame `954`, while the normal control reached it at frame `959`, demonstrating catch-up without seven full rendered frames. Curated cross-peer RAM differences remained nonzero (`405` bytes / `18` pages before and `587` / `23` both immediately and after recovery), so this is a semantic-boundary pass, not byte-exact state proof.
+
 The extra tick advanced ARM9 by about `139k` timestamp units and ARM7 by about `70k`; therefore the ROM loop does not make hardware time disappear. The earlier scheduler-freeze failure remains relevant: hardware handling must be designed rather than globally suppressed.
 
 ### Gate status
@@ -59,8 +63,9 @@ The extra tick advanced ARM9 by about `139k` timestamp units and ARM7 by about `
 - Render-cache recovery after one normal render: **PASS for the tested route**.
 - Immediate full-RAM equality: **EXPECTED FAIL** because render/OAM and packet-ring state are not equal.
 - Curated gameplay digest: **INCOMPLETE**; current exclusions are diagnostic, not yet promoted.
-- Per-tick distinct input via diagnostic scratch injection: **PASS for seven ticks on the tested route**.
-- Real input-history integration, event coverage, duplicate audio/network effects, hook-free/JIT loop control, rollback performance, and WAN: **NOT RUN**.
+- Per-tick distinct input via guest-owned history table: **PASS for seven ticks on the tested route**.
+- Hook-free guest loop control under JIT: **PASS**; emulator-side diagnostic table population and boundary capture remain.
+- Real input-history integration, checkpoint restore, event coverage, duplicate audio/network effects, rollback performance, and WAN: **NOT RUN**.
 
 ## 2026-08-01 Slippi-style game-tick equivalence PoC
 
@@ -139,14 +144,14 @@ Primary sources:
 
 | Slippi/Melee mechanism | Existing melonDS/NSMB evidence | Required NSMB-specific work |
 | --- | --- | --- |
-| Guest-side game update loop hook | Symbols exist for `ProcessList::execute()`, `ProcessManager::updateProcessLists()`, `Game::waitVBlankIntr()`, `Game::mainProcessTable`, and `Math::frameCounter` | The ROM-loop entry/exit is now identified for one tick; prove it across `2-7` ticks and event routes |
+| Guest-side game update loop hook | Symbols exist for `ProcessList::execute()`, `ProcessManager::updateProcessLists()`, `Game::waitVBlankIntr()`, `Game::mainProcessTable`, and `Math::frameCounter` | The ROM-loop and guest history gate now pass `2-7` ticks under interpreter/JIT on the movement route; prove event routes |
 | Curated game-RAM restore | `tinycorepreimage` already snapshots/restores Main RAM cheaply | Define a stable snapshot boundary and preserve packet bridge/input history and emulator-owned control state |
 | Historical/corrected inputs inside guest | Runtime ARM9 patching and the packet bridge already write deterministic local/remote inputs | Prevent normal pad/Wi-Fi/input sampling from overwriting replayed inputs during catch-up |
 | Skip render and one-shot effects | Current resim can skip GPU presentation, but still runs `NDS::RunFrame()` | Bypass or deduplicate display-list submission, VBlank/IRQ/DMA/timers, sound commands, ARM7 interactions, and network writes during extra game ticks |
 | Fixed rollback window and pacing | Input timeline, prediction, mismatch detection, windowing, waits, and frame-lead control already exist | Retain these pieces; measure whether a practical `2-7` frame window is affordable after game-only resim |
 | Finalized-frame checksum | Existing game-state comparison and semantic traces cover known MvL state | Promote a deterministic digest over every Main RAM page changed by a normal gameplay tick plus critical emulator-visible state |
 
-The symbols and patch infrastructure made a bounded experiment possible, but the direct-call result proved that `ProcessList::execute()` alone is not the correct tick. The ROM-side loop preserves the native ordering and passes the current one-tick semantic/recovery check, while VBlank IRQs, DMA, timers, GPU FIFOs, ARM7 sound/Wi-Fi work, and multi-tick behavior remain its current coupling risks.
+The symbols and patch infrastructure made a bounded experiment possible, but the direct-call result proved that `ProcessList::execute()` alone is not the correct tick. The ROM-side loop preserves the native ordering and passes the current seven-tick semantic/recovery check under JIT. VBlank IRQs, DMA, timers, GPU FIFOs, ARM7 sound/Wi-Fi work, and untested event routes remain its current coupling risks.
 
 ### Required proof before implementation
 
