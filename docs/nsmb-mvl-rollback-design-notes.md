@@ -19,6 +19,16 @@ Tango/Slippi 以外の実装、過去の rollback / offline replay / software re
 | input delay/pacing で訂正をほぼ防ぎ、稀な 1F 訂正時だけ短い hitch を許す hybrid | **技術的には可能性あり** | exact 1F の選択入力と 1,250F semantic gate は通る。ただし「常時快適な rollback」ではない |
 | 別の DS core または trace/superblock 級 JIT 刷新後の再評価 | **不明** | ARM9 支配は確認済み。DeSmuME だけは別 JIT の実測価値があるが、現時点で同一条件の性能・決定性データはない |
 
+### ROM patch と emulator fork の性能分離
+
+同日の追加測定により、「改造ROMそのものが大幅に重く、JIT必須になった」という仮説は主因としては棄却寄りになった。1-process、同じcurrent fork、同じboot intervalでunmodified ROMとpatched direct-MvL ROMを比較すると、active FPSはJIT offで`31.25`対`30.48`、JIT onで`132.33`対`130.89`だった。patched側の差はそれぞれ`2.46%`、`1.09%`に留まる。詳細な条件と再現scriptは`docs/nsmb-mario-vs-luigi-online-poc.md`の2026-08-02節を参照する。
+
+一方、patched ROMで実際のMvL gameplayへ入ったframes 900-1499はJIT off `22.57fps`、JIT on `92.89fps`だった。state traceでscene `0x3`と両player actorを確認済みである。これはgameplay routeがcommon bootより重い証拠だが、unmodified ROMには同じ二人対戦sceneへのcontrol routeがないため、「native MvL scene」と「追加patch code」の内訳は未確定である。
+
+official melonDS 1.1のunmodified ROMは、JIT off・frame limiter offのGUI title sampleで概ね`108-126fps`へ達した。したがって、過去の「通常ROMはJITなしでも60fpsだった」という記憶は今回のPC上でも支持される。current `src/ARM.cpp`はtag `1.1`比で`+3293/-9`行で、interpreter loop内のper-instruction runtime-hook branch／instruction address処理と`BusWrite8/16/32`のtrace-enable checkを持つ。このsource差とcurrent-forkのunmodified ROM低速化は、fork固有のinterpreter hot-path汚染を強く示す。ただしcompile-time hook除外buildはisolated worktreeのvcpkg再構築が時間内に終わらず、直接A/Bは未完了である。
+
+この証拠により、「DS emulation自体が常にぎりぎり」という表現は撤回する。ただしrollback判断はまだ覆らない。現行rollbackはJITを使い、common pathでのROM差は約`1%`、actual MvL gameplayのforward-only値は`92.89fps`である。no-JIT interpreterをcleanに戻すだけではJIT rollbackの余裕は増えない。次の性能作業は、まずNSML hookをcompile-timeに除外できるbuild境界を作ってstandalone regressionを確定し、並行ではなくその後にJIT-enabled MvL gameplayのsample profilerでshared hook、memory helper、scheduler、ARM9 compiled codeの内訳を測る。JIT経路が最低`120fps`へ届く具体的候補がなければ、現行coreのrollback最適化は再開しない。
+
 ### 代替 DS emulator core の監査
 
 「DS だから遅い」のではなく、CPU 実行器、memory fast path、event scheduler、accuracy 方針、state 境界の違いで別 emulator が速くなることはあり得る。ただし、通常プレイの最高速度と exact rollback 適性は別である。2026-08-02 時点の各公式 source を読み、次のように判断した。
@@ -30,7 +40,7 @@ Tango/Slippi 以外の実装、過去の rollback / offline replay / software re
 | [NooDS interpreter](https://github.com/Hydr8gon/NooDS/blob/master/src/core/arm/interpreter.cpp#L143-L155) | ARM9/ARM7 を opcode 単位で交互実行する interpreter | [全 component](https://github.com/Hydr8gon/NooDS/blob/master/src/core/save_states.cpp#L82-L155) を順次 `FILE*` へ save/load。完全性は狙っているが rollback 用 preallocated memory path ではない | ARM9 支配の NSMB で速度優位を期待する構造的根拠が弱い |
 | [SkyEmu execution loop](https://github.com/skylersaleh/SkyEmu/blob/dev/src/nds.h#L6966-L7046) | ARM9/ARM7 の instruction interpreter と cycle/event fast-forward | [libretro state](https://github.com/skylersaleh/SkyEmu/blob/dev/src/libretro.c#L760-L774) は `nds_t` 全体の `memcpy` と pointer 再構築で、snapshot 自体は rollback 向き | State は最も軽そうだが、full-frame の CPU 再実行が支配する。NDS core の互換性・決定性・映像 gate も未検証なので、速度実測なしには採用できない |
 
-したがって、代替 core の探索は否定しないが、全面移植から始めない。最も安い phase-zero は、同じ PC、同じ patched NSMB、同じ gameplay route、software/native-resolution、audio/presentation 無し、state 操作無しで DeSmuME JIT の strict forward-only 速度を測ることである。安定して最低 `120fps`、できれば restore/host 余裕を持つ `150fps` 以上へ届かなければ、その時点で中止する。平均値だけでなく p95 frame time と gameplay/state hash を取る。
+したがって、代替 core の探索は否定しないが、全面移植から始めない。current forkのJIT-enabled gameplay profileで明確なshared overheadを除去できない場合、代替coreとして最も安いphase-zeroは、同じPC、同じpatched NSMB、同じgameplay route、software/native-resolution、audio/presentation無し、state操作無しでDeSmuME JITのstrict forward-only速度を測ることである。安定して最低`120fps`、できればrestore/host余裕を持つ`150fps`以上へ届かなければ、その時点で中止する。平均値だけでなくp95 frame timeとgameplay/state hashを取る。
 
 この gate を通った場合だけ、JIT cache を保持した complete in-memory state の save/restore、同一入力の反復 hash、rollback 後 screenshot、訂正を含む present-to-present interval の順に検証する。stock savestate のように load ごとに JIT cache を消す経路は採用しない。その後にも、現在 melonDS 固有の ROM hooks、packet bridge、local-player/Wi-Fi、desktop integration を移す大きな工数が残る。閉源の DraStic や NO$GBA は「別実装が高速になり得る」参考にはなるが、core 改造と完全 state 検証ができないため採用候補にしない。
 
@@ -85,9 +95,10 @@ Git 履歴と 2026-05-25 以降の関連 Codex session 原ログを監査した�
 
 再開するなら、次のいずれかを別規模の研究として明示的に選ぶ。
 
-1. まず DeSmuME JIT の phase-zero forward-only benchmark だけを行い、上記 `120fps` / p95 / hash gate で即時判定する。通った場合だけ rollback state と melonDS 固有機能の移植可能性を調べる。
-2. trace/superblock など melonDS の ARM9 JIT backend を刷新し、まず rollback 無しの strict offline gameplay で最低 `120fps`、実用上は restore/host 余裕を含めてそれ以上を安定達成する。その時点で full-frame exact rollback を再評価する。
-3. Slippi に近い、DS hardware timeline から独立したさらに小さい NSMB game-state update boundary を新たに特定する。最初の milestone は 1 tick を通常 frame の空き時間へ収めることと、死亡・復帰・土管・hazard・item・audio を含む semantic/visual recovery gate であり、現 ROM loop の延長を production 化することではない。
+1. まずcurrent forkでNSML hookをcompile-time除外できるbuild境界を作り、unmodified/patched × JIT off/on matrixでfork固有regressionを確定する。続いてJIT-enabled MvL gameplayをsample profileし、shared hot-path除去だけでstrict forward-only `120fps`へ届く具体的候補があるか判定する。
+2. 1で届かなければDeSmuME JITのphase-zero forward-only benchmarkだけを行い、上記`120fps` / p95 / hash gateで即時判定する。通った場合だけrollback stateとmelonDS固有機能の移植可能性を調べる。
+3. trace/superblockなどmelonDSのARM9 JIT backendを刷新し、まずrollback無しのstrict offline gameplayで最低`120fps`、実用上はrestore/host余裕を含めてそれ以上を安定達成する。その時点でfull-frame exact rollbackを再評価する。
+4. Slippiに近い、DS hardware timelineから独立したさらに小さいNSMB game-state update boundaryを新たに特定する。最初のmilestoneは1 tickを通常frameの空き時間へ収めることと、死亡・復帰・土管・hazard・item・audioを含むsemantic/visual recovery gateであり、現ROM loopの延長をproduction化することではない。
 
 いずれも成功保証はなく、現時点では推奨する短期ロードマップではない。短期の製品方針は input delay/pacing を主とする。稀な訂正時の 1F hitch を許容する要件へ変更するなら、exact full-frame route を hybrid fallback として再検討できるが、それを Slippi 相当の快適な rollback とは呼ばない。
 

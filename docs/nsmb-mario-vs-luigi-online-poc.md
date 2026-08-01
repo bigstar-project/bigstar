@@ -1,5 +1,26 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Current ROM/JIT performance isolation - 2026-08-02
+
+- **Current conclusion:** the large JIT-disabled slowdown is not primarily caused by the patched ROM. The dominant distinction is the official melonDS 1.1 interpreter versus this fork's modified interpreter path. The patched MvL gameplay route is heavier than the common boot route, but the current evidence does not attribute that whole difference to ROM patch overhead.
+- Added `scripts/run-nsmb-rom-jit-matrix.ps1` to run one emulator instance at a time with a clean `MELONDS_NSML_*` environment, the same executable/input/RTC/frame interval, explicit JIT on/off, disabled frame limit/hash, and CSV output containing executable/ROM/input SHA-256 values. This avoids conflating ROM selection with the older two-instance netplay load.
+- Controlled common-boot result (`logs/rom-jit-matrix-20260802-common-boot`, frames 300-899):
+
+| ROM | JIT | Active FPS | Average frame | Frames over 16ms |
+| --- | --- | ---: | ---: | ---: |
+| Unmodified US ROM | off | `31.25` | `31.998ms` | `447/600` |
+| Patched direct-MvL ROM | off | `30.48` | `32.805ms` | `517/600` |
+| Unmodified US ROM | on | `132.33` | `7.557ms` | `11/600` |
+| Patched direct-MvL ROM | on | `130.89` | `7.640ms` | `19/600` |
+
+  The patched ROM was only `2.46%` slower without JIT and `1.09%` slower with JIT over this shared path. This rules out ROM bytes or dormant ROM patches as the cause of the several-times JIT on/off gap.
+- Patched-ROM gameplay result (`logs/rom-jit-matrix-20260802-patched-gameplay`, frames 900-1499): JIT off was `22.57fps` / `44.315ms`; JIT on was `92.89fps` / `10.765ms`. `logs/rom-jit-matrix-20260802-gameplay-state/nsmb-mvl-route.game-state.csv` confirms at frame 900 that MvL gameplay scene `0x3` is active and both player actors exist. MvL gameplay is therefore materially heavier than common boot. There is no unmodified-ROM route to the same two-player MvL scene, so this measurement does **not** separate native two-player scene cost from patch code cost.
+- The fork's unmodified ROM also becomes slow later in its neutral-input route (`logs/rom-jit-matrix-20260802-base-late`, frames 1100-1499): JIT off `12.38fps`, JIT on `50.23fps`. The phase is not identical to the patched gameplay scene, so these absolute values must not be compared as a ROM A/B; they do show that the fork can exhibit severe interpreter slowdown without any ROM patch.
+- Official melonDS 1.1 was launched with a copied temporary config, unmodified ROM, frame limiter off, software renderer, and `JIT.Enable=false`. Its window-title sample settled mostly around `108-126fps`, so the user's memory that ordinary NSMB can sustain 60fps without JIT on this PC is supported. This is a GUI/title sample rather than the instrumented fixed-frame harness and is therefore not used for a precise percentage comparison.
+- Source evidence agrees with the executable measurements. Relative to tag `1.1`, current `src/ARM.cpp` is `+3293/-9` lines. The interpreter calls `NSMLRuntimeHooksMaybeEnabled()` before execution, retains a per-guest-instruction runtime branch and instruction-address work in both ARM execution loops, and calls `NSMLWriteTraceMaybeEnabled()` from each `BusWrite8/16/32`. Official 1.1 has none of these NSML checks. A compile-time-disabled temporary A/B build was attempted, but the isolated worktree triggered a full vcpkg dependency rebuild and did not finish within the bounded run; therefore the exact cost of each hook is still not directly quantified.
+- **Rollback implication:** this corrects the overly broad interpretation that DS emulation itself is inherently near the limit. This fork's instrumentation is a real contributor to the no-JIT regression. It does not yet rescue the current rollback design: rollback measurements already use JIT, the common-path patched/unmodified JIT difference is only about `1%`, and actual patched MvL gameplay measured `92.89fps`, below the `120fps` minimum forward-only gate needed for comfortable full-frame correction headroom.
+- **Next action:** first compile the normal ARM interpreter with NSML hooks structurally excluded and rerun this exact matrix, then profile the JIT-enabled patched gameplay route. Only shared hot-path work that is present under JIT can improve the rollback budget; polishing no-JIT behavior alone would fix standalone emulation but would not establish comfortable rollback.
+
 ## Slippi-style ROM game-loop rollback probe - 2026-08-01
 
 - 完了: `tools/bigstar-rom`へ診断専用`--game-tick-probe`を追加した。通常のstable ROM生成とGUI生成は既定で無効のまま維持し、診断ROMだけがARM9メインループ、render process list、font updateへ分岐gateを入れる。追加tickはNSMB自身の入力更新、scene/game helper、delete/create/update process list、priority更新、frame counter更新を通常順で通り、rollback-loop中だけrender listとfont updateを省く。
@@ -16,7 +37,7 @@
 - 検証: fixed seed `0x12345678`、fixed base tick `0x0051`、同一入力hash `7C3924A2`でhost target/control画像を比較した。depth 4終端は`281/98,304 pixels`（`0.285848%`）、通常描画1tick後も`292/98,304`（`0.297038%`）が異なる。空画面や背景崩壊はなく主に両player sprite領域の位相差だが、回復後もexact convergenceしないため描画gateはfailとする。
 - 却下: 最終catch-up tickでfont更新を省きprocess-list描画だけ戻す案は172 semantic fieldを維持したが、両側depth 4が`37.273/34.389ms`へ悪化し、UI stale riskも増えるためrevertした。retained variantは最終tickでfontとprocess-listを通常描画する。
 - 現在のblocker: guest-owned/JIT loopの意味状態はtested movement routeで一致する一方、60 FPSの1 presentation intervalとcorrected image convergenceを満たしていない。ユーザー指定どおり、このgate未達のままproduction入力serialize、checkpoint接続、event-route拡張をブラッシュアップしない。
-- 次: catch-upがVBlankをまたぐ位置を計測し、guest update、peer wait、最終font/render、presentationのコストを分離する。1 presentation intervalへrepeatableな余裕を持って収まり、fixed-seed same-role画像が収束する候補だけを残す。その後に限りproduction input table接続へ進む。
+- 後続判断: VBlank／guest update／最終renderの分離、exact 1F probe、full-history auditまで完了した。訂正処理だけでも60fps予算を安定して満たさず、通常current frameはその外側に残るため、このROM-loopのproduction接続は停止した。現行判断は`docs/nsmb-mvl-rollback-design-notes.md`先頭の2026-08-02節を正とする。
 
 ## NsmbMvlNetplayRuntime リファクタ調査 - 2026-07-15
 
