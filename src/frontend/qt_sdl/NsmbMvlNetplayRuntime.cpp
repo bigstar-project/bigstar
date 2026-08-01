@@ -797,7 +797,7 @@ void WritePacketBridgeJitScratchIfNeeded(
             : frame;
         const auto networkStart = std::chrono::steady_clock::now();
         {
-            std::unique_lock<std::mutex> lock(G.Mutex);
+            std::lock_guard<std::mutex> lock(G.Mutex);
             NetplaySession::PumpLocked(
                 NetplaySessionContext(), NetplaySessionHooks(), nds, frame);
             NetplaySession::SendMatchSeedLocked(NetplaySessionContext());
@@ -809,38 +809,47 @@ void WritePacketBridgeJitScratchIfNeeded(
                 auto localIt = G.InputRuntime.LocalInputs.find(logicalFrame);
                 effectiveLocalInput = localIt != G.InputRuntime.LocalInputs.end() ? localIt->second : NeutralInput();
             }
-            auto it = G.InputRuntime.RemoteInputs.find(logicalFrame);
-            if (it != G.InputRuntime.RemoteInputs.end())
-            {
-                remoteInput = it->second;
-                hasRemoteInput = true;
-            }
-            else if (G.Rollback.Enabled && G.Input.NetplayOnly
-                && (G.Connection.StartFrame == 0 || logicalFrame >= G.Connection.StartFrame)
-                && NetplaySession::TryWaitForRollbackRemoteInputLocked(
-                    NetplaySessionContext(),
-                    NetplaySessionHooks(),
-                    lock,
-                    nds,
-                    frame,
-                    logicalFrame,
-                    remoteInput))
-            {
-                hasRemoteInput = true;
-            }
-            else if (G.Rollback.Enabled && G.Input.NetplayOnly
-                && (G.Connection.StartFrame == 0 || logicalFrame >= G.Connection.StartFrame))
-            {
-                hasRemoteInput = RollbackRuntime::ResolveRemoteInputLocked(
-                    RollbackContext(), logicalFrame, remoteInput, predictedRemoteInput);
-            }
         }
         networkUs = static_cast<unsigned long long>(ElapsedUs(networkStart));
 
+        // Frame-lead throttling pumps the network. Do it before choosing the
+        // remote input so a packet received here cannot confirm a prediction
+        // after that prediction has already been committed to guest scratch.
         const auto throttleStart = std::chrono::steady_clock::now();
         NetplaySession::ThrottleFrameLead(
             NetplaySessionContext(), NetplaySessionHooks(), nds, frame, sendFrame);
         throttleUs = static_cast<unsigned long long>(ElapsedUs(throttleStart));
+
+        const auto resolveStart = std::chrono::steady_clock::now();
+        {
+            std::unique_lock<std::mutex> lock(G.Mutex);
+            auto it = G.InputRuntime.RemoteInputs.find(logicalFrame);
+            const bool rollbackInputActive = G.Rollback.Enabled
+                && G.Input.NetplayOnly
+                && (G.Connection.StartFrame == 0
+                    || logicalFrame >= G.Connection.StartFrame);
+            if (rollbackInputActive)
+            {
+                if (it == G.InputRuntime.RemoteInputs.end())
+                    (void)NetplaySession::TryWaitForRollbackRemoteInputLocked(
+                        NetplaySessionContext(),
+                        NetplaySessionHooks(),
+                        lock,
+                        nds,
+                        frame,
+                        logicalFrame,
+                        remoteInput);
+                hasRemoteInput = RollbackRuntime::ResolveRemoteInputLocked(
+                    RollbackContext(), logicalFrame, remoteInput,
+                    predictedRemoteInput);
+            }
+            else if (it != G.InputRuntime.RemoteInputs.end())
+            {
+                remoteInput = it->second;
+                hasRemoteInput = true;
+            }
+        }
+        networkUs += static_cast<unsigned long long>(ElapsedUs(resolveStart));
 
         const bool aiProvidesRemoteInput =
             RuleAIProvidesInputForPlayer(localPlayer ^ 1) ||
