@@ -212,6 +212,10 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
     constexpr u32 activeAddr = 0x02001AC4;
     constexpr u32 magicAddr = 0x02001AC8;
     constexpr u32 magic = 0x52505447;
+    constexpr u32 netPacketTickAddr = 0x020888E0;
+    constexpr u32 scratchTickAddr = 0x023C1200;
+    constexpr u32 scratchKeysAddr = 0x023C1208;
+    constexpr u32 scratchPacketsAddr = 0x023C1240;
 
     if (instrAddr != loopStart && instrAddr != loopGateAfterCounter)
         return false;
@@ -222,6 +226,7 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
         bool Enabled = false;
         bool RestoreAfterExtra = false;
         bool RenderlessAB = false;
+        bool HistoricalInputAB = false;
         u32 StartFrame = 900;
         u32 ExtraTicks = 1;
         std::string Role;
@@ -239,6 +244,8 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
         bool RenderlessABTickPending = false;
         u32 ActualTargetFrame = 0;
         u32 ExtraTicksSeen = 0;
+        u32 HistoricalBaseTick = 0;
+        u32 InputSequenceHash = 2166136261u;
         std::vector<u8> SavedMainRAM;
     };
 
@@ -252,6 +259,7 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
         cfg.Enabled = NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE");
         cfg.RestoreAfterExtra = NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE_RESTORE_AFTER_EXTRA");
         cfg.RenderlessAB = NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE_RENDERLESS_AB");
+        cfg.HistoricalInputAB = NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE_HISTORICAL_INPUT_AB");
         cfg.StartFrame = NSMLEnvU32("MELONDS_NSML_ROM_GAME_TICK_PROBE_START_FRAME", 900);
         cfg.ExtraTicks = std::clamp(
             NSMLEnvU32("MELONDS_NSML_ROM_GAME_TICK_PROBE_EXTRA_TICKS", 1), 1u, 7u);
@@ -270,7 +278,7 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
             if (cfg.LogFile)
             {
                 fprintf(cfg.LogFile,
-                    "role,frame,phase,main_ram_hash,game_frame_counter,arm9_timestamp,arm7_timestamp,request,active,extra_ticks_seen\n");
+                    "role,frame,phase,main_ram_hash,game_frame_counter,arm9_timestamp,arm7_timestamp,request,active,extra_ticks_seen,input_sequence_hash,scratch_tick,scratch_keys0,scratch_keys1\n");
                 fflush(cfg.LogFile);
             }
         }
@@ -290,7 +298,7 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
         const u64 mainRAMHash = HashNSMLGameTickProbeMainRAM(cpu->NDS);
         if (cfg.LogFile)
         {
-            fprintf(cfg.LogFile, "%s,%u,%s,%016llX,%u,%llu,%llu,%u,%u,%u\n",
+            fprintf(cfg.LogFile, "%s,%u,%s,%016llX,%u,%llu,%llu,%u,%u,%u,%08X,%u,%u,%u\n",
                 cfg.Role.c_str(),
                 frame,
                 phase,
@@ -300,7 +308,11 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
                 static_cast<unsigned long long>(cpu->NDS.ARM7Timestamp),
                 cpu->NDS.ARM9Read32(requestAddr),
                 cpu->NDS.ARM9Read32(activeAddr),
-                state.ExtraTicksSeen);
+                state.ExtraTicksSeen,
+                state.InputSequenceHash,
+                cpu->NDS.ARM9Read16(scratchTickAddr),
+                cpu->NDS.ARM9Read16(scratchKeysAddr),
+                cpu->NDS.ARM9Read16(scratchKeysAddr + 2));
             fflush(cfg.LogFile);
         }
 
@@ -317,6 +329,36 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
 
     if (cfg.RenderlessAB)
     {
+        auto applyHistoricalInput = [&]()
+        {
+            // Deterministic diagnostic history. The JIT helper patch already
+            // routes NSMB's per-player key reads through these scratch words.
+            constexpr std::array<u16, 7> player0Keys = {0x010, 0x011, 0x000, 0x020, 0x001, 0x810, 0x000};
+            constexpr std::array<u16, 7> player1Keys = {0x020, 0x022, 0x000, 0x010, 0x002, 0x820, 0x000};
+            const u32 index = std::min(state.ExtraTicksSeen, cfg.ExtraTicks - 1);
+            const u16 tick = static_cast<u16>((state.HistoricalBaseTick + index) & 0xFFFF);
+            const u16 keys0 = player0Keys[index];
+            const u16 keys1 = player1Keys[index];
+            cpu->NDS.ARM9Write16(netPacketTickAddr, tick);
+            cpu->NDS.ARM9Write16(scratchTickAddr, tick);
+            cpu->NDS.ARM9Write16(scratchKeysAddr, keys0);
+            cpu->NDS.ARM9Write16(scratchKeysAddr + 2, keys1);
+            for (u32 player = 0; player < 2; player++)
+            {
+                const u32 packetAddr = scratchPacketsAddr + player * 0x40;
+                const u16 keys = player == 0 ? keys0 : keys1;
+                cpu->NDS.ARM9Write16(packetAddr, tick);
+                cpu->NDS.ARM9Write16(packetAddr + 2, keys);
+            }
+            for (const u16 value : {tick, keys0, keys1})
+            {
+                state.InputSequenceHash ^= value & 0xFF;
+                state.InputSequenceHash *= 16777619u;
+                state.InputSequenceHash ^= value >> 8;
+                state.InputSequenceHash *= 16777619u;
+            }
+        };
+
         if (instrAddr == loopStart && !state.TargetSeen && !state.Done &&
             cpu->NDS.NumFrames >= cfg.StartFrame && IsNSMLMarioVsLuigiGameplay(cpu->NDS))
         {
@@ -324,11 +366,19 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
             state.ActualTargetFrame = cpu->NDS.NumFrames;
             state.RenderlessABTickPending = true;
             dump("before-renderless-ab-tick");
+            state.HistoricalBaseTick = cpu->NDS.ARM9Read16(scratchTickAddr);
+            if (cfg.HistoricalInputAB)
+                applyHistoricalInput();
             if (isTarget)
             {
                 cpu->NDS.ARM9Write32(activeAddr, 1);
                 cpu->NDS.ARM9Write32(requestAddr, cfg.ExtraTicks - 1);
             }
+            return false;
+        }
+        if (instrAddr == loopStart && state.RenderlessABTickPending && cfg.HistoricalInputAB)
+        {
+            applyHistoricalInput();
             return false;
         }
         if (instrAddr == loopGateAfterCounter && state.RenderlessABTickPending)

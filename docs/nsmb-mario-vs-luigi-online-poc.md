@@ -7,8 +7,9 @@
 - 検証: `logs/slippi-rom-loop-poc-loop-aligned`では追加tickと通常replayがともにgame counter `729 -> 730`となり、既知gameplay traceはframe 990まで同期した。curatedな即時差は`434 bytes / 12 pages`で、full RAM exact一致ではない。
 - 検証: `logs/slippi-rom-loop-poc-renderless-recovery`ではcross-peer curated差がtick前`445 bytes / 17 pages`、renderless直後`759 / 22`、次の通常render後`404 / 17`となった。増分の中心はOAMとactor render/cache pageで、一回の通常render後にbaseline以下へ戻る。tested movement routeでは永続gameplay divergenceを検出していない。
 - 検証: ROM-loopを`2`および`7`連続tickへ拡張した。`logs/slippi-rom-loop-poc-renderless-ab-2tick`は両peerでgame counter `729 -> 731`、curated差は前`448 / 17`、直後`819 / 23`、通常render後`406 / 20`だった。`logs/slippi-rom-loop-poc-renderless-ab-7tick`は`729 -> 736`、前`445 / 17`、直後`907 / 23`、回復後`411 / 20`だった。対象側はどちらもdisplay frameを1だけ進め、control側はそれぞれ2／7進めたため、`1-7`tickのrenderless loop制御と描画回復はtested movement routeで成立した。
-- 現在のblocker: multi-tickは同じcurrent inputを再利用しており、tick別historical input注入は未実装である。加えてitem/contact/death/result/restart、duplicate sound/network、IRQ/DMA/timer/IPC/ARM7副作用、JITからのrequest制御、実rollback性能は未検証である。ROM-loop方式は継続価値ありだが、現行rollbackへはまだ接続しない。
-- 次: packet/input履歴から各再実行tickの入力を選ぶtransactionを実装し、disposable render rangeをevent routeで再確認してcurated gameplay digestを固定する。
+- 完了: 診断hookから既存JIT-helper scratchへ、7tickそれぞれ異なるplayer 0/1入力とpacket tickを注入するA/Bを追加した。`logs/slippi-rom-loop-poc-historical-input-7tick`ではtarget/controlの入力列hashがともに`1A24E475`、game counterが`729 -> 736`で一致した。scene/game globals、入力、勝敗、RNG sample、両player actor、star、moving hazardの172 fieldを読むsemantic gateも直後・通常render後とも差分0だった。curated RAM差は前`445 / 17`、直後`1331 / 26`、回復後`445 / 22`で、残差には意図的に変更したscratch pageとnetwork/render-local stateが含まれる。
+- 現在のblocker: tick別入力の境界は通ったが、入力列は診断hookの固定列であり、productionのconfirmed/predicted input履歴とは未接続である。加えてitem/contact/death/result/restart、duplicate sound/network、IRQ/DMA/timer/IPC/ARM7副作用、hook-free/JIT制御、実rollback性能は未検証である。ROM-loop方式は継続価値ありだが、現行rollbackへはまだ接続しない。
+- 次: tick別input/tickをguest-owned control blockから読むROM gateへ移し、instruction hookなしでも動く形にしてproduction input timelineへ接続する。並行してevent routeでsemantic digestとdisposable render rangeを再確認する。
 
 ## NsmbMvlNetplayRuntime リファクタ調査 - 2026-07-15
 
