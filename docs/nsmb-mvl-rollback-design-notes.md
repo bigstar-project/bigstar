@@ -10,7 +10,7 @@ This is not yet an exact rollback implementation or a playability claim. The res
 
 **Current blocker:** the immediate full-Main-RAM image is intentionally not equal when rendering is omitted, and each extra guest tick still consumes ARM9 cycles while DS timers, events, and ARM7 advance. The guest table currently contains a diagnostic fixed sequence; a production kernel must source it from the real confirmed/predicted history, restore a real mismatch checkpoint, preserve the packet/input ring, and define how IRQ/DMA/timer/IPC/audio work is handled.
 
-**Next action:** connect the proven guest history/control block to the production `InputTimeline` and perform a forced prediction-mismatch restore plus catch-up. Run movement, contact, item, death/respawn, result/restart, and sound-side-effect routes before enabling the path for ordinary matches.
+**Next action:** serialize the new production `InputTimeline::ResolveReplayFrameInputs()` results into the proven guest history/control block, then perform a forced prediction-mismatch restore plus catch-up. Run movement, contact, item, death/respawn, result/restart, and sound-side-effect routes before enabling the path for ordinary matches.
 
 ### ROM patch boundary
 
@@ -54,6 +54,8 @@ Thus the native loop can execute the full `1-7` tick diagnostic window without a
 
 `logs/slippi-rom-loop-poc-jit-guest-recovery-7tick` moves that sequence into the guest-owned table and runs with JIT enabled and emulator observation only at DS frame boundaries. Both peers armed from game counter `709`, consumed all seven entries with sequence hash `1A24E475`, and stopped at the same comparison counter `718`; all `172` semantic fields matched. A further deterministic guest-table recovery tick also matched all `172` fields. The renderless target reached the transaction endpoint at display frame `954`, while the normal control reached it at frame `959`, demonstrating catch-up without seven full rendered frames. Curated cross-peer RAM differences remained nonzero (`405` bytes / `18` pages before and `587` / `23` both immediately and after recovery), so this is a semantic-boundary pass, not byte-exact state proof.
 
+The first production integration boundary is now shared rather than duplicated. `InputTimeline::ResolveReplayFrameInputs()` resolves the local input, confirmed-or-predicted remote input, prediction flag, and player 0/1 ordering for one replay frame. The existing full-`RunFrame()` rollback path uses this API, and unit coverage fixes both local-player orderings, confirmed and predicted remote cases, neutral fallback, and invalid player IDs. `logs/slippi-production-input-resolution-rollback` passed the existing 1,250-frame packet-loss rollback checkpoint/golden tier. The API does not yet write the ROM history table, so it proves input selection compatibility rather than guest-loop production activation.
+
 The extra tick advanced ARM9 by about `139k` timestamp units and ARM7 by about `70k`; therefore the ROM loop does not make hardware time disappear. The earlier scheduler-freeze failure remains relevant: hardware handling must be designed rather than globally suppressed.
 
 ### Gate status
@@ -65,7 +67,8 @@ The extra tick advanced ARM9 by about `139k` timestamp units and ARM7 by about `
 - Curated gameplay digest: **INCOMPLETE**; current exclusions are diagnostic, not yet promoted.
 - Per-tick distinct input via guest-owned history table: **PASS for seven ticks on the tested route**.
 - Hook-free guest loop control under JIT: **PASS**; emulator-side diagnostic table population and boundary capture remain.
-- Real input-history integration, checkpoint restore, event coverage, duplicate audio/network effects, rollback performance, and WAN: **NOT RUN**.
+- Production replay-input selection boundary: **PASS** in unit tests and the existing full-frame rollback regression.
+- Guest-table serialization from that boundary, checkpoint restore plus guest catch-up, event coverage, duplicate audio/network effects, rollback performance, and WAN: **NOT RUN**.
 
 ## 2026-08-01 Slippi-style game-tick equivalence PoC
 

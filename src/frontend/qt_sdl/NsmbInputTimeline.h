@@ -93,6 +93,14 @@ struct RemoteInputStoreResult
     ConfirmedInputResult Confirmation;
 };
 
+struct ReplayFrameInputs
+{
+    InputState Local;
+    InputState Remote;
+    InputState Players[2];
+    bool RemotePredicted = false;
+};
+
 class Runtime
 {
 public:
@@ -140,6 +148,13 @@ public:
     unsigned long long FrameLeadThrottleUs = 0;
     unsigned long long FrameLeadThrottleMaxUs = 0;
 };
+
+std::optional<ReplayFrameInputs> ResolveReplayFrameInputs(
+    Runtime& runtime,
+    melonDS::u32 frame,
+    int localPlayer,
+    const InputState& neutralInput,
+    const PredictionProbe& probe = {});
 
 class Recorder
 {

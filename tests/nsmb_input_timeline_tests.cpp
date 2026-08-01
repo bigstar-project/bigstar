@@ -177,6 +177,42 @@ void TestRuntimeRemoteStorePrimeAndPrune()
     CHECK(runtime.Lead(110, noFrameLimit) == 5);
 }
 
+void TestReplayFrameInputResolution()
+{
+    using NsmbMvlNetplay::InputTimeline::ResolveReplayFrameInputs;
+    using NsmbMvlNetplay::InputTimeline::Runtime;
+    Runtime runtime;
+    const auto neutral = Input(0xFFF);
+    const auto local = Input(0xFFE);
+    auto remote = Input(0xFFD);
+    remote.Touching = true;
+    remote.TouchX = 42;
+    remote.TouchY = 84;
+    runtime.LocalInputs.emplace(40, local);
+    runtime.RemoteInputs.emplace(40, remote);
+
+    const auto playerZero = ResolveReplayFrameInputs(runtime, 40, 0, neutral);
+    CHECK(playerZero.has_value());
+    CHECK(playerZero && SameInput(playerZero->Local, local));
+    CHECK(playerZero && SameInput(playerZero->Remote, remote));
+    CHECK(playerZero && SameInput(playerZero->Players[0], local));
+    CHECK(playerZero && SameInput(playerZero->Players[1], remote));
+    CHECK(playerZero && !playerZero->RemotePredicted);
+
+    const auto playerOne = ResolveReplayFrameInputs(runtime, 40, 1, neutral);
+    CHECK(playerOne.has_value());
+    CHECK(playerOne && SameInput(playerOne->Players[0], remote));
+    CHECK(playerOne && SameInput(playerOne->Players[1], local));
+
+    const auto predicted = ResolveReplayFrameInputs(runtime, 41, 1, neutral);
+    CHECK(predicted.has_value());
+    CHECK(predicted && SameInput(predicted->Local, neutral));
+    CHECK(predicted && SameInput(predicted->Remote, neutral));
+    CHECK(predicted && predicted->RemotePredicted);
+    CHECK(!ResolveReplayFrameInputs(runtime, 40, -1, neutral));
+    CHECK(!ResolveReplayFrameInputs(runtime, 40, 2, neutral));
+}
+
 void TestRuntimeRestartContractAndStatistics()
 {
     using NsmbMvlNetplay::InputTimeline::Runtime;
@@ -366,6 +402,7 @@ int main()
     TestPredictionMismatchScheduling();
     TestPredictionProbeAndPrune();
     TestRuntimeRemoteStorePrimeAndPrune();
+    TestReplayFrameInputResolution();
     TestRuntimeRestartContractAndStatistics();
     TestButtonAndMaskParsing();
     TestTimelineTargetsTouchAndFirstMatch();

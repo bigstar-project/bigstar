@@ -440,6 +440,32 @@ void Runtime::RecordFrameLeadThrottle(unsigned long long elapsedUs, unsigned lon
     FrameLeadThrottleMaxUs = std::max(FrameLeadThrottleMaxUs, elapsedUs);
 }
 
+std::optional<ReplayFrameInputs> ResolveReplayFrameInputs(
+    Runtime& runtime,
+    melonDS::u32 frame,
+    int localPlayer,
+    const InputState& neutralInput,
+    const PredictionProbe& probe)
+{
+    if (localPlayer < 0 || localPlayer > 1)
+        return std::nullopt;
+
+    ReplayFrameInputs result;
+    const auto local = runtime.LocalInputs.find(frame);
+    if (local != runtime.LocalInputs.end())
+        result.Local = local->second;
+    else
+        result.Local = neutralInput;
+
+    const PredictedInput remote = runtime.RollbackInputs.Resolve(
+        frame, runtime.RemoteInputs, neutralInput, probe);
+    result.Remote = remote.Input;
+    result.RemotePredicted = remote.Predicted;
+    result.Players[localPlayer] = result.Local;
+    result.Players[1 - localPlayer] = result.Remote;
+    return result;
+}
+
 bool ParseInputSpec(const std::string& spec, InputState& input)
 {
     input = {};

@@ -23,6 +23,19 @@ using StoredState = RollbackStorage::StoredState;
 
 InputState NeutralInput() { return {}; }
 
+InputTimeline::PredictionProbe PredictionProbe(
+    const Config::RollbackConfig &config) {
+  InputTimeline::PredictionProbe probe;
+  probe.Modulo = config.PredictionProbeModulo;
+  probe.Offset = config.PredictionProbeOffset;
+  probe.Limit = config.PredictionProbeLimit;
+  probe.StartFrame = config.PredictionProbeStartFrame;
+  if (config.PredictionProbeEndFrame != kNoFrame)
+    probe.EndFrame = config.PredictionProbeEndFrame;
+  probe.KeyMask = config.PredictionProbeKeyMask;
+  return probe;
+}
+
 unsigned long long ElapsedUs(std::chrono::steady_clock::time_point start) {
   return static_cast<unsigned long long>(
       std::chrono::duration_cast<std::chrono::microseconds>(
@@ -311,15 +324,7 @@ void InvalidateMainRAMJIT(const Config::RollbackConfig &config,
 
 bool ResolveRemoteInputLocked(Context context, melonDS::u32 frame,
                               InputState &input, bool &predicted) {
-  InputTimeline::PredictionProbe probe;
-  probe.Modulo = context.Config.PredictionProbeModulo;
-  probe.Offset = context.Config.PredictionProbeOffset;
-  probe.Limit = context.Config.PredictionProbeLimit;
-  probe.StartFrame = context.Config.PredictionProbeStartFrame;
-  if (context.Config.PredictionProbeEndFrame != kNoFrame)
-    probe.EndFrame = context.Config.PredictionProbeEndFrame;
-  probe.KeyMask = context.Config.PredictionProbeKeyMask;
-
+  const InputTimeline::PredictionProbe probe = PredictionProbe(context.Config);
   const auto resolved = context.Inputs.RollbackInputs.Resolve(
       frame, context.Inputs.RemoteInputs, NeutralInput(), probe);
   input = resolved.Input;
@@ -549,24 +554,25 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
   unsigned long long resimCheckpointSaveMaxUs = 0;
   for (melonDS::u32 resimFrame = restoreFrame; resimFrame < frame;
        resimFrame++) {
-    InputState localInput = NeutralInput();
-    InputState remoteInput = NeutralInput();
-    bool predictedRemote = false;
+    InputTimeline::ReplayFrameInputs replayInputs;
     {
       std::lock_guard<std::mutex> lock(context.Mutex);
-      const auto local = context.Inputs.LocalInputs.find(resimFrame);
-      if (local != context.Inputs.LocalInputs.end())
-        localInput = local->second;
-      ResolveRemoteInputLocked(context, resimFrame, remoteInput,
-                               predictedRemote);
+      const InputTimeline::PredictionProbe probe =
+          PredictionProbe(context.Config);
+      const auto resolved = InputTimeline::ResolveReplayFrameInputs(
+          context.Inputs, resimFrame, localPlayer, NeutralInput(), probe);
+      if (!resolved)
+        return false;
+      replayInputs = *resolved;
     }
 
     hooks.ApplyFramePatches(instanceID, resimFrame, nds);
     hooks.WritePacketBridgeInputs(instanceID, resimFrame, nds, localPlayer,
-                                  localInput, remoteInput, true,
-                                  predictedRemote);
+                                  replayInputs.Local, replayInputs.Remote, true,
+                                  replayInputs.RemotePredicted);
 
-    const InputState runtimeLocalInput = hooks.PrepareRuntimeInput(localInput);
+    const InputState runtimeLocalInput =
+        hooks.PrepareRuntimeInput(replayInputs.Local);
     nds->SetKeyMask(runtimeLocalInput.KeyMask);
     if (runtimeLocalInput.Touching)
       nds->TouchScreen(runtimeLocalInput.TouchX, runtimeLocalInput.TouchY);

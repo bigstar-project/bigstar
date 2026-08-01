@@ -10,8 +10,9 @@
 - 完了: 診断hookから既存JIT-helper scratchへ、7tickそれぞれ異なるplayer 0/1入力とpacket tickを注入するA/Bを追加した。`logs/slippi-rom-loop-poc-historical-input-7tick`ではtarget/controlの入力列hashがともに`1A24E475`、game counterが`729 -> 736`で一致した。scene/game globals、入力、勝敗、RNG sample、両player actor、star、moving hazardの172 fieldを読むsemantic gateも直後・通常render後とも差分0だった。curated RAM差は前`445 / 17`、直後`1331 / 26`、回復後`445 / 22`で、残差には意図的に変更したscratch pageとnetwork/render-local stateが含まれる。
 - 完了: tick別入力をguest RAM上の7-entry history/control blockへ移し、ROM input gate自身がpacket tickと両player keysを順にJIT scratchへ適用するようにした。共有game counterで開始し、履歴消費後は解除可能なguest loopへparkするため、instruction hookなしで正確なtransaction終端を観測できる。
 - 検証: JITを有効にした`logs/slippi-rom-loop-poc-jit-guest-recovery-7tick`で、両peerはgame counter `709`から同じ入力列hash `1A24E475`の7 entryを消費し、counter `718`で停止した。renderless targetはdisplay frame `954`、normal controlは`959`で同じ終端へ到達し、172 semantic fieldは差分0だった。さらに同一の確定入力1tickで解除した回復後も差分0。curated RAM差は前`405 bytes / 18 pages`、直後と回復後が`587 / 23`であり、full RAM exact一致はしていない。
-- 現在のblocker: guest-owned/JIT loop制御は通ったが、履歴列はまだ診断側の固定列で、productionのconfirmed/predicted `InputTimeline`とcheckpoint restoreには未接続である。item/contact/death/result/restart、duplicate sound/network、IRQ/DMA/timer/IPC/ARM7副作用、実rollback性能も未検証なので、現行rollbackへはまだ接続しない。
-- 次: production input timelineからguest history tableを組み立て、既知のprediction mismatchでcheckpoint restore→最大7tick catch-upを実行する。その後、event routeごとにsemantic digest、音声／network重複、disposable render rangeを再確認する。
+- 完了: productionの1 replay frameについて、local input、confirmed/predicted remote input、prediction flag、local player 0/1に応じた両player順序を一度に解決する`InputTimeline::ResolveReplayFrameInputs()`を追加した。既存full-`RunFrame()` rollbackもこの共通境界を使う。単体testに加え、`logs/slippi-production-input-resolution-rollback`のpacket loss付き1,250-frame rollback checkpoint/golden tierがpassした。
+- 現在のblocker: guest-owned/JIT loop制御とproduction入力選択は個別に通ったが、選択結果をguest history tableへserializeしてcheckpoint restore後に起動する接続は未実装である。item/contact/death/result/restart、duplicate sound/network、IRQ/DMA/timer/IPC/ARM7副作用、実rollback性能も未検証なので、現行rollbackへはまだ接続しない。
+- 次: 共通入力解決結果からguest history tableを組み立て、既知のprediction mismatchでcheckpoint restore→最大7tick catch-upを実行する。その後、event routeごとにsemantic digest、音声／network重複、disposable render rangeを再確認する。
 
 ## NsmbMvlNetplayRuntime リファクタ調査 - 2026-07-15
 
