@@ -2,15 +2,19 @@
 
 ## Live Slippi-style ROM-loop rollback milestone - 2026-08-02
 
-- **Current conclusion:** `romloop` backendを実prediction/confirmationへ接続し、手動操作可能な2-process launcherから送信遅延とjitterを注入できる段階へ進んだ。固定frameの診断triggerではなく、遅れて届いた確定入力が予測と異なった時だけ訂正を発火する。既存full-frame routeは比較baseline/fallbackとして保持する。
+- **Current conclusion:** `romloop` backendを実prediction/confirmationと手動操作へ接続できたが、最新2回の手動runでどちらも片peerのgame tickが停止した。したがって現行launcherは不具合再現用PoCであり、快適性や長時間安定性をpassした手動版とは扱わない。固定frameの診断triggerではなく、遅れて届いた確定入力が予測と異なった時だけ訂正する構成と、既存full-frame baseline/fallbackは保持する。
+- 手動run `logs/nsmb-mvl-manual-local-20260802-201958` はclientがcheckpoint `991` / game frame `750`で訂正をarmしたまま`completed`へ到達せず、display frame `1080-2160`で同じplayer/object/hazard heartbeatを出し続けた。hostは同期間もgameplayを更新し続けた。
+- 次の手動run `logs/nsmb-mvl-manual-local-20260802-202040` はhostの最後の訂正をdisplay frame `1125`でcompletedと記録した後、gate checkpointが`1125` / game frame `884`から更新されなくなった。次のmismatch `1133`をcurrent `1136`で処理した時点で既にdepth `11` / history capacity `8`となり訂正不能、display frame `1200-1920`のheartbeatは同一だった。両runとも外側frameとpacket送受信は継続し、prefetch/data abortやstderr例外はない。
+- 直接の停止機構は、ROM input gateへ到達しなくなるため新checkpointも採取されず、古いcheckpointと現在display frameの差が8-entry historyを超えることである。根本原因候補はLCD defer解除の競合である。`FinalizeNSMLGameRAMRollbackTransaction()`はtick-end markerを要求せずhistoryを無効化できる一方、LCD defer解除はhistory有効中のtick-endだけで行うため、判定順が入れ替わるとLCD eventを永久保留し得る。
+- ただし、反復自動入力の1800-frame A/B `logs/nsmb-mvl-manual-local-20260802-202636` (`-RomLoopNoDeferLCD`) と `logs/nsmb-mvl-manual-local-20260802-202719` (既存LCD defer) はどちらも完走し、停止を再現しなかった。よってLCD競合はコード上の強い候補だが、同一失敗入力での因果確定は未完である。
 - 最初のlive接続は外側frontend境界で4 MiB Main RAMを保存していた。実遅延で訂正するとARM9 prefetch abortが発生したため、この経路は不採用とした。原因は復元点だけを固定guest PC `0x02004EC8`へ置いても、checkpoint採取点が同じguest control pointではなかったことにある。
-- 現行実装はJIT callbackがROM入力gateへ到達した時点でper-`NDS` 16-entry ringへMain RAMとgame frameを保存する。rollback runtimeはlate-inputのmismatch frame以前のgate checkpointを選び、過去入力から現在入力までをguest historyへ詰め、同じgateで復元する。transaction完了をafter-frameで検出してhistory gateを解除するため、次の通常tickと次の訂正用checkpoint採取が再開する。
+- 現行実装はJIT callbackがROM入力gateへ到達した時点でper-`NDS` 16-entry ringへMain RAMとgame frameを保存する。rollback runtimeはlate-inputのmismatch frame以前のgate checkpointを選び、過去入力から現在入力までをguest historyへ詰め、同じgateで復元する。transaction完了をafter-frameで検出してhistory gateを解除する設計だが、最新の手動runでは次の通常tickとcheckpoint採取が再開しない場合があることを確認した。
 - `scripts/run-nsmb-mvl-manual-local.ps1 -SlippiRollback`はgame-tick patch済みROMをmanifest付きで自動生成し、JIT exact chain/self-loop、`romloop` backend、checkpoint interval 1、input delay 0を設定する。既定の遅延再現はsend delay 2 + jitter 1で、`-InputSendDelayFrames` / `-InputSendJitterFrames`から変更できる。2ウィンドウの物理入力はbootstrap後にそのまま送信される。
 - 実通信smoke `logs/nsm-mvl-romloop-gate-checkpoint-default-delay`では、frame 1000/1008の入力変化に対して両peerが計4回訂正した。hostはdepth 2、clientはdepth 3を含み、全transactionが完了した。prefetch/data abort、schedule失敗、25/33ms超はゼロだった。
 - 同runはframes 990-1080でhost/client `59.75/60.07fps`、outer max `24.151/24.229ms`。frame 1080の両player座標・速度、object/hazard summaryはhost/clientで一致した。より浅い `logs/nsm-mvl-romloop-gate-checkpoint-finalize` も二回ずつ訂正を完了し、`60.03/59.83fps`、outer max `24.295/21.059ms`だった。
 - 自動画面保存を有効にした追加runはlauncherの既存screenshot probeが画像を生成せず失敗したため、新live経路のPNG exact gateは未完である。これは「描画バグなし」を確定する証拠ではない。通常GUI表示を伴う上記runは完走し、semantic heartbeatも一致したが、手動目視と画像取得経路の修正が残る。
-- **Current blocker:** 反復数は入力の立ち上がり/立ち下がり各1回、計4訂正だけで、長時間p95/p99、連続操作、深度4-7、死亡・復帰・土管・item・result/restart、音声副作用は未検証。Main RAMだけをrollback対象にする境界もevent全般では未証明である。
-- **Next action:** まずユーザー手動runで操作感、表示、例外ログを確認する。次にlive mismatchを数十回発生させるbounded stressと画像取得を直し、outer p95/p99/max・同一role画像・semantic stateが維持された場合だけaudio/event検証へ進む。
+- **Current blocker:** 手動の反復訂正でgame tick停止が再現した。LCD defer状態、tick-end到達、history control、ARM9 PCを通常live logが保存していないため、残存ログだけで根本原因を一意に確定できない。これを解決するまで性能・画像・音声のブラッシュアップは先行しない。
+- **Next action:** transactionごとのarm/apply/tick-end/finalizeとLCD defer開始・解除を必ずlive traceへ追加し、両peerの短間隔入力変化でbounded再現する。LCD解除前のfinalizeが確認できたら、完了条件をtick-end到達へ揃え、異常時に永久保留しないwatchdogも入れた上で反復stressをやり直す。
 
 ## Exact rollback depth and presentation gate - 2026-08-02
 
