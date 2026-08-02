@@ -23,6 +23,7 @@
 #include <string>
 #include <optional>
 #include <functional>
+#include <vector>
 
 #include "Platform.h"
 #include "Savestate.h"
@@ -290,14 +291,28 @@ public: // TODO: Encapsulate the rest of these members
     // Diagnostic-only presentation experiment: keep required CPU/peripheral
     // events running while postponing LCD scanline events during ROM catch-up.
     bool NSMLGameTickProbeDeferLCD = false;
-    // Diagnostic-only Slippi-style experiment.  The RAM image is applied at
-    // the ROM input gate, where ARM9 reaches the same guest control-flow point
-    // every game tick, rather than at an arbitrary emulator frame boundary.
+    // Slippi-style ROM-loop rollback.  The RAM image is applied at the ROM
+    // input gate, where ARM9 reaches the same guest control-flow point every
+    // game tick, rather than at an arbitrary emulator frame boundary.
     bool NSMLGameRAMRestorePending = false;
     const u8* NSMLGameRAMRestoreData = nullptr;
     u32 NSMLGameRAMRestoreLength = 0;
+    std::vector<u8> NSMLGameRAMRestoreOwnedBuffer;
     unsigned long long NSMLGameRAMRestoreUs = 0;
     u32 NSMLGameRAMRestoreBytes = 0;
+    struct NSMLGameRAMCheckpoint
+    {
+        u32 DisplayFrame = 0;
+        u32 GameFrame = 0;
+        std::vector<u8> MainRAM;
+    };
+    std::vector<NSMLGameRAMCheckpoint> NSMLGameRAMCheckpoints;
+    u32 NSMLNextGameRAMCheckpoint = 0;
+    void CaptureNSMLGameRAMCheckpointAtGate();
+    bool CopyNSMLGameRAMCheckpointAtOrBefore(
+        u32 frame, u32& checkpointFrame, u32& gameFrame, std::vector<u8>& image) const;
+    bool FinalizeNSMLGameRAMRollbackTransaction();
+    bool ScheduleNSMLGameRAMRestore(std::vector<u8>&& image);
     void ApplyNSMLPendingGameRAMRestore();
     void CaptureNSMLGameTickProbeSchedulerState(NSMLGameTickProbeSchedulerState& state) const;
     void RestoreNSMLGameTickProbeSchedulerState(const NSMLGameTickProbeSchedulerState& state);

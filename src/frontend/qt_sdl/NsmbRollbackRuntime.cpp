@@ -19,6 +19,17 @@ constexpr melonDS::u32 kMainRAMModeFull = 0;
 constexpr melonDS::u32 kMainRAMModeSparse = 1;
 constexpr melonDS::u32 kMainRAMModeDelta = 2;
 constexpr melonDS::u32 kMainRAMModeSkip = 3;
+constexpr melonDS::u32 kRomLoopMagicAddress = 0x02001AC8;
+constexpr melonDS::u32 kRomLoopHistoryEnabledAddress = 0x02001ACC;
+constexpr melonDS::u32 kRomLoopHistoryIndexAddress = 0x02001AD0;
+constexpr melonDS::u32 kRomLoopHistoryCountAddress = 0x02001AD4;
+constexpr melonDS::u32 kRomLoopHistoryTargetAddress = 0x02001AD8;
+constexpr melonDS::u32 kRomLoopHistoryStartFrameAddress = 0x02001ADC;
+constexpr melonDS::u32 kRomLoopHistoryAddress = 0x02001AE0;
+constexpr melonDS::u32 kPacketBridgeScratchTickAddress = 0x023C1200;
+constexpr melonDS::u32 kPacketBridgeScratchKeysAddress = 0x023C1208;
+constexpr melonDS::u32 kRomLoopMagic = 0x52505447;
+constexpr melonDS::u32 kRomLoopHistoryCapacity = 8;
 using StoredState = RollbackStorage::StoredState;
 
 InputState NeutralInput() { return {}; }
@@ -233,6 +244,8 @@ void SaveCheckpointNowLocked(Context &context, melonDS::u32 frame,
   StoredState checkpoint;
   std::vector<melonDS::u8> deltaBaseMainRAM;
   const auto saveStart = std::chrono::steady_clock::now();
+  if (context.Config.Backend == Config::RollbackBackend::RomLoop)
+    return;
   PrepareDeltaSaveLocked(context, frame, checkpoint, deltaBaseMainRAM);
   const melonDS::u32 mainRAMMode =
       IsPreimageBackend(context.Config)
@@ -282,6 +295,8 @@ const char *BackendName(const Config::RollbackConfig &config) {
     return "corepreimage";
   case Config::RollbackBackend::TinyCorePreimage:
     return "tinycorepreimage";
+  case Config::RollbackBackend::RomLoop:
+    return "romloop";
   case Config::RollbackBackend::Savestate:
   default:
     return "savestate";
@@ -343,6 +358,13 @@ void SaveCheckpointIfNeeded(Context context, int instanceID,
           frame, context.Config.CheckpointInterval, context.NetplayStartFrame))
     return;
 
+  if (context.Config.Backend == Config::RollbackBackend::RomLoop) {
+    std::lock_guard<std::mutex> lock(context.Mutex);
+    context.Inputs.RollbackInputs.Prune(
+        frame, static_cast<melonDS::u32>(context.Config.Window),
+        context.Inputs.RemoteInputs);
+    return;
+  }
   StoredState checkpoint;
   std::vector<melonDS::u8> deltaBaseMainRAM;
   const auto saveStart = std::chrono::steady_clock::now();
@@ -393,6 +415,8 @@ bool RestoreCheckpointForProbeIfNeeded(Context context, int instanceID,
                                        melonDS::u32 frame, melonDS::NDS *nds) {
   if (!context.Config.Enabled || !context.Config.RestoreProbe ||
       !context.Input.NetplayOnly || !nds || instanceID < 0 || instanceID >= 16)
+    return false;
+  if (context.Config.Backend == Config::RollbackBackend::RomLoop)
     return false;
 
   melonDS::u32 restoreFrame = kNoFrame;
@@ -523,8 +547,16 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
             frame, observedFrame, context.Config.ResimulateDelayFrames))
       return false;
 
-    if (!context.Store.LatestAtOrBefore(mismatchFrame, restoreFrame,
-                                        checkpoint)) {
+    const bool romLoopBackend =
+        context.Config.Backend == Config::RollbackBackend::RomLoop;
+    const bool checkpointFound =
+        romLoopBackend
+            ? nds->CopyNSMLGameRAMCheckpointAtOrBefore(
+                  mismatchFrame, restoreFrame, checkpoint.GameFrame,
+                  checkpoint.MainRAMCopy)
+            : context.Store.LatestAtOrBefore(mismatchFrame, restoreFrame,
+                                             checkpoint);
+    if (!checkpointFound) {
       std::printf("NSMB Rollback: cannot resimulate mismatch=%u at current=%u, "
                   "checkpoint missing window=%d interval=%d\n",
                   mismatchFrame, frame, context.Config.Window,
@@ -533,10 +565,13 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
       return false;
     }
     const bool restoreReady =
-        IsPreimageBackend(context.Config)
-            ? context.Store.BuildPreimageRestore(restoreFrame, reverseStates,
-                                                 latestMainRAM)
-            : context.Store.BuildRestoreChain(restoreFrame, restoreChain);
+        romLoopBackend
+            ? checkpoint.MainRAMCopy.size() == 0x400000u
+            : (IsPreimageBackend(context.Config)
+                   ? context.Store.BuildPreimageRestore(
+                         restoreFrame, reverseStates, latestMainRAM)
+                   : context.Store.BuildRestoreChain(restoreFrame,
+                                                     restoreChain));
     if (!restoreReady) {
       std::printf("NSMB Rollback: cannot resimulate mismatch=%u from delta "
                   "checkpoint=%u, base=%u chain missing\n",
@@ -545,7 +580,95 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
       return false;
     }
     context.Inputs.RollbackInputs.ClearPendingRollback();
-    context.Store.EraseAfter(restoreFrame);
+    if (!romLoopBackend)
+      context.Store.EraseAfter(restoreFrame);
+  }
+
+  if (context.Config.Backend == Config::RollbackBackend::RomLoop) {
+    const melonDS::u32 transactionFrames = frame - restoreFrame + 1;
+    if (transactionFrames == 0 ||
+        transactionFrames > kRomLoopHistoryCapacity ||
+        checkpoint.GameFrame == kNoFrame ||
+        nds->ARM9Read32(kRomLoopMagicAddress) != kRomLoopMagic) {
+      std::printf(
+          "NSMB Rollback: cannot arm ROM-loop correction inst=%d "
+          "restoreFrame=%u current=%u depth=%u gameFrame=%u magic=%08X\n",
+          instanceID, restoreFrame, frame, frame - restoreFrame,
+          checkpoint.GameFrame, nds->ARM9Read32(kRomLoopMagicAddress));
+      std::fflush(stdout);
+      return false;
+    }
+
+    struct ReplayInput {
+      melonDS::u16 Tick = 0;
+      melonDS::u16 Keys0 = 0;
+      melonDS::u16 Keys1 = 0;
+    };
+    std::vector<InputTimeline::ReplayFrameInputs> resolvedInputs;
+    resolvedInputs.reserve(transactionFrames);
+    const int localPlayer = hooks.CurrentLocalPlayer();
+    {
+      std::lock_guard<std::mutex> lock(context.Mutex);
+      InputTimeline::PredictionProbe probe = PredictionProbe(context.Config);
+      probe.RetainConfirmation = false;
+      for (melonDS::u32 replayFrame = restoreFrame; replayFrame <= frame;
+           replayFrame++) {
+        const auto resolved = InputTimeline::ResolveReplayFrameInputs(
+            context.Inputs, replayFrame, localPlayer, NeutralInput(), probe);
+        if (!resolved)
+          return false;
+        resolvedInputs.push_back(*resolved);
+      }
+    }
+
+    std::vector<ReplayInput> replayInputs;
+    replayInputs.reserve(transactionFrames);
+    for (melonDS::u32 index = 0; index < transactionFrames; index++) {
+      const melonDS::u32 replayFrame = restoreFrame + index;
+      const auto &inputs = resolvedInputs[index];
+      hooks.WritePacketBridgeInputs(
+          instanceID, replayFrame, nds, localPlayer, inputs.Local,
+          inputs.Remote, true, inputs.RemotePredicted);
+      replayInputs.push_back({
+          nds->ARM9Read16(kPacketBridgeScratchTickAddress),
+          nds->ARM9Read16(kPacketBridgeScratchKeysAddress),
+          nds->ARM9Read16(kPacketBridgeScratchKeysAddress + 2),
+      });
+    }
+
+    nds->ARM9Write32(kRomLoopHistoryIndexAddress, 0);
+    nds->ARM9Write32(kRomLoopHistoryCountAddress, transactionFrames);
+    nds->ARM9Write32(kRomLoopHistoryTargetAddress, 1);
+    nds->ARM9Write32(kRomLoopHistoryStartFrameAddress, checkpoint.GameFrame);
+    for (melonDS::u32 index = 0; index < transactionFrames; index++) {
+      const melonDS::u32 entryAddress = kRomLoopHistoryAddress + index * 8;
+      nds->ARM9Write16(entryAddress, replayInputs[index].Tick);
+      nds->ARM9Write16(entryAddress + 2, replayInputs[index].Keys0);
+      nds->ARM9Write16(entryAddress + 4, replayInputs[index].Keys1);
+      nds->ARM9Write16(entryAddress + 6, 0);
+    }
+    nds->ARM9Write32(kRomLoopHistoryEnabledAddress, 1);
+    nds->ARM9Write32(0x02001AC4, 0);
+    nds->ARM9Write32(0x02001AC0, 0);
+    if (!nds->ScheduleNSMLGameRAMRestore(std::move(checkpoint.MainRAMCopy))) {
+      nds->ARM9Write32(kRomLoopHistoryEnabledAddress, 0);
+      std::printf("NSMB Rollback: failed to schedule ROM-loop RAM restore "
+                  "inst=%d restoreFrame=%u current=%u\n",
+                  instanceID, restoreFrame, frame);
+      std::fflush(stdout);
+      return false;
+    }
+
+    if (context.Input.NetplayTrace) {
+      std::printf(
+          "NSMB Rollback: armed ROM-loop correction checkpoint=%u "
+          "mismatch=%u current=%u depth=%u ticks=%u gameFrame=%u "
+          "bytes=%u\n",
+          restoreFrame, mismatchFrame, frame, frame - restoreFrame,
+          transactionFrames, checkpoint.GameFrame, 0x400000u);
+      std::fflush(stdout);
+    }
+    return true;
   }
 
   const auto rollbackStart = std::chrono::steady_clock::now();

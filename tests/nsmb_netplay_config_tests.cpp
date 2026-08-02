@@ -553,6 +553,8 @@ void TestRollbackConfigDefaultsAndBackendAliases() {
       {"coreframedelta", RollbackBackend::CoreFrameDelta},
       {"core-preimage", RollbackBackend::CorePreimage},
       {"tiny-core-preimage", RollbackBackend::TinyCorePreimage},
+      {"rom-loop", RollbackBackend::RomLoop},
+      {"slippi", RollbackBackend::RomLoop},
       {"nsmb-ranges", RollbackBackend::Savestate},
       {"ram", RollbackBackend::Savestate},
       {"unknown", RollbackBackend::Savestate},

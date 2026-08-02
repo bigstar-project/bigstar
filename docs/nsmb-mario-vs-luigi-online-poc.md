@@ -1,16 +1,16 @@
 # NSMB Mario vs Luigi Online PoC
 
-## Slippi-style game-memory restore milestone - 2026-08-02
+## Live Slippi-style ROM-loop rollback milestone - 2026-08-02
 
-- **Current conclusion:** Slippi型ROM-loopをrollbackの本線として継続する。4 MiB Main RAMの過去checkpointだけを戻し、CPU・GPU・周辺機器の外側timelineは戻さず、ROM入力gateから履歴入力と現在入力を連続実行するPoCがdepth 1-2で成立した。既存full-frame routeは比較baselineとfallbackとして保持する。
-- 最初に外側DS frame境界でRAMを復元した案は、ARM9の現在PCと復元RAMのgame-loop位相が一致せず、moving hazardが1 tick遅れたため不採用とした。復元を固定guest PC `0x02004EC8`へ移し、JIT生成コードへ診断専用callbackを埋めた結果、この差は解消した。
-- depth 1は過去状態から「履歴1 tick + 現在1 tick」、depth 2は「履歴2 tick + 現在1 tick」を一つのdisplay frameで実行する。`logs/slippi-game-ram-direct-ring-depth1-semantic-run1`と`logs/slippi-game-ram-jit-instruction-depth2-run1`は、訂正直後と通常回復後の172 semantic fieldが差分0。game counterもtarget/controlとも`759 -> 760`で一致した。
-- depth 2のsoftware-renderer相互A/B `logs/slippi-game-ram-visual-depth2-{host,client}-target-run1`では、display frame 1002の同一role PNGがhost/clientともSHA-256まで一致した。短区間のplayer sprite、moving hazard、UIを含む描画gateはpassした。
-- 同期4 MiB state dump/hashを外した両側補正では、depth 1のROM transactionが`3.169/3.264ms`、90-frame outer maxが`19.200/18.472ms`、平均が`16.665/16.662ms`、`25/33ms`超ゼロだった。最大`19.200ms`は訂正点ではなく測定末尾frame 1079で、clientの訂正点最大は`18.472ms`。毎frame RAM copyは最大`0.422/0.328ms`、固定境界restoreは`0.213/0.224ms`だった。
-- depth 2は中間4 MiB copy削除前でもROM transaction `4.200/3.727ms`、outer max `19.720/19.356ms`、`25/33ms`超ゼロだった。厳密な単一frame上限`16.667ms`は超えるため「全訂正frameがdeadline内」とはまだ言わないが、平均約60fpsを維持し、従来の25ms級停止より小さい約2-3msの局所超過まで縮小した。
-- 訂正時の中間4 MiB copyは削除し、事前確保ring内checkpointから固定境界へ直接1回だけ復元する。現PoCは診断用static stateと全Main RAM snapshotであり、productionの複数instance所有権、live prediction/confirmation、訂正後checkpointの置換は未接続である。
-- **Current blocker:** 一回だけの固定movement-route訂正であり、複数訂正のp95/p99/max、死亡・復帰・土管・item・result/restart、音声副作用、長時間安定性は未検証。full RAMに含まれるguest-local/SDK領域をどこまでrollback対象にするかも確定していない。
-- **Next action:** このgame-memory restoreをper-instance checkpoint ringへ移し、実late-input timelineでdepth 1-2を複数回発生させる。まずouter p95/p99/maxと同一role画像を再確認し、性能・描画gateを維持した場合だけevent/audio検証へ進む。
+- **Current conclusion:** `romloop` backendを実prediction/confirmationへ接続し、手動操作可能な2-process launcherから送信遅延とjitterを注入できる段階へ進んだ。固定frameの診断triggerではなく、遅れて届いた確定入力が予測と異なった時だけ訂正を発火する。既存full-frame routeは比較baseline/fallbackとして保持する。
+- 最初のlive接続は外側frontend境界で4 MiB Main RAMを保存していた。実遅延で訂正するとARM9 prefetch abortが発生したため、この経路は不採用とした。原因は復元点だけを固定guest PC `0x02004EC8`へ置いても、checkpoint採取点が同じguest control pointではなかったことにある。
+- 現行実装はJIT callbackがROM入力gateへ到達した時点でper-`NDS` 16-entry ringへMain RAMとgame frameを保存する。rollback runtimeはlate-inputのmismatch frame以前のgate checkpointを選び、過去入力から現在入力までをguest historyへ詰め、同じgateで復元する。transaction完了をafter-frameで検出してhistory gateを解除するため、次の通常tickと次の訂正用checkpoint採取が再開する。
+- `scripts/run-nsmb-mvl-manual-local.ps1 -SlippiRollback`はgame-tick patch済みROMをmanifest付きで自動生成し、JIT exact chain/self-loop、`romloop` backend、checkpoint interval 1、input delay 0を設定する。既定の遅延再現はsend delay 2 + jitter 1で、`-InputSendDelayFrames` / `-InputSendJitterFrames`から変更できる。2ウィンドウの物理入力はbootstrap後にそのまま送信される。
+- 実通信smoke `logs/nsm-mvl-romloop-gate-checkpoint-default-delay`では、frame 1000/1008の入力変化に対して両peerが計4回訂正した。hostはdepth 2、clientはdepth 3を含み、全transactionが完了した。prefetch/data abort、schedule失敗、25/33ms超はゼロだった。
+- 同runはframes 990-1080でhost/client `59.75/60.07fps`、outer max `24.151/24.229ms`。frame 1080の両player座標・速度、object/hazard summaryはhost/clientで一致した。より浅い `logs/nsm-mvl-romloop-gate-checkpoint-finalize` も二回ずつ訂正を完了し、`60.03/59.83fps`、outer max `24.295/21.059ms`だった。
+- 自動画面保存を有効にした追加runはlauncherの既存screenshot probeが画像を生成せず失敗したため、新live経路のPNG exact gateは未完である。これは「描画バグなし」を確定する証拠ではない。通常GUI表示を伴う上記runは完走し、semantic heartbeatも一致したが、手動目視と画像取得経路の修正が残る。
+- **Current blocker:** 反復数は入力の立ち上がり/立ち下がり各1回、計4訂正だけで、長時間p95/p99、連続操作、深度4-7、死亡・復帰・土管・item・result/restart、音声副作用は未検証。Main RAMだけをrollback対象にする境界もevent全般では未証明である。
+- **Next action:** まずユーザー手動runで操作感、表示、例外ログを確認する。次にlive mismatchを数十回発生させるbounded stressと画像取得を直し、outer p95/p99/max・同一role画像・semantic stateが維持された場合だけaudio/event検証へ進む。
 
 ## Exact rollback depth and presentation gate - 2026-08-02
 

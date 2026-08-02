@@ -8,6 +8,7 @@ param(
     [ValidateSet(3, 5, 10)] [int]$MvlBigStars = 5,
     [ValidateSet("3", "5", "endless", "Endless")] [string]$MvlLives = "endless",
     [ValidateSet("random", "select")] [string]$MvlCourseMode = "random",
+    [switch]$GameTickProbe,
     [switch]$Force
 )
 
@@ -131,7 +132,8 @@ function Test-OptionsMatch {
         -and (Get-ObjectField $Actual "mvl_wins") -eq (Get-ObjectField $Expected "mvl_wins") `
         -and (Get-ObjectField $Actual "mvl_big_stars") -eq (Get-ObjectField $Expected "mvl_big_stars") `
         -and (Get-ObjectField $Actual "mvl_lives") -eq (Get-ObjectField $Expected "mvl_lives") `
-        -and (Get-ObjectField $Actual "mvl_course_mode") -eq (Get-ObjectField $Expected "mvl_course_mode")
+        -and (Get-ObjectField $Actual "mvl_course_mode") -eq (Get-ObjectField $Expected "mvl_course_mode") `
+        -and (Get-ObjectField $Actual "game_tick_probe") -eq (Get-ObjectField $Expected "game_tick_probe")
 }
 
 function Test-InputsMatch {
@@ -237,6 +239,7 @@ $expectedInputs = [ordered]@{
         mvl_big_stars = $MvlBigStars
         mvl_lives = $effectiveLives
         mvl_course_mode = $MvlCourseMode
+        game_tick_probe = $GameTickProbe.IsPresent
     }
 }
 
@@ -245,17 +248,24 @@ if (!$Force -and (Test-ReusableRoms -HostPath $hostRomPath -ClientPath $clientRo
     return
 }
 
-& cargo run --release --manifest-path (Join-Path $repoRoot "tools\bigstar-rom\Cargo.toml") -- `
-    generate-stable `
-    --source-rom $sourceRomPath `
-    --host-rom $hostRomPath `
-    --client-rom $clientRomPath `
-    --stage $MvlStage `
-    --wins $MvlWins `
-    --big-stars $MvlBigStars `
-    --lives $effectiveLives `
-    --course-mode $MvlCourseMode `
-    --scene-settings $effectiveSceneSettings
+$generatorArgs = @(
+    "run", "--release",
+    "--manifest-path", (Join-Path $repoRoot "tools\bigstar-rom\Cargo.toml"),
+    "--", "generate-stable",
+    "--source-rom", $sourceRomPath,
+    "--host-rom", $hostRomPath,
+    "--client-rom", $clientRomPath,
+    "--stage", "$MvlStage",
+    "--wins", "$MvlWins",
+    "--big-stars", "$MvlBigStars",
+    "--lives", $effectiveLives,
+    "--course-mode", $MvlCourseMode,
+    "--scene-settings", $effectiveSceneSettings
+)
+if ($GameTickProbe) {
+    $generatorArgs += "--game-tick-probe"
+}
+& cargo @generatorArgs
 
 if ($LASTEXITCODE -ne 0) {
     throw "stable MvL ROM generation failed with exit code $LASTEXITCODE"

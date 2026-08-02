@@ -152,6 +152,7 @@ enum class RollbackBackend {
   CoreFrameDelta,
   CorePreimage,
   TinyCorePreimage,
+  RomLoop,
 };
 
 struct RollbackConfig {

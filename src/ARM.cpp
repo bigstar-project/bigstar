@@ -3771,7 +3771,8 @@ void ARM::CheckGdbIncoming()
 #ifdef JIT_ENABLED
 extern "C" const u8 ARM_JitExactBlockChainEnabled = [] {
     const bool allowRomProbe = NSMLEnvFlag("MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE")
-        && NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY");
+        && (NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE_FRAME_BOUNDARY") ||
+            NSMLEnvFlag("MELONDS_NSML_ROM_GAME_TICK_PROBE_GAME_RAM_ROLLBACK"));
     return NSMLEnvFlag("MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN")
         && (!NSMLRuntimeHooksMaybeEnabled() || allowRomProbe) ? u8{1} : u8{0};
 }();

@@ -15,6 +15,10 @@ param(
     [int]$NetworkPumpSleepUs = 250,
     [switch]$LowDelayWan,
     [switch]$LowLatencyRollback,
+    [switch]$RomLoopRollback,
+    [switch]$SlippiRollback,
+    [switch]$RomLoopStageTrace,
+    [switch]$RomLoopNoDeferLCD,
     [switch]$Rollback,
     [string]$RollbackBackend = "",
     [string]$RollbackTinyCoreFlags = "",
@@ -146,6 +150,11 @@ if ($LowDelayWan) {
     if (-not $PSBoundParameters.ContainsKey('InputBundleHistory')) { $InputBundleHistory = 8 }
 }
 
+$useRomLoopRollback = $RomLoopRollback -or $SlippiRollback
+if ($useRomLoopRollback) {
+    $LowLatencyRollback = $true
+}
+
 if ($LowLatencyRollback) {
     $InputDelayFrames = 0
     $InputMaxFrameLead = 8
@@ -158,7 +167,24 @@ if ($LowLatencyRollback) {
     $RollbackResimulate = $true
 }
 
+if ($useRomLoopRollback) {
+    $RollbackBackend = "romloop"
+    $RollbackWindow = 16
+    $RollbackCheckpointInterval = 1
+    if (-not $PSBoundParameters.ContainsKey('RollbackMaxResimFrames')) { $RollbackMaxResimFrames = 7 }
+    if (-not $PSBoundParameters.ContainsKey('InputSendDelayFrames')) { $InputSendDelayFrames = 2 }
+    if (-not $PSBoundParameters.ContainsKey('InputSendJitterFrames')) { $InputSendJitterFrames = 1 }
+    if (-not $PSBoundParameters.ContainsKey('HostReadyTimeoutMs')) { $HostReadyTimeoutMs = 0 }
+    if (-not $PSBoundParameters.ContainsKey('HostRom')) {
+        $HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-romloop-gametick.tmp.nds"
+    }
+    if (-not $PSBoundParameters.ContainsKey('ClientRom')) {
+        $ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-romloop-gametick.tmp.nds"
+    }
+}
+
 $isTinyCorePreimageRollback = $RollbackBackend -eq "tinycorepreimage" -or $RollbackBackend -eq "tiny-core-preimage"
+$isRomLoopRollback = $RollbackBackend -eq "romloop" -or $RollbackBackend -eq "rom-loop" -or $RollbackBackend -eq "slippi"
 
 if ($LowLatencyRollback -and $isTinyCorePreimageRollback) {
     if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 2 }
@@ -205,6 +231,9 @@ if (!$SkipRomEnsure -and !$GenerateMvlConfiguredRoms) {
     }
     if ($MvlSceneSettings -ne "") {
         $ensureParams.MvlSceneSettings = $MvlSceneSettings
+    }
+    if ($isRomLoopRollback) {
+        $ensureParams.GameTickProbe = $true
     }
     & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") @ensureParams
 }
@@ -411,6 +440,32 @@ if ($LowLatencyRollback) {
         Remove-Item Env:\MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS -ErrorAction SilentlyContinue
     }
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_CORE_SKIP_MASK -ErrorAction SilentlyContinue
+}
+if ($isRomLoopRollback) {
+    $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GAME_RAM_ROLLBACK = "1"
+    if ($RomLoopNoDeferLCD) {
+        Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_DEFER_LCD -ErrorAction SilentlyContinue
+    } else {
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_DEFER_LCD = "1"
+    }
+    if ($RomLoopStageTrace) {
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE = "1"
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_DIR = $logRoot
+    } else {
+        Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_DIR -ErrorAction SilentlyContinue
+    }
+    $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN = "1"
+    $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE = "1"
+    $env:MELONDS_NSML_JIT_SELF_LOOP_FAST_PATH = "1"
+} else {
+    Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_GAME_RAM_ROLLBACK -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_DEFER_LCD -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_JIT_SELF_LOOP_FAST_PATH -ErrorAction SilentlyContinue
 }
 if ($RollbackInputWaitUs -gt 0) {
     $env:MELONDS_NSML_ROLLBACK_INPUT_WAIT_US = "$RollbackInputWaitUs"

@@ -19,6 +19,7 @@ struct StoredState {
   std::vector<melonDS::u8> MainRAMShadowCopy;
   std::vector<melonDS::u32> MainRAMPreimagePages;
   std::vector<melonDS::u8> MainRAMPreimage;
+  melonDS::u32 GameFrame = kNoFrame;
   melonDS::u32 BaseFrame = kNoFrame;
   bool MainRAMDelta = false;
   bool MainRAMFramePreimage = false;

@@ -1252,7 +1252,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             PacketBridgeContext(), instanceID, inputFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::JitPatch);
 
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds
+        && G.Rollback.Backend != Config::RollbackBackend::RomLoop)
         RollbackResimulateIfNeeded(instanceID, inputFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Rollback);
 
@@ -1320,6 +1321,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if (!pauseInputNetplayForRestart
         && (G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         WritePacketBridgeJitScratchIfNeeded(instanceID, syncFrame, nds, testInput);
+    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds
+        && G.Rollback.Backend == Config::RollbackBackend::RomLoop)
+        RollbackResimulateIfNeeded(instanceID, syncFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Scratch);
 
     if (G.Enabled && G.Input.NetplayOnly)
@@ -1583,6 +1587,14 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (instanceID < 0 || instanceID >= 16) return;
 
     const melonDS::u32 logFrame = PrepareAfterFrameLogFrame(instanceID, frame);
+    if (G.Rollback.Backend == Config::RollbackBackend::RomLoop &&
+        nds->FinalizeNSMLGameRAMRollbackTransaction() &&
+        G.Input.NetplayTrace)
+    {
+        std::printf("NSMB Rollback: completed ROM-loop correction frame=%u\n",
+                    logFrame);
+        std::fflush(stdout);
+    }
     const auto afterHeartbeat = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "after-frame", instanceID, logFrame, logFrame, logFrame);
     GameStateSync::UpdateHangSnapshot(

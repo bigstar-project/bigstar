@@ -555,6 +555,10 @@ RollbackConfig LoadRollbackConfig(const Environment &environment) {
   else if (!std::strcmp(backend, "tinycorepreimage") ||
            !std::strcmp(backend, "tiny-core-preimage"))
     config.Backend = RollbackBackend::TinyCorePreimage;
+  else if (!std::strcmp(backend, "romloop") ||
+           !std::strcmp(backend, "rom-loop") ||
+           !std::strcmp(backend, "slippi"))
+    config.Backend = RollbackBackend::RomLoop;
 
   config.Window = std::clamp(
       ReadInt(environment, "MELONDS_NSML_ROLLBACK_WINDOW", 20), 1, 180);

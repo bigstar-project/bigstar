@@ -547,6 +547,9 @@ void NDS::Reset()
     NSMLGameRAMRestorePending = false;
     NSMLGameRAMRestoreData = nullptr;
     NSMLGameRAMRestoreLength = 0;
+    NSMLGameRAMRestoreOwnedBuffer.clear();
+    NSMLGameRAMCheckpoints.clear();
+    NSMLNextGameRAMCheckpoint = 0;
     NSMLGameRAMRestoreUs = 0;
     NSMLGameRAMRestoreBytes = 0;
     LagFrameFlag = false;
@@ -2269,7 +2272,12 @@ void NDS::CaptureNSMLGameTickProbeSchedulerState(NSMLGameTickProbeSchedulerState
 
 void NDS::ApplyNSMLPendingGameRAMRestore()
 {
-    if (!NSMLGameRAMRestorePending || !MainRAM)
+    if (!NSMLGameRAMRestorePending)
+    {
+        CaptureNSMLGameRAMCheckpointAtGate();
+        return;
+    }
+    if (!MainRAM)
         return;
 
     const u32 length = std::min(MainRAMMask + 1, 0x400000u);
@@ -2278,6 +2286,7 @@ void NDS::ApplyNSMLPendingGameRAMRestore()
         NSMLGameRAMRestorePending = false;
         NSMLGameRAMRestoreData = nullptr;
         NSMLGameRAMRestoreLength = 0;
+        NSMLGameRAMRestoreOwnedBuffer.clear();
         return;
     }
 
@@ -2296,6 +2305,95 @@ void NDS::ApplyNSMLPendingGameRAMRestore()
     NSMLGameRAMRestorePending = false;
     NSMLGameRAMRestoreData = nullptr;
     NSMLGameRAMRestoreLength = 0;
+    NSMLGameRAMRestoreOwnedBuffer.clear();
+}
+
+void NDS::CaptureNSMLGameRAMCheckpointAtGate()
+{
+    static const bool enabled = []
+    {
+        const char* backend = getenv("MELONDS_NSML_ROLLBACK_BACKEND");
+        return backend &&
+            (!strcmp(backend, "romloop") || !strcmp(backend, "rom-loop") ||
+             !strcmp(backend, "slippi"));
+    }();
+    if (!enabled || !MainRAM || ARM9Read32(0x02001ACC) != 0)
+        return;
+
+    constexpr u32 capacity = 16;
+    const u32 length = std::min(MainRAMMask + 1, 0x400000u);
+    if (length != 0x400000u)
+        return;
+    if (NSMLGameRAMCheckpoints.size() != capacity)
+    {
+        NSMLGameRAMCheckpoints.resize(capacity);
+        for (auto& checkpoint : NSMLGameRAMCheckpoints)
+            checkpoint.MainRAM.resize(length);
+        NSMLNextGameRAMCheckpoint = 0;
+    }
+
+    NSMLGameRAMCheckpoint& checkpoint =
+        NSMLGameRAMCheckpoints[NSMLNextGameRAMCheckpoint];
+    checkpoint.DisplayFrame = NumFrames;
+    checkpoint.GameFrame = ARM9Read32(0x0208B668);
+    memcpy(checkpoint.MainRAM.data(), MainRAM, length);
+    NSMLNextGameRAMCheckpoint =
+        (NSMLNextGameRAMCheckpoint + 1) % capacity;
+}
+
+bool NDS::CopyNSMLGameRAMCheckpointAtOrBefore(
+    u32 frame, u32& checkpointFrame, u32& gameFrame, std::vector<u8>& image) const
+{
+    const NSMLGameRAMCheckpoint* best = nullptr;
+    for (const auto& checkpoint : NSMLGameRAMCheckpoints)
+    {
+        if (checkpoint.MainRAM.empty() || checkpoint.DisplayFrame > frame)
+            continue;
+        if (!best || checkpoint.DisplayFrame > best->DisplayFrame)
+            best = &checkpoint;
+    }
+    if (!best)
+        return false;
+    checkpointFrame = best->DisplayFrame;
+    gameFrame = best->GameFrame;
+    image = best->MainRAM;
+    return true;
+}
+
+bool NDS::FinalizeNSMLGameRAMRollbackTransaction()
+{
+    constexpr u32 historyEnabledAddr = 0x02001ACC;
+    constexpr u32 historyIndexAddr = 0x02001AD0;
+    constexpr u32 historyCountAddr = 0x02001AD4;
+    constexpr u32 historyTargetAddr = 0x02001AD8;
+    constexpr u32 historyStartFrameAddr = 0x02001ADC;
+    constexpr u32 gameFrameAddr = 0x0208B668;
+    if (NSMLGameRAMRestorePending || ARM9Read32(historyEnabledAddr) == 0)
+        return false;
+    const u32 historyCount = ARM9Read32(historyCountAddr);
+    if (historyCount == 0 || ARM9Read32(historyIndexAddr) < historyCount ||
+        ARM9Read32(gameFrameAddr) < ARM9Read32(historyStartFrameAddr) + historyCount)
+        return false;
+
+    ARM9Write32(historyEnabledAddr, 0);
+    ARM9Write32(historyIndexAddr, 0);
+    ARM9Write32(historyCountAddr, 0);
+    ARM9Write32(historyTargetAddr, 0);
+    ARM9Write32(historyStartFrameAddr, 0);
+    return true;
+}
+
+bool NDS::ScheduleNSMLGameRAMRestore(std::vector<u8>&& image)
+{
+    const u32 length = std::min(MainRAMMask + 1, 0x400000u);
+    if (!MainRAM || image.size() != length || NSMLGameRAMRestorePending)
+        return false;
+
+    NSMLGameRAMRestoreOwnedBuffer = std::move(image);
+    NSMLGameRAMRestoreData = NSMLGameRAMRestoreOwnedBuffer.data();
+    NSMLGameRAMRestoreLength = static_cast<u32>(NSMLGameRAMRestoreOwnedBuffer.size());
+    NSMLGameRAMRestorePending = true;
+    return true;
 }
 
 void NDS::RestoreNSMLGameTickProbeSchedulerState(const NSMLGameTickProbeSchedulerState& state)

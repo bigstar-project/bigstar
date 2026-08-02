@@ -4,7 +4,21 @@
 
 ## 2026-08-02 Slippi-style game-memory restore
 
-### 現在の結論
+### 現在のlive実装と境界
+
+`RollbackBackend::RomLoop`を実late-input timelineへ接続した。`WritePacketBridgeJitScratchIfNeeded()`がnetwork pump、送信、remote prediction/confirmation、現在frameのlocal input記録を終えた直後にだけROM-loop訂正を予約する。これにより、訂正historyにはcheckpoint frameから現在frameまでの両player入力とpacket tickが揃い、固定診断triggerを使わない。
+
+checkpointとrestoreは同じguest control pointでなければならない。最初のlive版はfrontendの外側frame境界でMain RAMを保存し、固定PC `0x02004EC8`で復元したため、実訂正後にARM9 prefetch abortを再現した。この失敗により、診断PoCの短いsemantic一致だけではproduction境界を証明できないと判明した。
+
+現行版はJITがROM input gate先頭へ到達するたび、通常history transaction外ならper-`NDS` 16-entry ringへ4 MiB Main RAM、display frame、game frameを保存する。late mismatch時はmismatch frame以前の最新gate checkpointを選び、guest history/controlを現在RAMへ書いてから同じgateでcheckpoint RAMを復元する。after-frameで`historyIndex >= historyCount`とgame frame終端を確認し、history gateを解除する。これにより次の通常tick、次checkpoint、次rollbackを継続できる。
+
+実通信gate `logs/nsm-mvl-romloop-gate-checkpoint-default-delay`はsend delay 2 + jitter 1でframe 1000/1008の立ち上がり・立ち下がりを遅延確定し、両peer計4訂正を発生させた。hostはdepth 2、clientはdepth 3を含み、全transactionがcompleted logへ到達した。prefetch/data abortはゼロ、frame 1080のplayer/object/hazard summaryは一致、frames 990-1080のactive rateは`59.75/60.07fps`、outer maxは`24.151/24.229ms`、`25/33ms`超ゼロだった。send delay 1の`logs/nsm-mvl-romloop-gate-checkpoint-finalize`も二回ずつ完了し、`60.03/59.83fps`、outer max `24.295/21.059ms`だった。
+
+手動launcherは`-SlippiRollback`または`-RomLoopRollback`でこのbackendを選ぶ。game-tick patch済みhost/client ROMを別名とmanifestで生成し、checkpoint interval 1、window 16、最大depth 7、input delay 0、既定send delay 2/jitter 1、JIT exact chain/self-loopを設定する。bootstrap入力終了後は各melonDS windowの物理入力がそのままnetplay timelineへ入る。
+
+現段階はbounded live PoCである。GUIを描画しながら約60fpsで反復訂正した事実とsemantic heartbeat一致はあるが、自動screenshot probeが画像を生成しなかったためlive訂正後PNG exact比較は未完。長時間p95/p99、連続操作、depth 4-7、死亡・復帰・土管・item・result/restart、音声波形も未検証である。したがって、次は手動体感・表示確認と数十回のlive stress/画像gateを優先し、それを通るまでaudio/event周辺を先行実装しない。
+
+### 診断PoCの根拠（live接続前）
 
 Slippi型ROM-loopを本線として継続する。診断用の4 MiB Main RAM ringから過去game memoryだけを復元し、CPU register、GPU、scheduler、ARM7/peripheral timelineは現在のまま保つ経路を接続した。復元後はROM入力gateで過去入力から現在入力までを連続実行し、最終tickだけ通常描画する。depth 1なら2 tick、depth 2なら3 tickを一つのdisplay frameで処理する。
 
@@ -21,7 +35,7 @@ depth 1の最終測定では毎frame 4 MiB save最大`0.422/0.328ms`、restore `
 
 software rendererでtarget roleを入れ替えた`logs/slippi-game-ram-visual-depth2-{host,client}-target-run1`では、display frame 1002の同一role PNGがhost/clientともSHA-256まで一致した。両runとも訂正直後・回復後の172 field差分は0である。これはtested movement routeの短区間presentation passであり、イベント全般や長時間の描画完全性を証明しない。
 
-現実装はPoCである。checkpoint ringは診断関数内static state、snapshotは全Main RAM、訂正は一回の固定triggerであり、productionのper-instance ownership、実prediction/confirmation、訂正後checkpoint差し替え、複数訂正統計は未接続である。次はこの境界を製品runtimeのcheckpoint ringへ移し、depth 1-2の反復訂正でouter p95/p99/maxと画像を測る。性能・描画を維持するまで、audio/event側のブラッシュアップを先行しない。既存full-frameは比較baseline/fallbackとして保持する。
+この時点の実装は、診断関数内static ringと一回の固定triggerだけを持つPoCだった。上のlive実装でper-`NDS` gate ringと実prediction/confirmationへの接続までは完了したため、この段落の「未接続」と次actionは履歴としてのみ残す。既存full-frameは引き続き比較baseline/fallbackとして保持する。
 
 ## 2026-08-02 post-hotfix Slippi-style ROM-loop remeasurement（game-memory restore前の履歴）
 
