@@ -1,12 +1,48 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
-> 現在の判断は直下の exact depth/presentation gate 節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
+> 現在の判断は直下の post-hotfix ROM-loop 再測定節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
+
+## 2026-08-02 post-hotfix Slippi-style ROM-loop remeasurement
+
+### 結論
+
+`ARMv5::JumpTo()` hot-path regression修正後に同じguest-owned/JIT ROM loopを再測定した結果、旧「ROM loopはdepth 1でもfull-frame replayより遅く、depth 2から60fps予算を満たさない」という性能判定は撤回する。診断無効時にも全ARM9 jumpで`getenv()`していた回帰が、ROM内で高頻度に分岐するcatch-up loopを特に強く汚染していた。
+
+frame limiterなし、描画なし、JIT、host/client別CPU affinity、exact block chain/self-loop、同一履歴入力というkernel測定は次のとおりだった。depth 1-2は3回ずつ、各6 role sample、depth 4/7は各1回、各2 role sampleである。
+
+| Depth | 修正後ROM-loop kernel | 修正前の保持値 | Input hash / ticks | 判定 |
+| ---: | ---: | ---: | --- | --- |
+| 1 | `1.871-2.199ms` | `12.624-14.470ms` | 1 tick | 旧値から約6倍改善 |
+| 2 | `1.983-2.987ms` | `16.720-28.513ms` | `A23040D5` / 2 ticks | kernel性能gate pass |
+| 4 | `2.622-2.700ms` | 旧経路は表示intervalへspill | `7C3924A2` / 4 ticks | kernelのみpass |
+| 7 | `3.123-3.428ms` | `34.341-39.657ms`級 | `1A24E475` / 7 ticks | kernelのみpass |
+
+固定60fps、`InputMaxFrameLead=8`、通常current frameを含むouter active-frame timerでも、一回の強制transactionは次の範囲に収まった。dormant probeの同条件controlはouter max `18.520/18.335ms`だった。
+
+| Depth | ROM transaction | Outer max host/client | `25ms`超 | `33ms`超 |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | `2.942-3.405ms` | `22.121/22.112ms`（2 run中の各role最大） | 0 | 0 |
+| 2 | `5.755-6.107ms` | `21.970/22.138ms`（2 run中の各role最大） | 0 | 0 |
+| 7 | `9.083-9.573ms` | `24.314/23.710ms` | 0 | 0 |
+
+depth 2はsoftware rendererでhost-target/client-targetを入れ替えた二つのpaced A/Bも行った。172 semantic fieldは訂正直後と通常回復後の双方で差分ゼロだった。同一roleのtarget/control PNGはhost、clientともSHA-256まで一致した。cross-peer curated RAMにはrole固有・render-local領域を含む差が残るため、full RAM exact一致を主張するものではない。
+
+### 比較上の制約
+
+この結果はSlippi型のgame-tick kernelとcorrected endpointが有望だと示すが、既存full-machine rollbackよりproduction end-to-endで確実に速いとはまだ言えない。現在の診断transactionには、過去checkpointのrestore、訂正後checkpointの再保存、live prediction/confirmation timeline、SPU restore/output処理が接続されていない。既存depth 2 full-frameのrestore p95 `3.346ms`とintermediate save p95 `1.499ms`を単純に足すだけでも、今回の約`3ms`のouter差は消え得る。またpaced測定は各run一回の強制transactionで、既存full-frame depth 2の9訂正/roleとはsample数が異なる。
+
+したがって現在の独立した判断は次のとおりとする。
+
+- depth 1-2の製品fallbackとしては、restore、SPU、画像一致まで接続済みの`tinycorepreimage` full-frame routeを維持する。
+- ROM-loopの旧性能棄却は取り消し、特にfull-frameで線形悪化するdepth 3以上を救えるかを調べるbounded feasibility trackを再開する。
+- 次は周辺機能を磨かず、実checkpoint restore + 履歴loop + 必要なcheckpoint再保存を一つのtransactionへ接続し、固定60fpsで複数回訂正のouter p95/maxを測る。depth 2で`25/33ms`境界を悪化させる、または意味状態・同一role画像を壊すならそこで停止する。
+- そのgateを通った場合だけdepth 4の同一role画像、audio/event side effectを再検証する。旧depth 4画像不一致はCPU回帰修正で自動的に直る種類ではないため、未解決のままとする。
 
 ## 2026-08-02 exact depth/presentation gate
 
 ### 結論
 
-`ARMv5::JumpTo()` hot-path regression修正後のJIT + `tinycorepreimage` full-machine rollbackは、tested MvL movement routeのdepth 1-2について、状態・描画・固定60fpsの三条件を満たした。Slippi風ROM loopへ切り替える根拠は現時点ではなく、より単純なfull-frame routeを本線に維持する。ただし「Slippi級の深いwindowが完成した」という意味ではない。depth 3-5は性能測定だけ、depth 4は訂正区間のsprite位相差、depth 6-7はouter `33ms`超過があり、現時点の製品安全域はdepth 2までとする。
+`ARMv5::JumpTo()` hot-path regression修正後のJIT + `tinycorepreimage` full-machine rollbackは、tested MvL movement routeのdepth 1-2について、状態・描画・固定60fpsの三条件を満たした。この節の「Slippi風ROM loopへ切り替える根拠はない」という比較判断は、その後のpost-hotfix ROM-loop再測定で撤回した。接続済みfallbackはfull-frame routeのままだが、ROM-loopはbounded feasibility trackとして再開する。depth 3-5はfull-frameでは性能測定だけ、depth 4は訂正区間のsprite位相差、depth 6-7はouter `33ms`超過があり、現時点のfull-frame製品安全域はdepth 2までとする。
 
 診断用のforced confirmationは1F固定をやめ、`MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_DELAY_FRAMES=1..180`で過去の任意frameを確認できるようにした。旧boolean環境変数はdepth 1 aliasとして残す。depth 1-7の各peer 10訂正、計20 sampleはすべて指定frame数を再演算した。
 
@@ -39,7 +75,7 @@ SPU state/output処理は「内部状態を正しい時刻へ戻す」「再演�
 
 - **昇格済み:** tested movement routeのexact depth 1-2。JIT、software renderer、full-machine state、SPU restore、replay render/audio output suppressionを組み合わせ、状態・画像・60fps gateを通過。
 - **未解決:** 実packet jitter/lossで訂正がdepth 1-2へ収まる割合、burst時のpresent-to-present時間、死亡/復帰・土管・item・result/restartのevent duplicate、長時間実行、音声波形と体感。
-- **方針:** product policyは通常depth 1-2までとし、それを超えたら深いcatch-upを常用せず短いstallへ落とす。まず実送信delay/jitter/lossを加えた分布測定とevent/audio gateを行う。depth 3以上のcheckpointや描画を磨くのは、実分布が必要性を示した場合だけにする。
+- **方針:** 接続済みfull-frame product policyは通常depth 1-2までとし、それを超えたら深いcatch-upを常用せず短いstallへ落とす。並行するROM-loop研究の優先事項は上節のcheckpoint込みperformance/presentation gateであり、それを通るまではproduction周辺を磨かない。
 
 ## 2026-08-02 ARM9 hot-path regression resolved
 

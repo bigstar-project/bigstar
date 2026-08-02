@@ -1,5 +1,14 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Post-hotfix Slippi-style ROM-loop remeasurement - 2026-08-02
+
+- **Current conclusion:** `ARMv5::JumpTo()`診断回帰の修正後、guest-owned/JIT ROM loopの旧性能棄却は撤回する。frame limiterなしのkernelはdepth 1が3 run・6 role sampleで`1.871-2.199ms`、depth 2が`1.983-2.987ms`、depth 4が`2.622-2.700ms`、depth 7が`3.123-3.428ms`だった。旧depth 1の`12.624-14.470ms`、depth 2の`16.720-28.513ms`はhot-path回帰に汚染されていた。
+- fixed 60fps、`InputMaxFrameLead=8`、描画なしで一回の強制transactionを測ると、outer maxはdepth 1がhost/client `22.121/22.112ms`、depth 2が`21.970/22.138ms`、depth 7が`24.314/23.710ms`で、全runの`25/33ms`超はゼロだった。同条件のdormant-probe controlは`18.520/18.335ms`。runnerへ`-Paced`とactive-frame summary列を追加し、kernel時間と通常current frameを含むouter時間を同じCSVで保持する。
+- software rendererのdepth 2 host-target/client-target A/Bは、172 semantic fieldが訂正直後・回復後とも差分ゼロ。同一roleのtarget/control PNGもhost/clientともSHA-256まで一致した。cross-peer curated RAM差はrole/render-local stateを含むためfull RAM exact一致ではない。
+- **Comparison limit:** この診断loopは過去checkpoint restore、訂正後checkpoint再保存、live prediction/confirmation、SPU restore/outputをまだ含まない。既存full-frame depth 2のrestore p95 `3.346ms`とintermediate save p95 `1.499ms`を加えると、今回のouter差は消え得る。またpaced runは各一回のtransactionであり、既存full-frameの9訂正/roleとsample数が違う。したがって「Slippi型が既存方式より確実に速い」は未証明である。
+- **Current blocker:** CPU kernel性能とdepth 2 endpoint imageは通ったが、productionに必要なrestore/save込みtransactionと複数訂正時のp95/max、depth 4画像、audio/event side effectは未検証。
+- **Next action:** 周辺実装を先に進めず、実checkpoint restore + ROM history loop + 必要なcheckpoint再保存を接続し、固定60fpsで反復測定する。depth 2の`25/33ms`境界または意味状態・同一role画像を悪化させるなら停止する。通った場合だけdepth 4画像とaudio/event gateへ進む。接続済みfallbackは引き続きdepth 1-2のfull-frame routeとする。
+
 ## Exact rollback depth and presentation gate - 2026-08-02
 
 - **Current conclusion:** JIT + `tinycorepreimage` の full-machine rollback は、tested MvL movement route では exact depth 1-2 を実用候補へ進められる。SPU state を checkpoint に含め、再演算中に生成された host audio samples は FIFO へ再投入しない。深度2を9回ずつ強制訂正した `logs/slippi-audio-depth2-postcorrection-run1` は host/client とも対照runの全game-state fieldへ訂正後に一致し、`60.02/60.00fps`、outer max `25.100/24.450ms`、`33ms` 超ゼロだった。
@@ -21,7 +30,7 @@
 - depth 4では背景・UI・座標は一致したが、訂正区間中にplayer spriteだけ `340-376 pixels` 程度異なり、その後自然収束した。全VRAMを加える `tinyFlags=0x2C1` はcheckpointが約`922KB`へ増えて実行がstallしたため棄却した。深度3以上はこのpresentation gateを通すまで製品側の調整対象にしない。
 - **Audio limitation:** SPU内部状態の復元と再演算sampleの重複投入防止は実装・件数確認済みだが、既に再生済みの誤予測音を取り消すことはできない。音声captureの波形比較、実聴、必要なら短いcrossfadeは未実施である。
 - **Current blocker:** tested movement routeのdepth 1-2は性能・状態・画像gateを通ったが、実packet jitter/lossでの訂正深度分布、死亡/復帰・土管・item・result/restartの副作用、長時間安定性、音声波形は未検証である。
-- **Next action:** production policyを「通常はdepth 1-2、深度超過は無理にcatch-upせず短いstall」に寄せ、実送信jitter/lossで頻度とpresent-to-present時間を測る。その後、event routeと音声captureを同じgateへ上げる。depth 3以上の最適化は、実ネットワーク分布が必要性を示すまで行わない。
+- **Next action:** 接続済みfull-frame routeの製品方針は「通常depth 1-2、深度超過は短いstall」を維持する。方式比較の次作業は上のpost-hotfix ROM-loop節を正とし、checkpoint込み性能gateを先に行う。
 
 ## ARM9 bad-jump trace hot-path regression - 2026-08-02
 
@@ -65,8 +74,8 @@
 - 検証: offset 2の両側同時JIT runでは、depth 2=`25.569/19.329ms`、depth 3=`23.292/31.966ms`、depth 4=`23.978/26.262ms`、depth 7=`39.657/34.341ms`で、いずれもtransactionが2 display frameへまたがった。depth 1は4回・両roleの8 sample中1 sampleが16.667msを超え、worstは`18.159ms`だった。最短実行可能なoffset 1でもdepth 1-4は2 display frameとなり、depth 4=`25.981/25.852ms`だった。offset 0は入力gate到達時にcounterを通過して開始不能なのでrunnerでは許可しない。
 - 検証: fixed seed `0x12345678`、fixed base tick `0x0051`、同一入力hash `7C3924A2`でhost target/control画像を比較した。depth 4終端は`281/98,304 pixels`（`0.285848%`）、通常描画1tick後も`292/98,304`（`0.297038%`）が異なる。空画面や背景崩壊はなく主に両player sprite領域の位相差だが、回復後もexact convergenceしないため描画gateはfailとする。
 - 却下: 最終catch-up tickでfont更新を省きprocess-list描画だけ戻す案は172 semantic fieldを維持したが、両側depth 4が`37.273/34.389ms`へ悪化し、UI stale riskも増えるためrevertした。retained variantは最終tickでfontとprocess-listを通常描画する。
-- 現在のblocker: guest-owned/JIT loopの意味状態はtested movement routeで一致する一方、60 FPSの1 presentation intervalとcorrected image convergenceを満たしていない。ユーザー指定どおり、このgate未達のままproduction入力serialize、checkpoint接続、event-route拡張をブラッシュアップしない。
-- 後続判断: VBlank／guest update／最終renderの分離、exact 1F probe、full-history auditまで完了した。訂正処理だけでも60fps予算を安定して満たさず、通常current frameはその外側に残るため、このROM-loopのproduction接続は停止した。現行判断は`docs/nsmb-mvl-rollback-design-notes.md`先頭の2026-08-02節を正とする。
+- 当時のblocker: guest-owned/JIT loopの意味状態はtested movement routeで一致する一方、回帰に汚染された測定では60 FPSの1 presentation intervalとcorrected image convergenceを満たさなかった。
+- 後続判断: この節の性能停止判断は、2026-08-02のpost-hotfix再測定で撤回した。最新のblockerとnext actionは本書先頭および`docs/nsmb-mvl-rollback-design-notes.md`先頭を正とする。
 
 ## NsmbMvlNetplayRuntime リファクタ調査 - 2026-07-15
 

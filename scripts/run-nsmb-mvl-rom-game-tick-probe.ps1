@@ -23,6 +23,8 @@ param(
     [ValidateRange(0, 1000)] [double]$MaxTargetHistoryRunMs = 0,
     [ValidateRange(0, 1000)] [double]$MaxTargetHistoryFrameMs = 0,
     [ValidateRange(0, 1000000)] [int]$ScreenshotInterval = 0,
+    [int]$InputMaxFrameLead = 2,
+    [switch]$Paced,
     [UInt64]$HostProcessAffinityMask = 0,
     [UInt64]$ClientProcessAffinityMask = 0,
     [switch]$AnalyzeExisting,
@@ -178,6 +180,33 @@ function Get-StageTimingSummary {
         CreateCycles = $segmentTotals.CreateCycles
         GameplayWallUs = $segmentTotals.GameplayWallUs
         GameplayCycles = $segmentTotals.GameplayCycles
+    }
+}
+
+function Get-ActiveFrameTimingSummary {
+    param(
+        [string]$Root,
+        [string]$Role
+    )
+
+    $path = Join-Path $Root "split\$Role\$Role.stdout.txt"
+    if (!(Test-Path -LiteralPath $path)) {
+        return $null
+    }
+    $line = Get-Content -LiteralPath $path -Encoding UTF8 |
+        Where-Object { $_ -match "NSMB Test: active frame timing" } |
+        Select-Object -Last 1
+    if (!$line -or $line -notmatch "samples=(\d+) avgFrameMs=([0-9.]+) maxFrameMs=([0-9.]+) maxFrame=(\d+) over16ms=(\d+) over25ms=(\d+) over33ms=(\d+)") {
+        return $null
+    }
+    return [pscustomobject]@{
+        Samples = [uint32]$Matches[1]
+        AverageMs = [double]$Matches[2]
+        MaximumMs = [double]$Matches[3]
+        MaximumFrame = [uint32]$Matches[4]
+        Over16Ms = [uint32]$Matches[5]
+        Over25Ms = [uint32]$Matches[6]
+        Over33Ms = [uint32]$Matches[7]
     }
 }
 
@@ -484,17 +513,19 @@ if (!$AnalyzeExisting) {
             ClientRom = $clientRom
             SkipRomEnsure = $true
             InputDelayFrames = 4
-            InputMaxFrameLead = 2
+            InputMaxFrameLead = $InputMaxFrameLead
             MvlMatchSeed = $MvlMatchSeed
             GameStateTraceInterval = 30
             GameStateTraceStartFrame = 900
             SkipGameStateComparison = $true
-            NoFrameLimit = $true
             FixedFrameTime = $true
             NoAudioSync = $true
             LogDir = Join-Path $resolvedLogDir "split"
             HostProcessAffinityMask = $HostProcessAffinityMask
             ClientProcessAffinityMask = $ClientProcessAffinityMask
+        }
+        if (!$Paced) {
+            $smokeArgs.NoFrameLimit = $true
         }
         if ($ScreenshotInterval -gt 0) {
             $smokeArgs.ScreenshotInterval = $ScreenshotInterval
@@ -551,6 +582,7 @@ if ($RenderlessAB) {
             if ($beforeRows.Count -ne 1 -or $afterRows.Count -ne 1) {
                 throw "$role symmetric phase missing or duplicated: before=$($beforeRows.Count) after=$($afterRows.Count)"
             }
+            $activeTiming = Get-ActiveFrameTimingSummary -Root $resolvedLogDir -Role $role
             [pscustomobject]@{
                 Role = $role
                 ExtraTicksRequested = $ExtraTicks
@@ -566,6 +598,13 @@ if ($RenderlessAB) {
                 BeforeGameFrame = [uint32]$beforeRows[0].game_frame_counter
                 AfterGameFrame = [uint32]$afterRows[0].game_frame_counter
                 GameFrameAdvance = [uint32]$afterRows[0].game_frame_counter - [uint32]$beforeRows[0].game_frame_counter
+                ActiveFrameSamples = if ($activeTiming) { $activeTiming.Samples } else { 0 }
+                ActiveFrameAverageMs = if ($activeTiming) { $activeTiming.AverageMs } else { 0 }
+                ActiveFrameMaximumMs = if ($activeTiming) { $activeTiming.MaximumMs } else { 0 }
+                ActiveFrameMaximumFrame = if ($activeTiming) { $activeTiming.MaximumFrame } else { 0 }
+                ActiveFramesOver16Ms = if ($activeTiming) { $activeTiming.Over16Ms } else { 0 }
+                ActiveFramesOver25Ms = if ($activeTiming) { $activeTiming.Over25Ms } else { 0 }
+                ActiveFramesOver33Ms = if ($activeTiming) { $activeTiming.Over33Ms } else { 0 }
             }
         }
         $roleSummaries | Export-Csv -LiteralPath (Join-Path $resolvedLogDir "summary.csv") -NoTypeInformation -Encoding UTF8
