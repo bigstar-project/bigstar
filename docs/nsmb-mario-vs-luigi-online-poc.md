@@ -2,19 +2,15 @@
 
 ## Live Slippi-style ROM-loop rollback milestone - 2026-08-02
 
-- **Current conclusion:** `romloop` backendを実prediction/confirmationと手動操作へ接続できたが、最新2回の手動runでどちらも片peerのgame tickが停止した。したがって現行launcherは不具合再現用PoCであり、快適性や長時間安定性をpassした手動版とは扱わない。固定frameの診断triggerではなく、遅れて届いた確定入力が予測と異なった時だけ訂正する構成と、既存full-frame baseline/fallbackは保持する。
-- 手動run `logs/nsmb-mvl-manual-local-20260802-201958` はclientがcheckpoint `991` / game frame `750`で訂正をarmしたまま`completed`へ到達せず、display frame `1080-2160`で同じplayer/object/hazard heartbeatを出し続けた。hostは同期間もgameplayを更新し続けた。
-- 次の手動run `logs/nsmb-mvl-manual-local-20260802-202040` はhostの最後の訂正をdisplay frame `1125`でcompletedと記録した後、gate checkpointが`1125` / game frame `884`から更新されなくなった。次のmismatch `1133`をcurrent `1136`で処理した時点で既にdepth `11` / history capacity `8`となり訂正不能、display frame `1200-1920`のheartbeatは同一だった。両runとも外側frameとpacket送受信は継続し、prefetch/data abortやstderr例外はない。
-- 直接の停止機構は、ROM input gateへ到達しなくなるため新checkpointも採取されず、古いcheckpointと現在display frameの差が8-entry historyを超えることである。根本原因候補はLCD defer解除の競合である。`FinalizeNSMLGameRAMRollbackTransaction()`はtick-end markerを要求せずhistoryを無効化できる一方、LCD defer解除はhistory有効中のtick-endだけで行うため、判定順が入れ替わるとLCD eventを永久保留し得る。
-- ただし、反復自動入力の1800-frame A/B `logs/nsmb-mvl-manual-local-20260802-202636` (`-RomLoopNoDeferLCD`) と `logs/nsmb-mvl-manual-local-20260802-202719` (既存LCD defer) はどちらも完走し、停止を再現しなかった。よってLCD競合はコード上の強い候補だが、同一失敗入力での因果確定は未完である。
-- 最初のlive接続は外側frontend境界で4 MiB Main RAMを保存していた。実遅延で訂正するとARM9 prefetch abortが発生したため、この経路は不採用とした。原因は復元点だけを固定guest PC `0x02004EC8`へ置いても、checkpoint採取点が同じguest control pointではなかったことにある。
-- 現行実装はJIT callbackがROM入力gateへ到達した時点でper-`NDS` 16-entry ringへMain RAMとgame frameを保存する。rollback runtimeはlate-inputのmismatch frame以前のgate checkpointを選び、過去入力から現在入力までをguest historyへ詰め、同じgateで復元する。transaction完了をafter-frameで検出してhistory gateを解除する設計だが、最新の手動runでは次の通常tickとcheckpoint採取が再開しない場合があることを確認した。
-- `scripts/run-nsmb-mvl-manual-local.ps1 -SlippiRollback`はgame-tick patch済みROMをmanifest付きで自動生成し、JIT exact chain/self-loop、`romloop` backend、checkpoint interval 1、input delay 0を設定する。既定の遅延再現はsend delay 2 + jitter 1で、`-InputSendDelayFrames` / `-InputSendJitterFrames`から変更できる。2ウィンドウの物理入力はbootstrap後にそのまま送信される。
-- 実通信smoke `logs/nsm-mvl-romloop-gate-checkpoint-default-delay`では、frame 1000/1008の入力変化に対して両peerが計4回訂正した。hostはdepth 2、clientはdepth 3を含み、全transactionが完了した。prefetch/data abort、schedule失敗、25/33ms超はゼロだった。
-- 同runはframes 990-1080でhost/client `59.75/60.07fps`、outer max `24.151/24.229ms`。frame 1080の両player座標・速度、object/hazard summaryはhost/clientで一致した。より浅い `logs/nsm-mvl-romloop-gate-checkpoint-finalize` も二回ずつ訂正を完了し、`60.03/59.83fps`、outer max `24.295/21.059ms`だった。
-- 自動画面保存を有効にした追加runはlauncherの既存screenshot probeが画像を生成せず失敗したため、新live経路のPNG exact gateは未完である。これは「描画バグなし」を確定する証拠ではない。通常GUI表示を伴う上記runは完走し、semantic heartbeatも一致したが、手動目視と画像取得経路の修正が残る。
-- **Current blocker:** 手動の反復訂正でgame tick停止が再現した。LCD defer状態、tick-end到達、history control、ARM9 PCを通常live logが保存していないため、残存ログだけで根本原因を一意に確定できない。これを解決するまで性能・画像・音声のブラッシュアップは先行しない。
-- **Next action:** transactionごとのarm/apply/tick-end/finalizeとLCD defer開始・解除を必ずlive traceへ追加し、両peerの短間隔入力変化でbounded再現する。LCD解除前のfinalizeが確認できたら、完了条件をtick-end到達へ揃え、異常時に永久保留しないwatchdogも入れた上で反復stressをやり直す。
+- **Current conclusion:** 最新2回の手動runで起きた「片画面だけゲームが止まり、外側frameと通信は進む」問題を自動再現し、主因を修正した。両peerが独立して短間隔入力を変える `tests/nsmb_us_direct_mvl_romloop_bidirectional_stress.inputs` を追加し、修正前ログ `logs/nsmb-mvl-manual-local-20260802-203801` はgameplay heartbeatがhost 7行、client 8行連続で不変になる。analyzerもこの条件を `freeze-suspect` と判定するようにした。
+- LCD defer有無、ARM9 register/DTCM復元、history終了処理を個別にA/Bした結果、それらだけでは停止を解消しなかった。Main RAM復元を省くcontrolは57 transactionを完走し、復元長の二分では `0x02094600` まで継続、`0x02094700` を含めると停止した。シンボル上、この境界はNitroSDKの `OSi_UseTick` / `OSi_UseAlarm` / `OSi_AlarmQueue` と一致する。
+- 根本問題は4 MiB Main RAM全体を「ゲーム状態」と見なし、現在のCPU・scheduler・peripheral timelineへ過去のNitroSDK thread/tick/alarm/WM stateを混ぜていたことである。現行restoreはゲームRAMを戻しつつ、`0x020942A0..0x02097FFF` のSDK runtime領域とROM-loop control blockを現在値のまま保持する。失敗したARM9 register/DTCM復元案は採用していない。
+- transaction中に次のmismatchが既存historyを上書きしないよう予約を直列化し、実際のrestore gateまでに通常tickが完了した分だけhistory countを調整した。履歴を消費した次のinput gateで終了を確定し、after-frameまでtransactionをin-flightとして扱う。ROMのinput/loop/font/render wrapperは元のBL return addressをLRへ戻してから復帰する。
+- 修正後run `logs/nsmb-mvl-manual-local-20260802-215215` はsend delay 2 + jitter 1、継続入力、1800 framesで各peer 120 transactionをarm/completedし、gameplay plateauは両側とも最長1行だった。active rateはhost/client `60.00/59.97fps`、outer max `28.076/24.289ms`、`33ms`超ゼロ。frames 1560/1680/1800でもplayer座標とobject/hazard stateが更新された。
+- stage traceなしの反復 `logs/nsmb-mvl-manual-local-20260802-215331` も各peer 120 transaction、1800 framesを完走し、outer max `22.949/26.147ms`、`33ms`超ゼロだった。wrapper終了は既存screenshot probeがPNGを生成しないためfailureになったが、両melonDS本体はframe-limitへ到達しており、rollback停止や性能failureではない。
+- `scripts/run-nsmb-mvl-manual-local.ps1 -SlippiRollback` はgame-tick patch済みROMを生成し、JIT exact chain/self-loop、`romloop` backend、checkpoint interval 1、input delay 0、既定send delay 2 + jitter 1を設定する。物理入力を使う手動再試験も同じ経路で実行できる。
+- **Current blocker:** 画面停止のbounded再現は解消したが、修正後ログのshared heartbeat 8点中4点でhost/clientのsignificant object/hazard差がある。role-local表示差か永続simulation divergenceかをまだ分離できていない。またlive rollbackのPNG取得は既存screenshot probe不調のため未完で、死亡/復帰・土管・item・result/restart、長時間、音声も未検証である。
+- **Next action:** 同一game tickへ揃えたcross-peer semantic比較でobject/hazard差を分類し、永続差ならrestore対象境界を修正する。その後にscreenshot取得経路を直して訂正中/直後の描画を比較し、手動操作で今回の停止が消えたことを確認する。これらを通すまでproduction安定版とは扱わない。
 
 ## Exact rollback depth and presentation gate - 2026-08-02
 

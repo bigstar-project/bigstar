@@ -486,6 +486,10 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
       !context.Input.NetplayOnly || !nds || instanceID < 0 || instanceID >= 16)
     return false;
 
+  if (context.Config.Backend == Config::RollbackBackend::RomLoop &&
+      nds->IsNSMLGameRAMRollbackTransactionInFlight())
+    return false;
+
   melonDS::u32 mismatchFrame = kNoFrame;
   melonDS::u32 restoreFrame = kNoFrame;
   StoredState checkpoint;
@@ -636,6 +640,14 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
       });
     }
 
+    if (!nds->ScheduleNSMLGameRAMRestore(std::move(checkpoint.MainRAMCopy))) {
+      std::printf("NSMB Rollback: failed to schedule ROM-loop RAM restore "
+                  "inst=%d restoreFrame=%u current=%u\n",
+                  instanceID, restoreFrame, frame);
+      std::fflush(stdout);
+      return false;
+    }
+
     nds->ARM9Write32(kRomLoopHistoryIndexAddress, 0);
     nds->ARM9Write32(kRomLoopHistoryCountAddress, transactionFrames);
     nds->ARM9Write32(kRomLoopHistoryTargetAddress, 1);
@@ -650,14 +662,6 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
     nds->ARM9Write32(kRomLoopHistoryEnabledAddress, 1);
     nds->ARM9Write32(0x02001AC4, 0);
     nds->ARM9Write32(0x02001AC0, 0);
-    if (!nds->ScheduleNSMLGameRAMRestore(std::move(checkpoint.MainRAMCopy))) {
-      nds->ARM9Write32(kRomLoopHistoryEnabledAddress, 0);
-      std::printf("NSMB Rollback: failed to schedule ROM-loop RAM restore "
-                  "inst=%d restoreFrame=%u current=%u\n",
-                  instanceID, restoreFrame, frame);
-      std::fflush(stdout);
-      return false;
-    }
 
     if (context.Input.NetplayTrace) {
       std::printf(

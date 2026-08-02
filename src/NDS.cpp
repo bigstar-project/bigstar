@@ -548,6 +548,7 @@ void NDS::Reset()
     NSMLGameRAMRestoreData = nullptr;
     NSMLGameRAMRestoreLength = 0;
     NSMLGameRAMRestoreOwnedBuffer.clear();
+    NSMLGameRAMHistoryReachedExitGate = false;
     NSMLGameRAMCheckpoints.clear();
     NSMLNextGameRAMCheckpoint = 0;
     NSMLGameRAMRestoreUs = 0;
@@ -2274,7 +2275,18 @@ void NDS::ApplyNSMLPendingGameRAMRestore()
 {
     if (!NSMLGameRAMRestorePending)
     {
-        CaptureNSMLGameRAMCheckpointAtGate();
+        constexpr u32 historyEnabledAddr = 0x02001ACC;
+        constexpr u32 historyIndexAddr = 0x02001AD0;
+        constexpr u32 historyCountAddr = 0x02001AD4;
+        if (ARM9Read32(historyEnabledAddr) != 0 &&
+            ARM9Read32(historyIndexAddr) >= ARM9Read32(historyCountAddr))
+        {
+            NSMLGameRAMHistoryReachedExitGate = true;
+            ARM9Write32(historyEnabledAddr, 0);
+            return;
+        }
+        if (!NSMLGameRAMHistoryReachedExitGate)
+            CaptureNSMLGameRAMCheckpointAtGate();
         return;
     }
     if (!MainRAM)
@@ -2292,11 +2304,53 @@ void NDS::ApplyNSMLPendingGameRAMRestore()
 
     constexpr u32 controlOffset = 0x1AC0;
     constexpr u32 controlLength = 0x60;
+    constexpr u32 historyCountAddr = 0x02001AD4;
+    constexpr u32 historyStartFrameAddr = 0x02001ADC;
+    constexpr u32 gameFrameAddr = 0x0208B668;
+    // NitroSDK owns this MainRAM interval. In particular it contains
+    // OSi_CurrentThreadPtr/OSi_ThreadInfo (0x020942AC) and the live tick/alarm
+    // queue (0x020945A4/0x020945B8), followed by filesystem and WM state. These
+    // structures belong to the current outer emulator frame, not the rewound
+    // game tick. Restoring them makes the final replay tick return through a
+    // stale OS scheduler/alarm state and leaves the game loop stopped.
+    constexpr u32 sdkRuntimeOffset = 0x942A0;
+    constexpr u32 sdkRuntimeEnd = 0x98000;
+
+    const u32 configuredHistoryCount = ARM9Read32(historyCountAddr);
+    const u32 historyStartFrame = ARM9Read32(historyStartFrameAddr);
+    const u32 preRestoreGameFrame = ARM9Read32(gameFrameAddr);
+    if (preRestoreGameFrame > historyStartFrame)
+    {
+        const u32 gateHistoryCount = std::min(
+            configuredHistoryCount, preRestoreGameFrame - historyStartFrame);
+        if (gateHistoryCount != 0)
+            ARM9Write32(historyCountAddr, gateHistoryCount);
+    }
+
     std::array<u8, controlLength> control {};
     memcpy(control.data(), MainRAM + controlOffset, control.size());
 
+    if (getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE"))
+    {
+        printf("NSMB ROM-loop gate state: frame=%u gameFrame=%u start=%u "
+               "configuredTicks=%u gateTicks=%u currentSP=%08X "
+               "currentLR=%08X currentCPSR=%08X\n",
+               NumFrames, preRestoreGameFrame, historyStartFrame,
+               configuredHistoryCount, ARM9Read32(historyCountAddr),
+               ARM9.R[13], ARM9.R[14], ARM9.CPSR);
+        fflush(stdout);
+    }
+
     const auto restoreStart = std::chrono::steady_clock::now();
-    memcpy(MainRAM, NSMLGameRAMRestoreData, length);
+    static_assert(sdkRuntimeOffset < sdkRuntimeEnd);
+    static_assert(sdkRuntimeEnd <= 0x400000);
+    const u32 beforeSDK = std::min(length, sdkRuntimeOffset);
+    memcpy(MainRAM, NSMLGameRAMRestoreData, beforeSDK);
+    if (length > sdkRuntimeEnd)
+    {
+        memcpy(MainRAM + sdkRuntimeEnd, NSMLGameRAMRestoreData + sdkRuntimeEnd,
+               length - sdkRuntimeEnd);
+    }
     memcpy(MainRAM + controlOffset, control.data(), control.size());
     const auto restoreElapsed = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::steady_clock::now() - restoreStart);
@@ -2360,6 +2414,13 @@ bool NDS::CopyNSMLGameRAMCheckpointAtOrBefore(
     return true;
 }
 
+bool NDS::IsNSMLGameRAMRollbackTransactionInFlight()
+{
+    constexpr u32 historyEnabledAddr = 0x02001ACC;
+    return NSMLGameRAMRestorePending || NSMLGameRAMHistoryReachedExitGate ||
+        ARM9Read32(historyEnabledAddr) != 0;
+}
+
 bool NDS::FinalizeNSMLGameRAMRollbackTransaction()
 {
     constexpr u32 historyEnabledAddr = 0x02001ACC;
@@ -2368,7 +2429,7 @@ bool NDS::FinalizeNSMLGameRAMRollbackTransaction()
     constexpr u32 historyTargetAddr = 0x02001AD8;
     constexpr u32 historyStartFrameAddr = 0x02001ADC;
     constexpr u32 gameFrameAddr = 0x0208B668;
-    if (NSMLGameRAMRestorePending || ARM9Read32(historyEnabledAddr) == 0)
+    if (NSMLGameRAMRestorePending || !NSMLGameRAMHistoryReachedExitGate)
         return false;
     const u32 historyCount = ARM9Read32(historyCountAddr);
     if (historyCount == 0 || ARM9Read32(historyIndexAddr) < historyCount ||
@@ -2380,18 +2441,20 @@ bool NDS::FinalizeNSMLGameRAMRollbackTransaction()
     ARM9Write32(historyCountAddr, 0);
     ARM9Write32(historyTargetAddr, 0);
     ARM9Write32(historyStartFrameAddr, 0);
+    NSMLGameRAMHistoryReachedExitGate = false;
     return true;
 }
 
 bool NDS::ScheduleNSMLGameRAMRestore(std::vector<u8>&& image)
 {
     const u32 length = std::min(MainRAMMask + 1, 0x400000u);
-    if (!MainRAM || image.size() != length || NSMLGameRAMRestorePending)
+    if (!MainRAM || image.size() != length || IsNSMLGameRAMRollbackTransactionInFlight())
         return false;
 
     NSMLGameRAMRestoreOwnedBuffer = std::move(image);
     NSMLGameRAMRestoreData = NSMLGameRAMRestoreOwnedBuffer.data();
     NSMLGameRAMRestoreLength = static_cast<u32>(NSMLGameRAMRestoreOwnedBuffer.size());
+    NSMLGameRAMHistoryReachedExitGate = false;
     NSMLGameRAMRestorePending = true;
     return true;
 }

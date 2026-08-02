@@ -8,19 +8,21 @@
 
 `RollbackBackend::RomLoop`を実late-input timelineへ接続した。`WritePacketBridgeJitScratchIfNeeded()`がnetwork pump、送信、remote prediction/confirmation、現在frameのlocal input記録を終えた直後にだけROM-loop訂正を予約する。これにより、訂正historyにはcheckpoint frameから現在frameまでの両player入力とpacket tickが揃い、固定診断triggerを使わない。
 
-2026-08-02の最新2回の手動runで、それぞれclientとhostのgame tick停止を確認した。`201958`はclientのcheckpoint `991` / game frame `750`からの訂正が未完了のまま残り、`202040`はhostの訂正をframe `1125`でcompletedとした後にcheckpointが`1125` / game frame `884`で止まった。どちらもdisplay frameとpacket通信は進み続けたため、プロセスやtransportの停止ではない。現時点で手動launcherは安定版ではなく、不具合再現用PoCとする。
+手動停止を再現できなかった旧自動入力は片側中心で変化間隔も長く、実際のprediction mismatch列を再現していなかった。両peerを独立に短間隔操作する `tests/nsmb_us_direct_mvl_romloop_bidirectional_stress.inputs` へ置き換えると、修正前の `logs/nsmb-mvl-manual-local-20260802-203801` で両画面のgameplay heartbeatが長時間不変となり、同じ停止をboundedに再現できた。rollback log analyzerはgameplay heartbeat plateauもfreeze判定へ含め、同ログを `freeze-suspect` とする。
 
-有力な競合候補はLCD deferとtransaction finalizeの順序である。現行finalizeはhistory indexとgame frameだけでhistory enabledをclearするが、LCD deferはhistory enabled中のtick-end markerでのみ解除される。tick-end前にfinalizeすると、後続tick-end handlerがhistory disabledでearly returnし、LCD eventが保留され続ける経路がコード上存在する。ただし、同日の1800-frame反復自動入力A/BはLCD defer無効 (`202636`) と有効 (`202719`) の両方が完走した。手動失敗と同じタイミングを再現できていないため、まだ因果確定とは扱わない。次はarm/apply/tick-end/finalize、history control、LCD defer状態、ARM9 PCをtransaction単位で残し、再現後に完了条件をtick-endへ揃える。
+LCD defer無効化は同じ入力で停止し、ARM9 register/DTCMをcheckpointへ追加しても停止した。一方、history loopを維持してMain RAM copyだけ省いたcontrolは57 transactionを完走した。復元prefixの二分では `0x02094600` まで継続し、`0x02094700` を含めると最終tick後に通常game loopへ戻れなかった。この256-byte境界は `symbols9.x` の `OSi_UseTick=0x020945A4`、`OSi_UseAlarm=0x020945B4`、`OSi_AlarmQueue=0x020945B8` と一致する。
 
 checkpointとrestoreは同じguest control pointでなければならない。最初のlive版はfrontendの外側frame境界でMain RAMを保存し、固定PC `0x02004EC8`で復元したため、実訂正後にARM9 prefetch abortを再現した。この失敗により、診断PoCの短いsemantic一致だけではproduction境界を証明できないと判明した。
 
-現行版はJITがROM input gate先頭へ到達するたび、通常history transaction外ならper-`NDS` 16-entry ringへ4 MiB Main RAM、display frame、game frameを保存する。late mismatch時はmismatch frame以前の最新gate checkpointを選び、guest history/controlを現在RAMへ書いてから同じgateでcheckpoint RAMを復元する。after-frameで`historyIndex >= historyCount`とgame frame終端を確認し、history gateを解除する設計である。ただし最新の手動runにより、この完了条件だけでは次の通常tick、次checkpoint、次rollbackが必ずしも継続しないと判明した。
+主因はMain RAM全体をgame-owned stateとして戻したことだった。NitroSDKのthread/tick/alarm/filesystem/WM stateは現在のCPU・scheduler・peripheral timelineに属し、過去game memoryと同時に復元できない。現行版はcheckpointの4 MiBを保持するが、restore時は `0x020942A0..0x02097FFF` のSDK runtimeと `0x02001AC0` からのROM-loop controlを現在値のまま残す。DTCMとCPU registerは現在値を維持する。
 
-実通信gate `logs/nsm-mvl-romloop-gate-checkpoint-default-delay`はsend delay 2 + jitter 1でframe 1000/1008の立ち上がり・立ち下がりを遅延確定し、両peer計4訂正を発生させた。hostはdepth 2、clientはdepth 3を含み、全transactionがcompleted logへ到達した。prefetch/data abortはゼロ、frame 1080のplayer/object/hazard summaryは一致、frames 990-1080のactive rateは`59.75/60.07fps`、outer maxは`24.151/24.229ms`、`25/33ms`超ゼロだった。send delay 1の`logs/nsm-mvl-romloop-gate-checkpoint-finalize`も二回ずつ完了し、`60.03/59.83fps`、outer max `24.295/21.059ms`だった。
+加えて、一つのtransaction中は次のlate mismatchをpendingのまま保持してhistory上書きを防ぎ、restore gate時点の実game-frame差へhistory countを合わせる。履歴消費後の次gate到達を明示的な完了境界とし、after-frameでcontrolをclearする。ROM wrapperは入力・loop counter・font・renderの元BL return addressをLRへ復元してから戻る。
+
+修正後の `logs/nsmb-mvl-manual-local-20260802-215215` はsend delay 2 + jitter 1、継続入力、1800 framesで各peer 120 transactionを完了した。gameplay plateauは最長1 heartbeat、active rateは `60.00/59.97fps`、outer maxは `28.076/24.289ms`、`33ms`超ゼロである。stage traceなしの反復 `215331` も各120 transaction、1800 framesを完走し、outer max `22.949/26.147ms`、`33ms`超ゼロだった。
 
 手動launcherは`-SlippiRollback`または`-RomLoopRollback`でこのbackendを選ぶ。game-tick patch済みhost/client ROMを別名とmanifestで生成し、checkpoint interval 1、window 16、最大depth 7、input delay 0、既定send delay 2/jitter 1、JIT exact chain/self-loopを設定する。bootstrap入力終了後は各melonDS windowの物理入力がそのままnetplay timelineへ入る。
 
-現段階はbounded live PoCである。短い自動runではGUIを描画しながら約60fpsとsemantic heartbeat一致を確認したが、手動の反復訂正でgame tick停止が再現したため安定性gateはfailである。自動screenshot probeも画像を生成しなかったためlive訂正後PNG exact比較は未完。まず停止transactionの再現・修正・反復stressを通し、それまで性能、画像、audio/event周辺のブラッシュアップを先行しない。
+現段階はbounded live PoCのままだが、報告された画面停止の自動再現と1800-frame反復gateはpassへ変わった。未解決なのは、`215215` のshared heartbeat 8点中4点にあるsignificant object/hazard差がrole-local stateか永続simulation divergenceか、既存screenshot probeがPNGを生成しないため訂正中画像を比較できないこと、イベント・長時間・音声である。次は同一game tick semantic比較で差を分類し、PNG経路と手動再試験を通す。ここまで完了するまではproduction安定版としない。
 
 ### 診断PoCの根拠（live接続前）
 

@@ -300,6 +300,7 @@ public: // TODO: Encapsulate the rest of these members
     std::vector<u8> NSMLGameRAMRestoreOwnedBuffer;
     unsigned long long NSMLGameRAMRestoreUs = 0;
     u32 NSMLGameRAMRestoreBytes = 0;
+    bool NSMLGameRAMHistoryReachedExitGate = false;
     struct NSMLGameRAMCheckpoint
     {
         u32 DisplayFrame = 0;
@@ -311,6 +312,7 @@ public: // TODO: Encapsulate the rest of these members
     void CaptureNSMLGameRAMCheckpointAtGate();
     bool CopyNSMLGameRAMCheckpointAtOrBefore(
         u32 frame, u32& checkpointFrame, u32& gameFrame, std::vector<u8>& image) const;
+    bool IsNSMLGameRAMRollbackTransactionInFlight();
     bool FinalizeNSMLGameRAMRollbackTransaction();
     bool ScheduleNSMLGameRAMRestore(std::vector<u8>&& image);
     void ApplyNSMLPendingGameRAMRestore();
