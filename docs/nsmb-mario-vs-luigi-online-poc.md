@@ -7,7 +7,9 @@
 - software rendererのdepth 2 host-target/client-target A/Bは、172 semantic fieldが訂正直後・回復後とも差分ゼロ。同一roleのtarget/control PNGもhost/clientともSHA-256まで一致した。cross-peer curated RAM差はrole/render-local stateを含むためfull RAM exact一致ではない。
 - **Comparison limit:** この診断loopは過去checkpoint restore、訂正後checkpoint再保存、live prediction/confirmation、SPU restore/outputをまだ含まない。既存full-frame depth 2のrestore p95 `3.346ms`とintermediate save p95 `1.499ms`を加えると、今回のouter差は消え得る。またpaced runは各一回のtransactionであり、既存full-frameの9訂正/roleとsample数が違う。したがって「Slippi型が既存方式より確実に速い」は未証明である。
 - **Current blocker:** CPU kernel性能とdepth 2 endpoint imageは通ったが、productionに必要なrestore/save込みtransactionと複数訂正時のp95/max、depth 4画像、audio/event side effectは未検証。
-- **Next action:** 周辺実装を先に進めず、実checkpoint restore + ROM history loop + 必要なcheckpoint再保存を接続し、固定60fpsで反復測定する。depth 2の`25/33ms`境界または意味状態・同一role画像を悪化させるなら停止する。通った場合だけdepth 4画像とaudio/event gateへ進む。接続済みfallbackは引き続きdepth 1-2のfull-frame routeとする。
+- **Main direction:** ユーザー方針によりSlippi型ROM-loopをrollbackの本線とする。既存full-frame routeは比較baselineとdepth 1-2 fallbackとして保持する。
+- 毎frameの実`tinycorepreimage` checkpoint保存を有効にしたpaced gateを追加した。depth 1はouter max `22.382/22.384ms`、depth 2は2 run・4 role sampleの最大`22.816ms`で、`25/33ms`超ゼロ。depth 7はROM transaction `9.669-10.321ms`と安定した一方、2 run中hostに一度`30.966ms`が出て`25ms`超1件、再runは全role `24.148ms`以下、全体の`33ms`超はゼロだった。
+- **Next action:** 周辺実装を先に進めず、CPU/hardware timelineを戻さないgame-memory checkpoint restore + ROM history loop + 必要な再保存を接続する。固定60fpsで複数訂正のp95/p99/max、意味状態、同一role画像を測り、depth 2の性能・描画gateが通るまでaudio/event側へ進まない。
 
 ## Exact rollback depth and presentation gate - 2026-08-02
 
@@ -30,7 +32,7 @@
 - depth 4では背景・UI・座標は一致したが、訂正区間中にplayer spriteだけ `340-376 pixels` 程度異なり、その後自然収束した。全VRAMを加える `tinyFlags=0x2C1` はcheckpointが約`922KB`へ増えて実行がstallしたため棄却した。深度3以上はこのpresentation gateを通すまで製品側の調整対象にしない。
 - **Audio limitation:** SPU内部状態の復元と再演算sampleの重複投入防止は実装・件数確認済みだが、既に再生済みの誤予測音を取り消すことはできない。音声captureの波形比較、実聴、必要なら短いcrossfadeは未実施である。
 - **Current blocker:** tested movement routeのdepth 1-2は性能・状態・画像gateを通ったが、実packet jitter/lossでの訂正深度分布、死亡/復帰・土管・item・result/restartの副作用、長時間安定性、音声波形は未検証である。
-- **Next action:** 接続済みfull-frame routeの製品方針は「通常depth 1-2、深度超過は短いstall」を維持する。方式比較の次作業は上のpost-hotfix ROM-loop節を正とし、checkpoint込み性能gateを先に行う。
+- **Next action:** full-frame routeは比較baseline/depth 1-2 fallbackとして維持する。製品化の本線と次作業は上のpost-hotfix ROM-loop節を正とする。
 
 ## ARM9 bad-jump trace hot-path regression - 2026-08-02
 

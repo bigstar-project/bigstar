@@ -31,11 +31,23 @@ depth 2はsoftware rendererでhost-target/client-targetを入れ替えた二つ�
 
 この結果はSlippi型のgame-tick kernelとcorrected endpointが有望だと示すが、既存full-machine rollbackよりproduction end-to-endで確実に速いとはまだ言えない。現在の診断transactionには、過去checkpointのrestore、訂正後checkpointの再保存、live prediction/confirmation timeline、SPU restore/output処理が接続されていない。既存depth 2 full-frameのrestore p95 `3.346ms`とintermediate save p95 `1.499ms`を単純に足すだけでも、今回の約`3ms`のouter差は消え得る。またpaced測定は各run一回の強制transactionで、既存full-frame depth 2の9訂正/roleとはsample数が異なる。
 
+ユーザー方針により、以後はSlippi型ROM-loopをrollbackの本線として最適化する。これは未完成経路を完成扱いする判断ではなく、深度増加時のscalingを優先して研究・製品化対象を一本化する判断である。既存full-frameは比較baselineと、ROM-loopが性能・画像gateを失敗した場合のdepth 1-2 fallbackとして保持する。
+
+毎frameの実`tinycorepreimage` checkpoint保存を有効にし、full-frame resimulationだけを無効にした追加gateも行った。これによりROM transaction外の通常checkpoint保存がouter timerへ含まれる。restoreはまだ含まない。
+
+| Depth | Checkpoint込みROM transaction | Outer max host/client | 反復 | 判定 |
+| ---: | ---: | ---: | ---: | --- |
+| 1 | `3.537/3.478ms` | `22.382/22.384ms` | 1 run | `25/33ms`超ゼロ |
+| 2 | `6.340-6.547ms` | 全2 run最大`22.816ms` | 2 runs | 全roleで`25/33ms`超ゼロ |
+| 7 | `9.669-10.321ms` | run 1=`30.966/23.365ms`、run 2=`22.946/24.148ms` | 2 runs | hostに単発`25ms`超、`33ms`超ゼロ |
+
+depth 7のROM transaction自体は4 role sampleで狭い範囲だが、outer hostに一度だけ`30.966ms`が出た。再現runでは消えたためcheckpoint保存の必然的コストとは断定しない一方、最大値優先gateでは外れ値として無視もしない。restore接続後はtransactionを複数回発生させてp95/p99と実present deadlineを測る。
+
 したがって現在の独立した判断は次のとおりとする。
 
-- depth 1-2の製品fallbackとしては、restore、SPU、画像一致まで接続済みの`tinycorepreimage` full-frame routeを維持する。
-- ROM-loopの旧性能棄却は取り消し、特にfull-frameで線形悪化するdepth 3以上を救えるかを調べるbounded feasibility trackを再開する。
-- 次は周辺機能を磨かず、実checkpoint restore + 履歴loop + 必要なcheckpoint再保存を一つのtransactionへ接続し、固定60fpsで複数回訂正のouter p95/maxを測る。depth 2で`25/33ms`境界を悪化させる、または意味状態・同一role画像を壊すならそこで停止する。
+- ROM-loopをmain trackとし、full-frame routeは比較baseline/depth 1-2 fallbackへ下げる。
+- 毎frame checkpoint保存を足してもdepth 1-2の性能gateは維持したため、次はSlippi同様にCPU/hardware timelineを戻さずgame memoryだけを復元するcheckpoint境界を実装する。full-machine tinycore restoreをそのままROM-loopへ足す設計にはしない。
+- 周辺機能を磨かず、game-memory restore + 履歴loop + 必要なcheckpoint再保存を一つのtransactionへ接続し、固定60fpsで複数回訂正のouter p95/p99/maxを測る。depth 2で`25/33ms`境界を再現的に悪化させる、または意味状態・同一role画像を壊すなら原因を解消するまで先へ進まない。
 - そのgateを通った場合だけdepth 4の同一role画像、audio/event side effectを再検証する。旧depth 4画像不一致はCPU回帰修正で自動的に直る種類ではないため、未解決のままとする。
 
 ## 2026-08-02 exact depth/presentation gate

@@ -25,6 +25,7 @@ param(
     [ValidateRange(0, 1000000)] [int]$ScreenshotInterval = 0,
     [int]$InputMaxFrameLead = 2,
     [switch]$Paced,
+    [switch]$WithRollbackCheckpoints,
     [UInt64]$HostProcessAffinityMask = 0,
     [UInt64]$ClientProcessAffinityMask = 0,
     [switch]$AnalyzeExisting,
@@ -536,6 +537,14 @@ if (!$AnalyzeExisting) {
         if ($AllowJit) {
             $smokeArgs.AllowJit = $true
         }
+        if ($WithRollbackCheckpoints) {
+            $smokeArgs.Rollback = $true
+            $smokeArgs.RollbackBackend = "tinycorepreimage"
+            $smokeArgs.RollbackTinyCoreFlags = "0x245"
+            $smokeArgs.RollbackWindow = 20
+            $smokeArgs.RollbackCheckpointInterval = 1
+            $smokeArgs.RollbackResimulate = $false
+        }
         & (Join-Path $repoRoot "scripts\run-nsmb-mvl-split-local-input-smoke.ps1") @smokeArgs
     } finally {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE = $oldEnabled
@@ -585,6 +594,7 @@ if ($RenderlessAB) {
             $activeTiming = Get-ActiveFrameTimingSummary -Root $resolvedLogDir -Role $role
             [pscustomobject]@{
                 Role = $role
+                RollbackCheckpointsEnabled = $WithRollbackCheckpoints.IsPresent
                 ExtraTicksRequested = $ExtraTicks
                 ExtraTicksSeen = [uint32]$afterRows[0].extra_ticks_seen
                 InputSequenceHash = $afterRows[0].input_sequence_hash
@@ -671,6 +681,7 @@ if ($RenderlessAB) {
     $curatedDelta = Compare-ProbeDeltas -LeftBefore $targetBeforePath -LeftAfter $targetAfterPath -RightBefore $controlBeforePath -RightAfter $controlAfterPath -ExcludedRanges $excludedRanges
     $summary = [pscustomobject]@{
         Mode = if ($FrameBoundary) { "renderless-frame-boundary-ab" } elseif ($GuestOwnedHistoryAB) { "renderless-guest-history-ab" } elseif ($HistoricalInputAB) { "renderless-historical-input-ab" } else { "renderless-ab" }
+        RollbackCheckpointsEnabled = $WithRollbackCheckpoints.IsPresent
         ExtraTicksRequested = $ExtraTicks
         TargetExtraTicksSeen = [uint32]$targetAfterRows[0].extra_ticks_seen
         ControlTicksSeen = [uint32]$controlAfterRows[0].extra_ticks_seen
