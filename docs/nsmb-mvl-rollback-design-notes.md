@@ -1,8 +1,58 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
-> 現在の判断は直下の 2026-08-02 節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
+> 現在の判断は直下の ARM9 hot-path regression 解消節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
 
-## 2026-08-02 external rollback implementations and full-history audit
+## 2026-08-02 ARM9 hot-path regression resolved
+
+### 結論
+
+現行フォークが遅かった主因は特定・修正できた。Commit `f8afb92f557759ed7b5853fd71a9632fb07151cb` が StageScene 診断用に `ARMv5::JumpTo()` へ追加した `NSMLEnvFlag("MELONDS_NSML_BAD_JUMP_TRACE")` が、診断無効時にも全 ARM9 jump で `getenv()` を呼んでいた。PC/LR/SP/CPSR と jump target も毎回不要に取得していた。一般 runtime hook を compile-out した過去の A/B は、この直接呼び出しが gate の外だったため主因を除去できていなかった。
+
+修正は bad-jump flag を process 内で一度だけ読み、無効時には register capture と PU target check を実行しない。既存 runner は process 起動前に flag を設定するため、launch-time config として cache しても診断用途を保てる。flag 有効の 600-frame route smoke も pass した。
+
+実 MvL gameplay の fixed-frame/state-trace 測定は次のように変わった。
+
+| 条件 | 修正前 active FPS / frame | 修正後 active FPS / frame | 改善 |
+| --- | ---: | ---: | ---: |
+| JIT off | `21.68fps` / `46.117ms` | `264.55fps` / `3.781ms` | `12.20x`、frame time `-91.8%` |
+| JIT on | `91.90fps` / `10.882ms` | `530.04fps` / `1.886ms` | `5.77x`、frame time `-82.7%` |
+
+修正後の trace は scene `0x3`、`vsMode=1`、両 player actor 存在を確認し、双方とも `16/25/33ms` 超がゼロだった（`logs/rom-jit-matrix-20260802-badjump-cache-mvl`）。したがって「改造 ROM が本質的に重い」「DS emulation がこの PC で限界」「JIT backend 自体が遅い」という仮説は主因説明として棄却する。
+
+### Rollback feasibility after the fix
+
+前節までの full-frame rollback 不可判定は、replay `RunFrame()` がこの hot-path regression を含む測定だったため撤回する。固定 seed、JIT、host/client を別 logical CPU に固定した exact-one-frame probe を同条件で再実行した結果、各 peer 10 回、計 20 回がすべて `frames=1`、confirmed input replay、1,250-frame cross-peer semantic comparison pass となった（`logs/slippi-exact-one-frame-probe-badjump-cache-run2`）。
+
+| 指標 | p50 | p95 | max | `16.667ms` 超 |
+| --- | ---: | ---: | ---: | ---: |
+| restore + 1F replay total | `5.091ms` | `5.485ms` | `5.581ms` | `0/20` |
+| restore | `3.318ms` | `3.481ms` | `3.886ms` | `0/20` |
+| replay `RunFrame()` | `1.484ms` | `1.611ms` | `1.714ms` | `0/20` |
+
+この固定 60fps run 全体も host/client `59.90/59.95fps`、active frame max `22.081/22.112ms`、`25/33ms` 超ゼロだった。訂正処理の外に通常 current frame があるという以前の測定境界の注意は今も正しいが、今回は outer active-frame timer でも短い上限に収まっている。少なくとも local exact 1F について「通常 frame を足すと必ず 60fps 不可能」という旧結論は成立しない。
+
+描画あり software-renderer の standard regression は rollback 無効の条件で 3,000 frames を pass し、active FPS `59.99/59.98`、`33ms` 超ゼロ、両 peer 10 枚ずつの screenshot に blank/corrupt frame はなかった（`logs/badjump-cache-standard`）。これは通常描画の回帰がない証拠であり、rollback 訂正直後の visual exactness、audio duplicate、2F 以上の catch-up を証明するものではない。
+
+実現可能性は現時点で次のように更新する。
+
+| 目標 | 現在の判断 | 根拠／未検証点 |
+| --- | --- | --- |
+| 通常 MvL を安定 60fps | **高い・local gate pass** | 描画あり 3,000F、約60fps、33ms超ゼロ |
+| exact 1F correction を大きな hitch なしで処理 | **高くなった・headless local gate pass** | correction p95 `5.485ms`、outer max `22.112ms`、semantic pass |
+| 描画・音声を壊さない exact 1F correction | **未確定** | 通常描画は pass。訂正 frame の screenshot/audio gate は未実行 |
+| exact 2-7F rollback window | **未確定** | 旧 full-frame/ROM-loop timing は regression 汚染。修正後の深度別実測が必要 |
+| WAN で継続的に快適 | **未確定** | packet jitter/loss、burst correction、長時間 event route を未再測定 |
+
+JIT off も `264.55fps` まで回復したため correctness 比較には使えるが、JIT on は `530.04fps` でさらに約2倍速い。現時点の production 候補は JIT 有効の full-machine `tinycorepreimage` exact rollback とし、no-JIT は比較・fallback 候補に留める。Slippi 型 ROM loop を捨てたわけではないが、旧 timing は同じ regression を含むため、その production 却下も確定判断ではなくなった。ただしまず、より単純で semantic gate 済みの full-frame route を再評価する。
+
+### Current blocker and next action
+
+- **Blocker:** 1F headless local gate と通常描画 gate は個別に pass したが、rollback 訂正と描画・音声を同時に通す gate、2-7F burst、実 WAN、死亡/復帰・土管・item・result/restart の長時間 gate は未実行。
+- **Next action:** exact depth 2-7 の restore/replay/outer-frame timing を測り、corrected screenshot と audio/event duplicate を検査する。その後だけ packet loss/jitter と gameplay event suite へ進む。full-frame が性能または visual gate を落とした場合に限り、同じ hot-path fix 後の ROM loop を再測定する。
+
+## 2026-08-02 external rollback implementations and full-history audit (historical, superseded above)
+
+> この節の「低い／停止」判断と timing 値は、後に特定した `ARMv5::JumpTo()` の hot-path regression を含む。外部実装の source 調査と state-boundary の説明は有効だが、現行フォークの性能判定と次 action は上節が優先する。
 
 ### 結論
 
