@@ -544,6 +544,11 @@ void NDS::Reset()
     SysTimestamp = 0;
     NumFrames = 0;
     NumLagFrames = 0;
+    NSMLGameRAMRestorePending = false;
+    NSMLGameRAMRestoreData = nullptr;
+    NSMLGameRAMRestoreLength = 0;
+    NSMLGameRAMRestoreUs = 0;
+    NSMLGameRAMRestoreBytes = 0;
     LagFrameFlag = false;
 
     InitTimings();
@@ -1709,6 +1714,8 @@ static void HandleNSMLRomGameTickProbeFrameBoundary(NDS* nds, bool beforeFrame)
         u32 ExtraTicks = 1;
         u32 StartOffset = 2;
         u16 BaseTick = 0x51;
+        bool GameRAMRollback = false;
+        bool SkipStateDumps = false;
         std::string Role = "local";
         std::string TargetRole = "host";
         std::string OutputDir;
@@ -1716,6 +1723,16 @@ static void HandleNSMLRomGameTickProbeFrameBoundary(NDS* nds, bool beforeFrame)
     };
     struct State
     {
+        struct GameRAMSnapshot
+        {
+            u32 DisplayFrame = 0;
+            u32 GameFrame = 0;
+            u16 Tick = 0;
+            u16 Keys0 = 0;
+            u16 Keys1 = 0;
+            std::vector<u8> MainRAM;
+        };
+
         bool Armed = false;
         bool AfterDumped = false;
         bool BeforeRecoveryDumped = false;
@@ -1725,12 +1742,20 @@ static void HandleNSMLRomGameTickProbeFrameBoundary(NDS* nds, bool beforeFrame)
         u32 InputSequenceHash = 2166136261u;
         bool FrameTimingActive = false;
         bool HistoryTransactionInFlight = false;
+        bool NormalControlPending = false;
         u32 FrameHistoryIndex = 0;
+        u32 TransactionTicks = 0;
         std::chrono::steady_clock::time_point FrameStartedAt;
         unsigned long long HistoryRunWallUs = 0;
         unsigned long long HistoryRunMaxUs = 0;
         unsigned long long LastHistoryRunWallUs = 0;
         u32 HistoryRunFrames = 0;
+        unsigned long long SnapshotSaveMaxUs = 0;
+        unsigned long long GameRAMRestoreUs = 0;
+        u32 GameRAMRestoreBytes = 0;
+        u32 GameRAMRestoreFrame = 0;
+        std::vector<GameRAMSnapshot> GameRAMSnapshots;
+        u32 NextGameRAMSnapshot = 0;
     };
     static Config cfg;
     static State state;
@@ -1743,6 +1768,8 @@ static void HandleNSMLRomGameTickProbeFrameBoundary(NDS* nds, bool beforeFrame)
             cfg.ExtraTicks = std::clamp(static_cast<u32>(strtoul(value, nullptr, 0)), 1u, 7u);
         if (const char* value = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_BASE_TICK"))
             cfg.BaseTick = static_cast<u16>(strtoul(value, nullptr, 0) & 0xFFFF);
+        cfg.GameRAMRollback = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_GAME_RAM_ROLLBACK") != nullptr;
+        cfg.SkipStateDumps = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_SKIP_STATE_DUMPS") != nullptr;
         if (const char* value = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_START_OFFSET"))
             cfg.StartOffset = std::clamp(static_cast<u32>(strtoul(value, nullptr, 0)), 1u, 4u);
         if (const char* value = getenv("MELONDS_NSML_ROLE"))
@@ -1758,7 +1785,7 @@ static void HandleNSMLRomGameTickProbeFrameBoundary(NDS* nds, bool beforeFrame)
             if (cfg.LogFile)
             {
                 fprintf(cfg.LogFile,
-                    "role,frame,phase,main_ram_hash,game_frame_counter,arm9_timestamp,arm7_timestamp,request,active,extra_ticks_seen,input_sequence_hash,scratch_tick,scratch_keys0,scratch_keys1,history_enabled,history_index,history_count,history_run_wall_us,history_run_max_us,history_run_frames,last_history_run_wall_us\n");
+                    "role,frame,phase,main_ram_hash,game_frame_counter,arm9_timestamp,arm7_timestamp,request,active,extra_ticks_seen,input_sequence_hash,scratch_tick,scratch_keys0,scratch_keys1,history_enabled,history_index,history_count,history_run_wall_us,history_run_max_us,history_run_frames,last_history_run_wall_us,snapshot_save_max_us,game_ram_restore_us,game_ram_restore_bytes\n");
                 fflush(cfg.LogFile);
             }
         }
@@ -1783,9 +1810,9 @@ static void HandleNSMLRomGameTickProbeFrameBoundary(NDS* nds, bool beforeFrame)
     {
         if (cfg.LogFile)
         {
-            fprintf(cfg.LogFile, "%s,%u,%s,%016llX,%u,%llu,%llu,%u,%u,%u,%08X,%u,%u,%u,%u,%u,%u,%llu,%llu,%u,%llu\n",
+            fprintf(cfg.LogFile, "%s,%u,%s,%016llX,%u,%llu,%llu,%u,%u,%u,%08X,%u,%u,%u,%u,%u,%u,%llu,%llu,%u,%llu,%llu,%llu,%u\n",
                 cfg.Role.c_str(), nds->NumFrames, phase,
-                static_cast<unsigned long long>(hashMainRAM()),
+                static_cast<unsigned long long>(cfg.SkipStateDumps ? 0 : hashMainRAM()),
                 nds->ARM9Read32(0x0208B668),
                 static_cast<unsigned long long>(nds->ARM9Timestamp),
                 static_cast<unsigned long long>(nds->ARM7Timestamp),
@@ -1795,9 +1822,12 @@ static void HandleNSMLRomGameTickProbeFrameBoundary(NDS* nds, bool beforeFrame)
                 nds->ARM9Read16(scratchKeysAddr + 2), nds->ARM9Read32(historyEnabledAddr),
                 nds->ARM9Read32(historyIndexAddr), nds->ARM9Read32(historyCountAddr),
                 state.HistoryRunWallUs, state.HistoryRunMaxUs, state.HistoryRunFrames,
-                state.LastHistoryRunWallUs);
+                state.LastHistoryRunWallUs, state.SnapshotSaveMaxUs,
+                state.GameRAMRestoreUs, state.GameRAMRestoreBytes);
             fflush(cfg.LogFile);
         }
+        if (cfg.SkipStateDumps)
+            return;
         char filename[1024];
         snprintf(filename, sizeof(filename), "%s/rom-game-tick-probe-%s-frame%u-%s.bin",
             cfg.OutputDir.c_str(), cfg.Role.c_str(), nds->NumFrames, phase);
@@ -1809,27 +1839,137 @@ static void HandleNSMLRomGameTickProbeFrameBoundary(NDS* nds, bool beforeFrame)
         }
     };
 
+    if (cfg.GameRAMRollback && beforeFrame && !state.Done)
+    {
+        const u32 length = std::min(nds->MainRAMMask + 1, 0x400000u);
+        const u32 capacity = cfg.ExtraTicks + 3;
+        if (state.GameRAMSnapshots.size() != capacity)
+        {
+            state.GameRAMSnapshots.resize(capacity);
+            for (auto& snapshot : state.GameRAMSnapshots)
+                snapshot.MainRAM.resize(length);
+            state.NextGameRAMSnapshot = 0;
+        }
+        const auto saveStart = std::chrono::steady_clock::now();
+        State::GameRAMSnapshot& snapshot =
+            state.GameRAMSnapshots[state.NextGameRAMSnapshot];
+        snapshot.DisplayFrame = nds->NumFrames;
+        snapshot.GameFrame = nds->ARM9Read32(0x0208B668);
+        snapshot.Tick = nds->ARM9Read16(scratchTickAddr);
+        snapshot.Keys0 = nds->ARM9Read16(scratchKeysAddr);
+        snapshot.Keys1 = nds->ARM9Read16(scratchKeysAddr + 2);
+        memcpy(snapshot.MainRAM.data(), nds->MainRAM, length);
+        const auto saveElapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - saveStart);
+        state.SnapshotSaveMaxUs = std::max(
+            state.SnapshotSaveMaxUs,
+            static_cast<unsigned long long>(saveElapsed.count()));
+        state.NextGameRAMSnapshot =
+            (state.NextGameRAMSnapshot + 1) % capacity;
+    }
+
     if (!state.Armed && beforeFrame && nds->NumFrames >= cfg.StartFrame &&
         nds->ARM9Read32(magicAddr) == magic && nds->ARM9Read32(0x02085A18) == 9 &&
         nds->ARM9Read32(0x02085A84) == 1)
     {
         state.Armed = true;
         dump("before-renderless-ab-tick");
+        struct ReplayInput
+        {
+            u32 DisplayFrame;
+            u16 Tick;
+            u16 Keys0;
+            u16 Keys1;
+        };
+        std::vector<ReplayInput> replayInputs;
+        bool gameRAMRestoreReady = !cfg.GameRAMRollback || !isTarget;
+        if (cfg.GameRAMRollback && isTarget && nds->NumFrames >= cfg.ExtraTicks)
+        {
+            const u32 restoreFrame = nds->NumFrames - cfg.ExtraTicks;
+            auto restoreIt = std::find_if(
+                state.GameRAMSnapshots.begin(), state.GameRAMSnapshots.end(),
+                [restoreFrame](const State::GameRAMSnapshot& snapshot)
+                {
+                    return snapshot.DisplayFrame == restoreFrame;
+                });
+            if (restoreIt != state.GameRAMSnapshots.end())
+            {
+                for (const auto& snapshot : state.GameRAMSnapshots)
+                {
+                    if (snapshot.DisplayFrame >= restoreFrame &&
+                        snapshot.DisplayFrame <= nds->NumFrames)
+                        replayInputs.push_back(
+                            {snapshot.DisplayFrame, snapshot.Tick, snapshot.Keys0, snapshot.Keys1});
+                }
+                std::sort(replayInputs.begin(), replayInputs.end(),
+                    [](const ReplayInput& left, const ReplayInput& right)
+                    {
+                        return left.DisplayFrame < right.DisplayFrame;
+                    });
+                if (replayInputs.size() == cfg.ExtraTicks + 1 &&
+                    restoreIt->MainRAM.size() == std::min(nds->MainRAMMask + 1, 0x400000u))
+                {
+                    nds->NSMLGameRAMRestoreData = restoreIt->MainRAM.data();
+                    nds->NSMLGameRAMRestoreLength = static_cast<u32>(restoreIt->MainRAM.size());
+                    nds->NSMLGameRAMRestorePending = true;
+                    state.GameRAMRestoreFrame = restoreIt->GameFrame;
+                    gameRAMRestoreReady = true;
+                }
+                else
+                {
+                    replayInputs.clear();
+                }
+            }
+        }
+        if (!gameRAMRestoreReady)
+        {
+            printf("NSMB ROM rollback: game RAM checkpoint unavailable role=%s frame=%u depth=%u\n",
+                cfg.Role.c_str(), nds->NumFrames, cfg.ExtraTicks);
+            fflush(stdout);
+            state.Done = true;
+            return;
+        }
+        if (cfg.GameRAMRollback && !isTarget)
+        {
+            state.TransactionTicks = 0;
+            state.NormalControlPending = true;
+            nds->ARM9Write32(historyEnabledAddr, 0);
+            nds->ARM9Write32(historyIndexAddr, 0);
+            nds->ARM9Write32(historyCountAddr, 0);
+            nds->ARM9Write32(historyTargetAddr, 0);
+            nds->ARM9Write32(activeAddr, 0);
+            nds->ARM9Write32(requestAddr, 0);
+            return;
+        }
+        state.TransactionTicks = cfg.GameRAMRollback
+            ? cfg.ExtraTicks + 1
+            : cfg.ExtraTicks;
         const u16 baseTick = cfg.BaseTick;
         nds->ARM9Write32(historyIndexAddr, 0);
-        nds->ARM9Write32(historyCountAddr, cfg.ExtraTicks);
+        nds->ARM9Write32(historyCountAddr, state.TransactionTicks);
         nds->ARM9Write32(historyTargetAddr, isTarget ? 1 : 0);
-        nds->ARM9Write32(
-            historyStartFrameAddr, nds->ARM9Read32(0x0208B668) + cfg.StartOffset);
-        for (u32 index = 0; index < cfg.ExtraTicks; index++)
+        nds->ARM9Write32(historyStartFrameAddr,
+            cfg.GameRAMRollback
+                ? state.GameRAMRestoreFrame
+                : nds->ARM9Read32(0x0208B668) + cfg.StartOffset);
+        for (u32 index = 0; index < state.TransactionTicks; index++)
         {
-            const u16 tick = static_cast<u16>((baseTick + index) & 0xFFFF);
+            const bool useReplayInput = replayInputs.size() == state.TransactionTicks;
+            const u16 tick = useReplayInput
+                ? replayInputs[index].Tick
+                : static_cast<u16>((baseTick + index) & 0xFFFF);
+            const u16 keys0 = useReplayInput
+                ? replayInputs[index].Keys0
+                : player0Keys[index];
+            const u16 keys1 = useReplayInput
+                ? replayInputs[index].Keys1
+                : player1Keys[index];
             const u32 entryAddr = historyAddr + index * 8;
             nds->ARM9Write16(entryAddr, tick);
-            nds->ARM9Write16(entryAddr + 2, player0Keys[index]);
-            nds->ARM9Write16(entryAddr + 4, player1Keys[index]);
+            nds->ARM9Write16(entryAddr + 2, keys0);
+            nds->ARM9Write16(entryAddr + 4, keys1);
             nds->ARM9Write16(entryAddr + 6, 0);
-            for (const u16 value : {tick, player0Keys[index], player1Keys[index]})
+            for (const u16 value : {tick, keys0, keys1})
             {
                 state.InputSequenceHash ^= value & 0xFF;
                 state.InputSequenceHash *= 16777619u;
@@ -1850,6 +1990,8 @@ static void HandleNSMLRomGameTickProbeFrameBoundary(NDS* nds, bool beforeFrame)
 
     if (!beforeFrame && state.FrameTimingActive)
     {
+        state.GameRAMRestoreUs = nds->NSMLGameRAMRestoreUs;
+        state.GameRAMRestoreBytes = nds->NSMLGameRAMRestoreBytes;
         const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - state.FrameStartedAt);
         const u32 historyIndex = nds->ARM9Read32(historyIndexAddr);
@@ -1876,10 +2018,19 @@ static void HandleNSMLRomGameTickProbeFrameBoundary(NDS* nds, bool beforeFrame)
         state.FrameStartedAt = std::chrono::steady_clock::now();
     }
 
+    if (!beforeFrame && state.NormalControlPending && !state.AfterDumped)
+    {
+        dump("after-normal-control-tick");
+        state.NormalControlPending = false;
+        state.AfterDumped = true;
+        state.AfterDisplayFrame = nds->NumFrames;
+        state.AfterGameFrame = nds->ARM9Read32(0x0208B668);
+        return;
+    }
     if (!beforeFrame && !state.AfterDumped &&
-        nds->ARM9Read32(historyIndexAddr) >= cfg.ExtraTicks &&
+        nds->ARM9Read32(historyIndexAddr) >= state.TransactionTicks &&
         nds->ARM9Read32(0x0208B668) >=
-            nds->ARM9Read32(historyStartFrameAddr) + cfg.ExtraTicks)
+            nds->ARM9Read32(historyStartFrameAddr) + state.TransactionTicks)
     {
         dump(isTarget ? "after-renderless-tick" : "after-normal-control-tick");
         state.AfterDumped = true;
@@ -2114,6 +2265,37 @@ void NDS::CaptureNSMLGameTickProbeSchedulerState(NSMLGameTickProbeSchedulerState
 {
     std::copy(std::begin(SchedList), std::end(SchedList), state.Events.begin());
     state.Mask = SchedListMask;
+}
+
+void NDS::ApplyNSMLPendingGameRAMRestore()
+{
+    if (!NSMLGameRAMRestorePending || !MainRAM)
+        return;
+
+    const u32 length = std::min(MainRAMMask + 1, 0x400000u);
+    if (!NSMLGameRAMRestoreData || NSMLGameRAMRestoreLength != length)
+    {
+        NSMLGameRAMRestorePending = false;
+        NSMLGameRAMRestoreData = nullptr;
+        NSMLGameRAMRestoreLength = 0;
+        return;
+    }
+
+    constexpr u32 controlOffset = 0x1AC0;
+    constexpr u32 controlLength = 0x60;
+    std::array<u8, controlLength> control {};
+    memcpy(control.data(), MainRAM + controlOffset, control.size());
+
+    const auto restoreStart = std::chrono::steady_clock::now();
+    memcpy(MainRAM, NSMLGameRAMRestoreData, length);
+    memcpy(MainRAM + controlOffset, control.data(), control.size());
+    const auto restoreElapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - restoreStart);
+    NSMLGameRAMRestoreUs = static_cast<unsigned long long>(restoreElapsed.count());
+    NSMLGameRAMRestoreBytes = length;
+    NSMLGameRAMRestorePending = false;
+    NSMLGameRAMRestoreData = nullptr;
+    NSMLGameRAMRestoreLength = 0;
 }
 
 void NDS::RestoreNSMLGameTickProbeSchedulerState(const NSMLGameTickProbeSchedulerState& state)

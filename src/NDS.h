@@ -290,6 +290,15 @@ public: // TODO: Encapsulate the rest of these members
     // Diagnostic-only presentation experiment: keep required CPU/peripheral
     // events running while postponing LCD scanline events during ROM catch-up.
     bool NSMLGameTickProbeDeferLCD = false;
+    // Diagnostic-only Slippi-style experiment.  The RAM image is applied at
+    // the ROM input gate, where ARM9 reaches the same guest control-flow point
+    // every game tick, rather than at an arbitrary emulator frame boundary.
+    bool NSMLGameRAMRestorePending = false;
+    const u8* NSMLGameRAMRestoreData = nullptr;
+    u32 NSMLGameRAMRestoreLength = 0;
+    unsigned long long NSMLGameRAMRestoreUs = 0;
+    u32 NSMLGameRAMRestoreBytes = 0;
+    void ApplyNSMLPendingGameRAMRestore();
     void CaptureNSMLGameTickProbeSchedulerState(NSMLGameTickProbeSchedulerState& state) const;
     void RestoreNSMLGameTickProbeSchedulerState(const NSMLGameTickProbeSchedulerState& state);
 

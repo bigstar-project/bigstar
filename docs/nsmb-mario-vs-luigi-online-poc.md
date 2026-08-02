@@ -1,15 +1,16 @@
 # NSMB Mario vs Luigi Online PoC
 
-## Post-hotfix Slippi-style ROM-loop remeasurement - 2026-08-02
+## Slippi-style game-memory restore milestone - 2026-08-02
 
-- **Current conclusion:** `ARMv5::JumpTo()`診断回帰の修正後、guest-owned/JIT ROM loopの旧性能棄却は撤回する。frame limiterなしのkernelはdepth 1が3 run・6 role sampleで`1.871-2.199ms`、depth 2が`1.983-2.987ms`、depth 4が`2.622-2.700ms`、depth 7が`3.123-3.428ms`だった。旧depth 1の`12.624-14.470ms`、depth 2の`16.720-28.513ms`はhot-path回帰に汚染されていた。
-- fixed 60fps、`InputMaxFrameLead=8`、描画なしで一回の強制transactionを測ると、outer maxはdepth 1がhost/client `22.121/22.112ms`、depth 2が`21.970/22.138ms`、depth 7が`24.314/23.710ms`で、全runの`25/33ms`超はゼロだった。同条件のdormant-probe controlは`18.520/18.335ms`。runnerへ`-Paced`とactive-frame summary列を追加し、kernel時間と通常current frameを含むouter時間を同じCSVで保持する。
-- software rendererのdepth 2 host-target/client-target A/Bは、172 semantic fieldが訂正直後・回復後とも差分ゼロ。同一roleのtarget/control PNGもhost/clientともSHA-256まで一致した。cross-peer curated RAM差はrole/render-local stateを含むためfull RAM exact一致ではない。
-- **Comparison limit:** この診断loopは過去checkpoint restore、訂正後checkpoint再保存、live prediction/confirmation、SPU restore/outputをまだ含まない。既存full-frame depth 2のrestore p95 `3.346ms`とintermediate save p95 `1.499ms`を加えると、今回のouter差は消え得る。またpaced runは各一回のtransactionであり、既存full-frameの9訂正/roleとsample数が違う。したがって「Slippi型が既存方式より確実に速い」は未証明である。
-- **Current blocker:** CPU kernel性能とdepth 2 endpoint imageは通ったが、productionに必要なrestore/save込みtransactionと複数訂正時のp95/max、depth 4画像、audio/event side effectは未検証。
-- **Main direction:** ユーザー方針によりSlippi型ROM-loopをrollbackの本線とする。既存full-frame routeは比較baselineとdepth 1-2 fallbackとして保持する。
-- 毎frameの実`tinycorepreimage` checkpoint保存を有効にしたpaced gateを追加した。depth 1はouter max `22.382/22.384ms`、depth 2は2 run・4 role sampleの最大`22.816ms`で、`25/33ms`超ゼロ。depth 7はROM transaction `9.669-10.321ms`と安定した一方、2 run中hostに一度`30.966ms`が出て`25ms`超1件、再runは全role `24.148ms`以下、全体の`33ms`超はゼロだった。
-- **Next action:** 周辺実装を先に進めず、CPU/hardware timelineを戻さないgame-memory checkpoint restore + ROM history loop + 必要な再保存を接続する。固定60fpsで複数訂正のp95/p99/max、意味状態、同一role画像を測り、depth 2の性能・描画gateが通るまでaudio/event側へ進まない。
+- **Current conclusion:** Slippi型ROM-loopをrollbackの本線として継続する。4 MiB Main RAMの過去checkpointだけを戻し、CPU・GPU・周辺機器の外側timelineは戻さず、ROM入力gateから履歴入力と現在入力を連続実行するPoCがdepth 1-2で成立した。既存full-frame routeは比較baselineとfallbackとして保持する。
+- 最初に外側DS frame境界でRAMを復元した案は、ARM9の現在PCと復元RAMのgame-loop位相が一致せず、moving hazardが1 tick遅れたため不採用とした。復元を固定guest PC `0x02004EC8`へ移し、JIT生成コードへ診断専用callbackを埋めた結果、この差は解消した。
+- depth 1は過去状態から「履歴1 tick + 現在1 tick」、depth 2は「履歴2 tick + 現在1 tick」を一つのdisplay frameで実行する。`logs/slippi-game-ram-direct-ring-depth1-semantic-run1`と`logs/slippi-game-ram-jit-instruction-depth2-run1`は、訂正直後と通常回復後の172 semantic fieldが差分0。game counterもtarget/controlとも`759 -> 760`で一致した。
+- depth 2のsoftware-renderer相互A/B `logs/slippi-game-ram-visual-depth2-{host,client}-target-run1`では、display frame 1002の同一role PNGがhost/clientともSHA-256まで一致した。短区間のplayer sprite、moving hazard、UIを含む描画gateはpassした。
+- 同期4 MiB state dump/hashを外した両側補正では、depth 1のROM transactionが`3.169/3.264ms`、90-frame outer maxが`19.200/18.472ms`、平均が`16.665/16.662ms`、`25/33ms`超ゼロだった。最大`19.200ms`は訂正点ではなく測定末尾frame 1079で、clientの訂正点最大は`18.472ms`。毎frame RAM copyは最大`0.422/0.328ms`、固定境界restoreは`0.213/0.224ms`だった。
+- depth 2は中間4 MiB copy削除前でもROM transaction `4.200/3.727ms`、outer max `19.720/19.356ms`、`25/33ms`超ゼロだった。厳密な単一frame上限`16.667ms`は超えるため「全訂正frameがdeadline内」とはまだ言わないが、平均約60fpsを維持し、従来の25ms級停止より小さい約2-3msの局所超過まで縮小した。
+- 訂正時の中間4 MiB copyは削除し、事前確保ring内checkpointから固定境界へ直接1回だけ復元する。現PoCは診断用static stateと全Main RAM snapshotであり、productionの複数instance所有権、live prediction/confirmation、訂正後checkpointの置換は未接続である。
+- **Current blocker:** 一回だけの固定movement-route訂正であり、複数訂正のp95/p99/max、死亡・復帰・土管・item・result/restart、音声副作用、長時間安定性は未検証。full RAMに含まれるguest-local/SDK領域をどこまでrollback対象にするかも確定していない。
+- **Next action:** このgame-memory restoreをper-instance checkpoint ringへ移し、実late-input timelineでdepth 1-2を複数回発生させる。まずouter p95/p99/maxと同一role画像を再確認し、性能・描画gateを維持した場合だけevent/audio検証へ進む。
 
 ## Exact rollback depth and presentation gate - 2026-08-02
 

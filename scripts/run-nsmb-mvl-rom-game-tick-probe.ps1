@@ -26,6 +26,8 @@ param(
     [int]$InputMaxFrameLead = 2,
     [switch]$Paced,
     [switch]$WithRollbackCheckpoints,
+    [switch]$GameRAMRollback,
+    [switch]$SkipStateDumps,
     [UInt64]$HostProcessAffinityMask = 0,
     [UInt64]$ClientProcessAffinityMask = 0,
     [switch]$AnalyzeExisting,
@@ -66,6 +68,12 @@ if ($SelfLoopFastPath -and -not $ExactBlockChain) {
 }
 if ($DeferLCD -and -not $ExactBlockChain) {
     throw "DeferLCD requires ExactBlockChain"
+}
+if ($GameRAMRollback -and -not $FrameBoundary) {
+    throw "GameRAMRollback requires FrameBoundary"
+}
+if ($SkipStateDumps -and $TargetRole -ne "both") {
+    throw "SkipStateDumps requires TargetRole=both"
 }
 
 function Get-StageTimingSummary {
@@ -485,6 +493,8 @@ if (!$AnalyzeExisting) {
     $oldDeferLCD = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_DEFER_LCD
     $oldHistoryBaseTick = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_BASE_TICK
     $oldHistoryStartOffset = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_OFFSET
+    $oldGameRAMRollback = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GAME_RAM_ROLLBACK
+    $oldSkipStateDumps = $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_SKIP_STATE_DUMPS
     try {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE = "1"
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_FRAME = "$ProbeStartFrame"
@@ -506,6 +516,8 @@ if (!$AnalyzeExisting) {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_DEFER_LCD = if ($DeferLCD) { "1" } else { $null }
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_BASE_TICK = "0x$($HistoryBaseTick.ToString('X4'))"
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_OFFSET = "$HistoryStartOffset"
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GAME_RAM_ROLLBACK = if ($GameRAMRollback) { "1" } else { $null }
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_SKIP_STATE_DUMPS = if ($SkipStateDumps) { "1" } else { $null }
 
         $smokeArgs = @{
             Frames = $Frames
@@ -545,6 +557,11 @@ if (!$AnalyzeExisting) {
             $smokeArgs.RollbackCheckpointInterval = 1
             $smokeArgs.RollbackResimulate = $false
         }
+        if ($GameRAMRollback) {
+            $smokeArgs.FpsSpikeTrace = $true
+            $smokeArgs.SlowFrameThresholdMs = 20
+            $smokeArgs.MaxConsecutiveSlowFrames = 1000
+        }
         & (Join-Path $repoRoot "scripts\run-nsmb-mvl-split-local-input-smoke.ps1") @smokeArgs
     } finally {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE = $oldEnabled
@@ -567,6 +584,8 @@ if (!$AnalyzeExisting) {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_DEFER_LCD = $oldDeferLCD
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_BASE_TICK = $oldHistoryBaseTick
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_START_OFFSET = $oldHistoryStartOffset
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_GAME_RAM_ROLLBACK = $oldGameRAMRollback
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_SKIP_STATE_DUMPS = $oldSkipStateDumps
     }
 }
 
@@ -583,6 +602,7 @@ $excludedRanges = @(
 )
 
 if ($RenderlessAB) {
+    $targetExpectedTicks = if ($GameRAMRollback) { $ExtraTicks + 1 } else { $ExtraTicks }
     if ($TargetRole -eq "both") {
         $roleSummaries = foreach ($role in @("host", "client")) {
             $rows = Import-Csv -LiteralPath (Join-Path $resolvedLogDir "rom-game-tick-probe-$role.csv")
@@ -595,6 +615,7 @@ if ($RenderlessAB) {
             [pscustomobject]@{
                 Role = $role
                 RollbackCheckpointsEnabled = $WithRollbackCheckpoints.IsPresent
+                GameRAMRollbackEnabled = $GameRAMRollback.IsPresent
                 ExtraTicksRequested = $ExtraTicks
                 ExtraTicksSeen = [uint32]$afterRows[0].extra_ticks_seen
                 InputSequenceHash = $afterRows[0].input_sequence_hash
@@ -602,7 +623,7 @@ if ($RenderlessAB) {
                 HistoryRunWallUs = [uint64]$afterRows[0].history_run_wall_us
                 HistoryRunMaxUs = [uint64]$afterRows[0].history_run_max_us
                 HistoryRunFrames = [uint32]$afterRows[0].history_run_frames
-                HistoryUsPerTick = [math]::Round([uint64]$afterRows[0].history_run_wall_us / $ExtraTicks, 2)
+                HistoryUsPerTick = [math]::Round([uint64]$afterRows[0].history_run_wall_us / $targetExpectedTicks, 2)
                 BeforeDisplayFrame = [uint32]$beforeRows[0].frame
                 AfterDisplayFrame = [uint32]$afterRows[0].frame
                 BeforeGameFrame = [uint32]$beforeRows[0].game_frame_counter
@@ -615,13 +636,16 @@ if ($RenderlessAB) {
                 ActiveFramesOver16Ms = if ($activeTiming) { $activeTiming.Over16Ms } else { 0 }
                 ActiveFramesOver25Ms = if ($activeTiming) { $activeTiming.Over25Ms } else { 0 }
                 ActiveFramesOver33Ms = if ($activeTiming) { $activeTiming.Over33Ms } else { 0 }
+                SnapshotSaveMaxUs = [uint64]$afterRows[0].snapshot_save_max_us
+                GameRAMRestoreUs = [uint64]$afterRows[0].game_ram_restore_us
+                GameRAMRestoreBytes = [uint32]$afterRows[0].game_ram_restore_bytes
             }
         }
         $roleSummaries | Export-Csv -LiteralPath (Join-Path $resolvedLogDir "summary.csv") -NoTypeInformation -Encoding UTF8
         $roleSummaries | Format-Table -AutoSize
         $stageSummaries = @(
             foreach ($role in @("host", "client")) {
-                Get-StageTimingSummary -Root $resolvedLogDir -Role $role -TickCount $ExtraTicks
+                Get-StageTimingSummary -Root $resolvedLogDir -Role $role -TickCount $targetExpectedTicks
             }
         ) | Where-Object { $null -ne $_ }
         if ($stageSummaries.Count -gt 0) {
@@ -629,7 +653,7 @@ if ($RenderlessAB) {
             $stageSummaries | Format-Table -AutoSize
         }
         foreach ($roleSummary in $roleSummaries) {
-            if ($roleSummary.ExtraTicksSeen -ne $ExtraTicks -or $roleSummary.HistoryIndex -ne $ExtraTicks) {
+            if ($roleSummary.ExtraTicksSeen -ne $targetExpectedTicks -or $roleSummary.HistoryIndex -ne $targetExpectedTicks) {
                 throw "$($roleSummary.Role) did not consume the full symmetric history"
             }
             if ($MaxTargetHistoryRunMs -gt 0 -and $roleSummary.HistoryRunWallUs -gt $MaxTargetHistoryRunMs * 1000) {
@@ -682,6 +706,7 @@ if ($RenderlessAB) {
     $summary = [pscustomobject]@{
         Mode = if ($FrameBoundary) { "renderless-frame-boundary-ab" } elseif ($GuestOwnedHistoryAB) { "renderless-guest-history-ab" } elseif ($HistoricalInputAB) { "renderless-historical-input-ab" } else { "renderless-ab" }
         RollbackCheckpointsEnabled = $WithRollbackCheckpoints.IsPresent
+        GameRAMRollbackEnabled = $GameRAMRollback.IsPresent
         ExtraTicksRequested = $ExtraTicks
         TargetExtraTicksSeen = [uint32]$targetAfterRows[0].extra_ticks_seen
         ControlTicksSeen = [uint32]$controlAfterRows[0].extra_ticks_seen
@@ -691,7 +716,8 @@ if ($RenderlessAB) {
         TargetHistoryIndex = [uint32]$targetAfterRows[0].history_index
         ControlHistoryIndex = [uint32]$controlAfterRows[0].history_index
         GuestHistoryConsumed = if ($GuestOwnedHistoryAB) {
-            [uint32]$targetAfterRows[0].history_index -eq $ExtraTicks -and [uint32]$controlAfterRows[0].history_index -eq $ExtraTicks
+            $controlExpectedTicks = if ($GameRAMRollback) { 0 } else { $ExtraTicks }
+            [uint32]$targetAfterRows[0].history_index -eq $targetExpectedTicks -and [uint32]$controlAfterRows[0].history_index -eq $controlExpectedTicks
         } else { $false }
         TargetHistoryRunWallUs = [uint64]$targetAfterRows[0].history_run_wall_us
         ControlHistoryRunWallUs = [uint64]$controlAfterRows[0].history_run_wall_us
@@ -699,7 +725,7 @@ if ($RenderlessAB) {
         ControlHistoryRunMaxUs = [uint64]$controlAfterRows[0].history_run_max_us
         TargetHistoryRunFrames = [uint32]$targetAfterRows[0].history_run_frames
         ControlHistoryRunFrames = [uint32]$controlAfterRows[0].history_run_frames
-        TargetHistoryUsPerTick = [math]::Round([uint64]$targetAfterRows[0].history_run_wall_us / $ExtraTicks, 2)
+        TargetHistoryUsPerTick = [math]::Round([uint64]$targetAfterRows[0].history_run_wall_us / $targetExpectedTicks, 2)
         GuestHistoryWallSpeedup = if ([uint64]$targetAfterRows[0].history_run_wall_us -gt 0) {
             [math]::Round([uint64]$controlAfterRows[0].history_run_wall_us / [uint64]$targetAfterRows[0].history_run_wall_us, 2)
         } else { 0 }
@@ -736,8 +762,9 @@ if ($RenderlessAB) {
         CuratedXorMismatchBytes = $curatedDelta.XorMismatchBytes
         GameFrameCountersMatch = [uint32]$targetAfterRows[0].game_frame_counter -eq [uint32]$controlAfterRows[0].game_frame_counter
         RequestedGameFrameAdvanceObserved = if ($FrameBoundary) {
+            $controlExpectedTicks = if ($GameRAMRollback) { 0 } else { $ExtraTicks }
             [uint32]$targetAfterRows[0].game_frame_counter -eq [uint32]$controlAfterRows[0].game_frame_counter -and `
-                [uint32]$targetAfterRows[0].history_index -eq $ExtraTicks -and [uint32]$controlAfterRows[0].history_index -eq $ExtraTicks
+                [uint32]$targetAfterRows[0].history_index -eq $targetExpectedTicks -and [uint32]$controlAfterRows[0].history_index -eq $controlExpectedTicks
         } else {
             ([uint32]$targetAfterRows[0].game_frame_counter - [uint32]$targetBeforeRows[0].game_frame_counter -eq $ExtraTicks) -and `
                 ([uint32]$controlAfterRows[0].game_frame_counter - [uint32]$controlBeforeRows[0].game_frame_counter -eq $ExtraTicks)

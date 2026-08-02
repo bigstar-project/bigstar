@@ -242,6 +242,8 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
     constexpr u32 historyStartFrameAddr = 0x02001ADC;
     constexpr u32 historyAddr = 0x02001AE0;
 
+    if (instrAddr == loopStart)
+        cpu->NDS.ApplyNSMLPendingGameRAMRestore();
     if (instrAddr != loopStart && instrAddr != loopGateAfterCounter)
         return false;
 

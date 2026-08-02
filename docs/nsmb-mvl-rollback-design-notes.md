@@ -1,8 +1,29 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
-> 現在の判断は直下の post-hotfix ROM-loop 再測定節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
+> 現在の判断は直下の game-memory restore節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
 
-## 2026-08-02 post-hotfix Slippi-style ROM-loop remeasurement
+## 2026-08-02 Slippi-style game-memory restore
+
+### 現在の結論
+
+Slippi型ROM-loopを本線として継続する。診断用の4 MiB Main RAM ringから過去game memoryだけを復元し、CPU register、GPU、scheduler、ARM7/peripheral timelineは現在のまま保つ経路を接続した。復元後はROM入力gateで過去入力から現在入力までを連続実行し、最終tickだけ通常描画する。depth 1なら2 tick、depth 2なら3 tickを一つのdisplay frameで処理する。
+
+最初の実装は`NDS::RunFrame()`外側境界でRAMを復元した。game counterはtarget/controlで一致したが、moving hazardの`+0x60/+0x70`座標が訂正直後・回復後とも1 tick遅れた。stage traceは復元直後のguest tickがinput/delete/create/gameplay stageを通らず、外側frame途中のARM9 PCを保ったまま古いRAMへ差し替えたことが原因だと示した。この案は描画・当たり判定を壊し得るため棄却した。
+
+復元点をROM loop先頭の固定PC `0x02004EC8`へ変更した。JITはこの分岐を同一blockへ取り込むため通常dispatcher hookでは捕捉できず、診断フラグ有効時だけ該当guest instruction直前へhost callbackを生成する。history control/tableだけは現在値を退避してRAM復元後に戻し、古いgame frameから`depth + current`件の入力を時系列順に適用する。この境界変更後、depth 1とdepth 2は訂正直後・通常回復後とも172 semantic field差分0となり、以前ずれたmoving hazardも一致した。
+
+| Depth | Correctness evidence | ROM transaction | dumpなしouter max host/client | 判定 |
+| ---: | --- | ---: | ---: | --- |
+| 1 | `logs/slippi-game-ram-direct-ring-depth1-semantic-run1`、直後/回復後172 field差分0 | `3.169/3.264ms` | `19.200/18.472ms` | 短区間state gate pass |
+| 2 | `logs/slippi-game-ram-jit-instruction-depth2-run1`、直後/回復後172 field差分0 | `4.200/3.727ms` | `19.720/19.356ms` | 短区間state/perf gate pass |
+
+depth 1の最終測定では毎frame 4 MiB save最大`0.422/0.328ms`、restore `0.213/0.224ms`、90-frame平均`16.665/16.662ms`、`25/33ms`超ゼロだった。host最大`19.200ms`はframe 1079で、訂正frame 1002ではない。depth 2値は訂正時にringから別bufferへ4 MiBを一度余計にcopyしていた版であり、そのcopyは後に削除した。厳密な`16.667ms`最大値はまだ満たさないため、訂正frameに約2-3msの局所超過が起こり得るという評価を維持する。一方、25ms級の目立つ停止は今回の単発測定では発生していない。
+
+software rendererでtarget roleを入れ替えた`logs/slippi-game-ram-visual-depth2-{host,client}-target-run1`では、display frame 1002の同一role PNGがhost/clientともSHA-256まで一致した。両runとも訂正直後・回復後の172 field差分は0である。これはtested movement routeの短区間presentation passであり、イベント全般や長時間の描画完全性を証明しない。
+
+現実装はPoCである。checkpoint ringは診断関数内static state、snapshotは全Main RAM、訂正は一回の固定triggerであり、productionのper-instance ownership、実prediction/confirmation、訂正後checkpoint差し替え、複数訂正統計は未接続である。次はこの境界を製品runtimeのcheckpoint ringへ移し、depth 1-2の反復訂正でouter p95/p99/maxと画像を測る。性能・描画を維持するまで、audio/event側のブラッシュアップを先行しない。既存full-frameは比較baseline/fallbackとして保持する。
+
+## 2026-08-02 post-hotfix Slippi-style ROM-loop remeasurement（game-memory restore前の履歴）
 
 ### 結論
 
