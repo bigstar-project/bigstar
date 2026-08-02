@@ -47,6 +47,7 @@ param(
     [int]$RollbackPredictionProbeStartFrame = 0,
     [int]$RollbackPredictionProbeEndFrame = 0,
     [string]$RollbackPredictionProbeKeyMask = "",
+    [int]$RollbackPredictionProbeConfirmDelayFrames = 0,
     [switch]$RollbackPredictionProbeConfirmAfterOneFrame,
     [int]$RollbackInputWaitUs = 0,
     [int]$RollbackSettleFrames = 0,
@@ -220,6 +221,11 @@ if ($RollbackPredictionProbeModulo -gt 0) {
     if ($RollbackPredictionProbeKeyMask -ne "") {
         $env:MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK = "$RollbackPredictionProbeKeyMask"
     }
+    if ($RollbackPredictionProbeConfirmDelayFrames -gt 0) {
+        $env:MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_DELAY_FRAMES = "$RollbackPredictionProbeConfirmDelayFrames"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_DELAY_FRAMES -ErrorAction SilentlyContinue
+    }
     if ($RollbackPredictionProbeConfirmAfterOneFrame) {
         $env:MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_AFTER_ONE_FRAME = "1"
     } else {
@@ -232,6 +238,7 @@ if ($RollbackPredictionProbeModulo -gt 0) {
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_START_FRAME -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_END_FRAME -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_DELAY_FRAMES -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_AFTER_ONE_FRAME -ErrorAction SilentlyContinue
 }
 
@@ -253,7 +260,7 @@ if ($Rollback -and $isTinyCorePreimageRollback) {
     $env:MELONDS_NSML_SUPPRESS_PU_DEBUG = "1"
     $env:MELONDS_NSML_ROLLBACK_SKIP_JIT_RESET = "1"
     $env:MELONDS_NSML_ROLLBACK_RESIM_SKIP_RENDER = "1"
-    if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x241" }
+    if ($RollbackTinyCoreFlags -eq "") { $RollbackTinyCoreFlags = "0x245" }
     $env:MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS = "$RollbackTinyCoreFlags"
 } else {
     Remove-Item Env:\MELONDS_NSML_SUPPRESS_PU_DEBUG -ErrorAction SilentlyContinue

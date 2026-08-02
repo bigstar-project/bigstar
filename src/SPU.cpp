@@ -220,6 +220,8 @@ SPU::SPU(melonDS::NDS& nds, AudioBitDepth bitdepth, AudioInterpolation interpola
 
     OutputBufferReadPos = 0;
     OutputBufferWritePos = 0;
+    RollbackSkipOutput = false;
+    RollbackDiscardedOutputSamples = 0;
 
     SetSampleRate(AudioSampleRate::_32KHz);
 }
@@ -248,6 +250,8 @@ void SPU::Reset()
     MasterVolume = 0;
     Bias = 0;
     Mute = true;
+    RollbackSkipOutput = false;
+    RollbackDiscardedOutputSamples = 0;
 
     for (int i = 0; i < 16; i++)
         Channels[i].Reset();
@@ -1032,6 +1036,12 @@ void SPU::BufferAudio()
     s16 temp[avail * 2];
     blip_read_samples(BlipLeft, temp, avail, true);
     blip_read_samples(BlipRight, temp + 1, avail, true);
+
+    if (RollbackSkipOutput)
+    {
+        RollbackDiscardedOutputSamples += static_cast<u64>(avail);
+        return;
+    }
 
     Platform::Mutex_Lock(AudioLock);
     for (int i = 0; i < avail * 2; i += 2)

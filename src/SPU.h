@@ -246,6 +246,8 @@ public:
 
     void Mix(u32 spucycles);
     void BufferAudio();
+    void SetRollbackSkipOutput(bool skip) { RollbackSkipOutput = skip; }
+    u64 GetRollbackDiscardedOutputSamples() const { return RollbackDiscardedOutputSamples; }
 
     void TrimOutput();
     void DrainOutput();
@@ -288,6 +290,8 @@ private:
     bool ApplyBias = true;
     bool Degrade10Bit = false;
     bool Mute;
+    bool RollbackSkipOutput = false;
+    u64 RollbackDiscardedOutputSamples = 0;
 
     std::array<SPUChannel, 16> Channels;
     std::array<SPUCaptureUnit, 2> Capture;

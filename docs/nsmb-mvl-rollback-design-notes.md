@@ -1,6 +1,45 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
-> 現在の判断は直下の ARM9 hot-path regression 解消節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
+> 現在の判断は直下の exact depth/presentation gate 節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
+
+## 2026-08-02 exact depth/presentation gate
+
+### 結論
+
+`ARMv5::JumpTo()` hot-path regression修正後のJIT + `tinycorepreimage` full-machine rollbackは、tested MvL movement routeのdepth 1-2について、状態・描画・固定60fpsの三条件を満たした。Slippi風ROM loopへ切り替える根拠は現時点ではなく、より単純なfull-frame routeを本線に維持する。ただし「Slippi級の深いwindowが完成した」という意味ではない。depth 3-5は性能測定だけ、depth 4は訂正区間のsprite位相差、depth 6-7はouter `33ms`超過があり、現時点の製品安全域はdepth 2までとする。
+
+診断用のforced confirmationは1F固定をやめ、`MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_DELAY_FRAMES=1..180`で過去の任意frameを確認できるようにした。旧boolean環境変数はdepth 1 aliasとして残す。depth 1-7の各peer 10訂正、計20 sampleはすべて指定frame数を再演算した。
+
+| Depth | total p50 | total p95 | total max | restore p95 | replay p95 | intermediate save p95 | outer max |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | `5.091ms` | `5.485ms` | `5.581ms` | `3.481ms` | `1.611ms` | `0` | `22.112ms` |
+| 2 | `7.729ms` | `9.198ms` | `9.713ms` | `5.081ms` | `3.133ms` | `1.323ms` | `26.212ms` |
+| 3 | `10.577ms` | `10.895ms` | `11.809ms` | `3.670ms` | `4.510ms` | `2.638ms` | `28.309ms` |
+| 4 | `12.963ms` | `14.016ms` | `14.585ms` | `3.540ms` | `6.121ms` | `4.525ms` | `31.029ms` |
+| 5 | `15.299ms` | `15.782ms` | `15.811ms` | `3.413ms` | `7.217ms` | `5.103ms` | `32.436ms` |
+| 6 | `17.466ms` | `18.012ms` | `18.515ms` | `3.473ms` | `8.535ms` | `6.157ms` | `34.338ms` |
+| 7 | `20.238ms` | `22.030ms` | `22.322ms` | `4.247ms` | `10.108ms` | `7.533ms` | `37.788ms` |
+
+このsweepは`tinyFlags=0x241`で、SPUをcheckpointへ含めていない性能境界診断である。depth増加に伴いintermediate checkpoint再保存が線形増加する。過去にintermediate保存を一律省略した経路はdense historical rollbackの意味状態を壊したため、表だけを根拠に削除しない。
+
+### Audio and corrected presentation
+
+現行候補はSPU bitを加えた`tinyFlags=0x245`とする。rollback restoreでSPU内部状態を戻し、再演算中の`SPU::BufferAudio()`は内部音源を通常どおり進めつつ、生成sampleをhost output FIFOへ書かず件数だけ記録する。これにより、再生済みframeのsampleを二重にqueueする問題を避ける。
+
+- depth 1、各peer 9訂正: 計18訂正のtotal p95/max `5.694/5.694ms`、訂正ごとの破棄sample `799-800`、outer max `21.849/21.571ms`、`25/33ms`超ゼロ。
+- depth 2、各peer 9訂正: `logs/slippi-audio-depth2-postcorrection-run1`で計18訂正のtotal average/p95/max `7.506/7.835/7.835ms`、破棄sample `1599-1601`。host/clientとも同一seed・同一roleの無訂正controlに対し、訂正後の全trace field差分ゼロ。active `60.02/60.00fps`、outer max `25.100/24.450ms`、`33ms`超ゼロ。
+- visual depth 1: frames 900-1200の11枚/role、計22 PNGが同一role controlと完全一致。
+- visual + audio depth 2: `logs/slippi-visual-audio-depth2-postcorrection-run1`の計22 PNGがSHA-256までcontrolと完全一致。PNG capture込みで`60.00/60.00fps`、outer max `24.950/24.382ms`。
+- visual depth 4: 背景、UI、座標は一致したが、訂正区間中はplayer sprite領域だけ約`340-376 pixels`異なり、後に自然収束した。現時点のcorrected-image gateはfail。
+- full VRAM追加の`tinyFlags=0x2C1`はcheckpoint約`922KB`となり、3回目付近でstallしたため棄却した。軽量なGPU 3D subset追加も単発診断では意味状態差を減らしたが、訂正前に採取されるCSVと訂正後に採取される画面の境界差が原因だった。`0x245`の訂正時刻をtrace採取点からずらすと全field一致したため、GPU state追加は採用しない。
+
+SPU state/output処理は「内部状態を正しい時刻へ戻す」「再演算音を重複queueしない」ことまでである。既にspeakerへ出た誤予測音は取り消せない。波形capture比較、実聴、必要な場合の短いcrossfadeは未検証であり、audio gate完了とは扱わない。
+
+### Current blocker and next action
+
+- **昇格済み:** tested movement routeのexact depth 1-2。JIT、software renderer、full-machine state、SPU restore、replay render/audio output suppressionを組み合わせ、状態・画像・60fps gateを通過。
+- **未解決:** 実packet jitter/lossで訂正がdepth 1-2へ収まる割合、burst時のpresent-to-present時間、死亡/復帰・土管・item・result/restartのevent duplicate、長時間実行、音声波形と体感。
+- **方針:** product policyは通常depth 1-2までとし、それを超えたら深いcatch-upを常用せず短いstallへ落とす。まず実送信delay/jitter/lossを加えた分布測定とevent/audio gateを行う。depth 3以上のcheckpointや描画を磨くのは、実分布が必要性を示した場合だけにする。
 
 ## 2026-08-02 ARM9 hot-path regression resolved
 
@@ -45,10 +84,9 @@
 
 JIT off も `264.55fps` まで回復したため correctness 比較には使えるが、JIT on は `530.04fps` でさらに約2倍速い。現時点の production 候補は JIT 有効の full-machine `tinycorepreimage` exact rollback とし、no-JIT は比較・fallback 候補に留める。Slippi 型 ROM loop を捨てたわけではないが、旧 timing は同じ regression を含むため、その production 却下も確定判断ではなくなった。ただしまず、より単純で semantic gate 済みの full-frame route を再評価する。
 
-### Current blocker and next action
+### Follow-up
 
-- **Blocker:** 1F headless local gate と通常描画 gate は個別に pass したが、rollback 訂正と描画・音声を同時に通す gate、2-7F burst、実 WAN、死亡/復帰・土管・item・result/restart の長時間 gate は未実行。
-- **Next action:** exact depth 2-7 の restore/replay/outer-frame timing を測り、corrected screenshot と audio/event duplicate を検査する。その後だけ packet loss/jitter と gameplay event suite へ進む。full-frame が性能または visual gate を落とした場合に限り、同じ hot-path fix 後の ROM loop を再測定する。
+exact depth 2-7、corrected screenshot、SPU state/output suppressionは上の現行節まで完了した。実WAN相当分布とevent/audio wave gateは未完であり、以後は上節のblockerとnext actionを正とする。
 
 ## 2026-08-02 external rollback implementations and full-history audit (historical, superseded above)
 

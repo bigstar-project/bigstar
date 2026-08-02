@@ -127,7 +127,7 @@ void TestPredictionProbeAndPrune()
     probe.StartFrame = 5;
     probe.EndFrame = 9;
     probe.KeyMask = 0x1001;
-    probe.ConfirmAfterOneFrame = true;
+    probe.RetainConfirmation = true;
 
     CHECK(SameInput(timeline.Resolve(4, confirmed, neutral, probe).Input, neutral));
     CHECK(timeline.Resolve(5, confirmed, neutral, probe).Input.KeyMask == 0xFFE);
@@ -161,7 +161,7 @@ void TestPredictionProbeAndPrune()
     forcedProbe.StartFrame = 12;
     forcedProbe.EndFrame = 12;
     forcedProbe.KeyMask = 1;
-    forcedProbe.ConfirmAfterOneFrame = true;
+    forcedProbe.RetainConfirmation = true;
     const auto forced = forcedTimeline.Resolve(
         12, forcedConfirmed, neutral, forcedProbe);
     CHECK(forced.Predicted);
@@ -174,7 +174,7 @@ void TestPredictionProbeAndPrune()
         12, *forcedConfirmation, 13);
     CHECK(forcedStored.Mismatch);
     CHECK(forcedStored.FrameAlreadySimulated);
-    forcedProbe.ConfirmAfterOneFrame = false;
+    forcedProbe.RetainConfirmation = false;
     const auto replayed = forcedTimeline.Resolve(
         12, forcedConfirmed, neutral, forcedProbe);
     CHECK(!replayed.Predicted);

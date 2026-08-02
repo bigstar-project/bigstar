@@ -33,7 +33,7 @@ InputTimeline::PredictionProbe PredictionProbe(
   if (config.PredictionProbeEndFrame != kNoFrame)
     probe.EndFrame = config.PredictionProbeEndFrame;
   probe.KeyMask = config.PredictionProbeKeyMask;
-  probe.ConfirmAfterOneFrame = config.PredictionProbeConfirmAfterOneFrame;
+  probe.RetainConfirmation = config.PredictionProbeConfirmDelayFrames > 0;
   return probe;
 }
 
@@ -470,8 +470,10 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
   std::vector<melonDS::u8> latestMainRAM;
   {
     std::lock_guard<std::mutex> lock(context.Mutex);
-    if (context.Config.PredictionProbeConfirmAfterOneFrame && frame > 0) {
-      const melonDS::u32 confirmationFrame = frame - 1;
+    const melonDS::u32 confirmationDelay = static_cast<melonDS::u32>(
+        context.Config.PredictionProbeConfirmDelayFrames);
+    if (confirmationDelay > 0 && frame >= confirmationDelay) {
+      const melonDS::u32 confirmationFrame = frame - confirmationDelay;
       const auto confirmation = context.Inputs.RollbackInputs
                                     .TakePredictionProbeConfirmation(
                                         confirmationFrame);
@@ -480,9 +482,9 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
             confirmationFrame, *confirmation, frame, true, kNoFrame);
         if (context.Input.NetplayTrace && stored.Confirmation.Mismatch) {
           std::printf(
-              "NSMB Rollback: one-frame prediction probe confirmed "
-              "frame=%u current=%u\n",
-              confirmationFrame, frame);
+              "NSMB Rollback: prediction probe confirmed frame=%u "
+              "current=%u depth=%u\n",
+              confirmationFrame, frame, confirmationDelay);
           std::fflush(stdout);
         }
       }
@@ -570,16 +572,18 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
   unsigned long long resimRunFrameMaxUs = 0;
   unsigned long long resimCheckpointSaveTotalUs = 0;
   unsigned long long resimCheckpointSaveMaxUs = 0;
+  const melonDS::u64 discardedAudioStart =
+      nds->SPU.GetRollbackDiscardedOutputSamples();
   for (melonDS::u32 resimFrame = restoreFrame; resimFrame < frame;
        resimFrame++) {
     InputTimeline::ReplayFrameInputs replayInputs;
     {
       std::lock_guard<std::mutex> lock(context.Mutex);
       InputTimeline::PredictionProbe probe = PredictionProbe(context.Config);
-      // A forced one-frame probe exists only to create the original bad
+      // A forced delayed probe exists only to create the original bad
       // prediction. Replay must consume the confirmed input that triggered
       // rollback, not inject the diagnostic error a second time.
-      probe.ConfirmAfterOneFrame = false;
+      probe.RetainConfirmation = false;
       const auto resolved = InputTimeline::ResolveReplayFrameInputs(
           context.Inputs, resimFrame, localPlayer, NeutralInput(), probe);
       if (!resolved)
@@ -603,9 +607,11 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
     const bool skipRender = context.Config.SkipRenderDuringResim;
     if (skipRender)
       nds->GPU.SetRollbackSkipRender(true);
+    nds->SPU.SetRollbackSkipOutput(true);
     const auto runFrameStart = std::chrono::steady_clock::now();
     nds->RunFrame();
     const unsigned long long runFrameUs = ElapsedUs(runFrameStart);
+    nds->SPU.SetRollbackSkipOutput(false);
     resimRunFrameTotalUs += runFrameUs;
     resimRunFrameMaxUs = std::max(resimRunFrameMaxUs, runFrameUs);
     if (skipRender)
@@ -640,6 +646,8 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
   }
 
   const unsigned long long rollbackTotalUs = ElapsedUs(rollbackStart);
+  const melonDS::u64 discardedAudioSamples =
+      nds->SPU.GetRollbackDiscardedOutputSamples() - discardedAudioStart;
   {
     std::lock_guard<std::mutex> lock(context.Mutex);
     RefreshFrameShadowLocked(context, frame, nds);
@@ -652,12 +660,14 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
     std::printf("NSMB Rollback: resimulated from checkpoint=%u mismatch=%u to "
                 "current=%u frames=%u bytes=%zu restoreUs=%llu runUs=%llu "
                 "runMaxUs=%llu checkpointSaveUs=%llu "
-                "checkpointSaveMaxUs=%llu totalUs=%llu\n",
+                "checkpointSaveMaxUs=%llu totalUs=%llu "
+                "audioDiscardedSamples=%llu\n",
                 restoreFrame, mismatchFrame, frame, resimulated,
                 RollbackStorage::CheckpointBytes(checkpoint), restoreUs,
                 resimRunFrameTotalUs, resimRunFrameMaxUs,
                 resimCheckpointSaveTotalUs, resimCheckpointSaveMaxUs,
-                rollbackTotalUs);
+                rollbackTotalUs,
+                static_cast<unsigned long long>(discardedAudioSamples));
     std::fflush(stdout);
   }
   return true;

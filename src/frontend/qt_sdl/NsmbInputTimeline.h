@@ -32,7 +32,7 @@ struct PredictionProbe
     melonDS::u32 StartFrame = 0;
     std::optional<melonDS::u32> EndFrame;
     melonDS::u32 KeyMask = 1;
-    bool ConfirmAfterOneFrame = false;
+    bool RetainConfirmation = false;
 };
 
 struct PredictedInput

@@ -269,7 +269,7 @@ PredictedInput PredictionRuntime::Resolve(
     const auto confirmed = confirmedInputs.find(frame);
     if (confirmed != confirmedInputs.end())
     {
-        if (applyProbe && probe.ConfirmAfterOneFrame)
+        if (applyProbe && probe.RetainConfirmation)
         {
             InputState input = confirmed->second;
             PredictionProbeConfirmations_[frame] = input;
@@ -297,7 +297,7 @@ PredictedInput PredictionRuntime::Resolve(
 
     if (applyProbe)
     {
-        if (probe.ConfirmAfterOneFrame)
+        if (probe.RetainConfirmation)
             PredictionProbeConfirmations_.emplace(frame, input);
         input.KeyMask ^= probe.KeyMask & 0xFFFu;
         PredictionProbeCount_++;

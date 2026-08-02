@@ -1,5 +1,28 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Exact rollback depth and presentation gate - 2026-08-02
+
+- **Current conclusion:** JIT + `tinycorepreimage` の full-machine rollback は、tested MvL movement route では exact depth 1-2 を実用候補へ進められる。SPU state を checkpoint に含め、再演算中に生成された host audio samples は FIFO へ再投入しない。深度2を9回ずつ強制訂正した `logs/slippi-audio-depth2-postcorrection-run1` は host/client とも対照runの全game-state fieldへ訂正後に一致し、`60.02/60.00fps`、outer max `25.100/24.450ms`、`33ms` 超ゼロだった。
+- 診断probeは従来の1F固定から `MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_DELAY_FRAMES` による任意の確認遅延へ拡張した。旧 `...CONFIRM_AFTER_ONE_FRAME=1` は互換aliasとして depth 1 に写像する。
+- hot-path修正後、SPUを含めない `tinyFlags=0x241` で各peer 10回の exact depth sweepを行った。全訂正は指定深度どおりに再演算され、tested cross-peer semantic gateを通過したが、この表は音声完全性を含まない性能境界の診断値である。
+
+| Depth | Correction p95 | Correction max | Outer-frame max | 判定 |
+| ---: | ---: | ---: | ---: | --- |
+| 1 | `5.485ms` | `5.581ms` | `22.112ms` | 十分な余裕 |
+| 2 | `9.198ms` | `9.713ms` | `26.212ms` | 候補。SPU込み再試験もpass |
+| 3 | `10.895ms` | `11.809ms` | `28.309ms` | 性能上は候補、presentation未昇格 |
+| 4 | `14.016ms` | `14.585ms` | `31.029ms` | 一時的なplayer sprite位相差を検出 |
+| 5 | `15.782ms` | `15.811ms` | `32.436ms` | 余裕が小さくvisual未検証 |
+| 6 | `18.012ms` | `18.515ms` | `34.338ms` | `33ms` 境界超過のため不採用 |
+| 7 | `22.030ms` | `22.322ms` | `37.788ms` | 不採用 |
+
+- SPU込みの現行候補 `tinyFlags=0x245` は depth 1で18訂正のp95/max `5.694/5.694ms`、破棄した再演算音声は訂正ごとに `799-800` samplesだった。depth 2の訂正後比較runは18訂正のp95/max `7.835/7.835ms`、破棄音声 `1599-1601` samplesで、対照runとの全field差分がhost/clientともゼロだった。
+- `logs/slippi-visual-audio-depth2-postcorrection-run1` は software renderer とPNG保存を有効にしたまま、depth 2を各peer 9回訂正して `60.00/60.00fps`、outer max `24.950/24.382ms` を維持した。frames 900-1200の11枚/role、計22枚は同一seed・同一roleの無訂正対照とSHA-256まで完全一致した。既存のdepth 1 visual probeも計22枚完全一致している。
+- depth 4では背景・UI・座標は一致したが、訂正区間中にplayer spriteだけ `340-376 pixels` 程度異なり、その後自然収束した。全VRAMを加える `tinyFlags=0x2C1` はcheckpointが約`922KB`へ増えて実行がstallしたため棄却した。深度3以上はこのpresentation gateを通すまで製品側の調整対象にしない。
+- **Audio limitation:** SPU内部状態の復元と再演算sampleの重複投入防止は実装・件数確認済みだが、既に再生済みの誤予測音を取り消すことはできない。音声captureの波形比較、実聴、必要なら短いcrossfadeは未実施である。
+- **Current blocker:** tested movement routeのdepth 1-2は性能・状態・画像gateを通ったが、実packet jitter/lossでの訂正深度分布、死亡/復帰・土管・item・result/restartの副作用、長時間安定性、音声波形は未検証である。
+- **Next action:** production policyを「通常はdepth 1-2、深度超過は無理にcatch-upせず短いstall」に寄せ、実送信jitter/lossで頻度とpresent-to-present時間を測る。その後、event routeと音声captureを同じgateへ上げる。depth 3以上の最適化は、実ネットワーク分布が必要性を示すまで行わない。
+
 ## ARM9 bad-jump trace hot-path regression - 2026-08-02
 
 - **Current conclusion:** the severe slowdown was neither a DS/melonDSの限界 nor the patched ROM. Commit `f8afb92f557759ed7b5853fd71a9632fb07151cb` (`MvL StageScene開始条件の診断を追加`) inserted `NSMLEnvFlag("MELONDS_NSML_BAD_JUMP_TRACE")` into `ARMv5::JumpTo()`. Every ARM9 branch/function call therefore executed `getenv()` and also captured PC/LR/SP/CPSR even though the diagnostic was normally disabled. The retained fix caches the launch-time flag once and captures the registers/target only when tracing is enabled.
@@ -25,8 +48,7 @@
 - The corrected exact-one-frame rollback gate (`logs/slippi-exact-one-frame-probe-badjump-cache-run2`) ran ten forced corrections per peer with JIT, fixed seed, separate CPU affinity, and confirmed real input. All 20 samples were exactly one replay frame and the 1,250-frame cross-peer semantic comparison passed. Correction total p50/p95/max was `5.091/5.485/5.581ms`; replay `RunFrame()` p95 was `1.611ms`, restore p95 `3.481ms`, and no correction exceeded `16.667ms`. The complete fixed-rate run held `59.90/59.95fps`, with zero frames over `25ms`.
 - The drawing-enabled software-renderer standard gate (`logs/badjump-cache-standard`) passed 3,000 frames with host/client game-state validation and ten screenshots per peer. Active rates were `59.99/59.98fps`, maximum frame times `28.402/27.010ms`, and neither peer had a frame over `33ms`. Manual inspection found normal gameplay and expected transition masking, with no blank/corrupt frame.
 - **Rollback implication:** the previous conclusion that even depth-1 full-frame correction was intrinsically too slow is overturned by this new root-cause fix. JIT remains the faster engine, but no-JIT now also has ample forward-only headroom. Exact one-frame correction itself satisfies the present performance gate; deeper and real-WAN correction distributions still need remeasurement before claiming Slippi-class comfort.
-- **Current blocker:** there is no remaining unexplained core-speed regression in the tested route. What remains unknown is practical rollback behavior beyond the forced exact-1F local gate: 2-7 frame catch-up, repeated real packet jitter/loss, corrected present-to-present latency, and audio/side-effect behavior.
-- **Next action:** keep the full-machine `tinycorepreimage` route as the primary candidate, measure exact depths 2-7 and WAN-like mismatch distributions with corrected presentation timing, then run the death/respawn, pipe, item, result/restart, audio, and long-duration visual gates. The ROM-side Slippi loop remains research fallback until it independently beats the now-fast full-frame path.
+- **Follow-up:** exact depths 2-7、corrected screenshot、SPU state/output handlingの再測定は上の現行節まで完了した。以後は上節のblockerとnext actionを正とする。
 
 ## Slippi-style ROM game-loop rollback probe - 2026-08-01
 

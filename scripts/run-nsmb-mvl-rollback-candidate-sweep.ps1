@@ -21,6 +21,7 @@ param(
     [int]$RollbackPredictionProbeStartFrame = 0,
     [int]$RollbackPredictionProbeEndFrame = 0,
     [string]$RollbackPredictionProbeKeyMask = "",
+    [int]$RollbackPredictionProbeConfirmDelayFrames = 0,
     [int]$RollbackInputWaitUs = 0,
     [int]$RollbackMaxResimFrames = 0,
     [int]$MinRollbackResims = -1,
@@ -186,6 +187,7 @@ foreach ($item in $candidates) {
         $candidateParams.RollbackPredictionProbeLimit = $RollbackPredictionProbeLimit
         $candidateParams.RollbackPredictionProbeStartFrame = $RollbackPredictionProbeStartFrame
         $candidateParams.RollbackPredictionProbeEndFrame = $RollbackPredictionProbeEndFrame
+        $candidateParams.RollbackPredictionProbeConfirmDelayFrames = $RollbackPredictionProbeConfirmDelayFrames
         if ($RollbackPredictionProbeKeyMask -ne "") {
             $candidateParams.RollbackPredictionProbeKeyMask = $RollbackPredictionProbeKeyMask
         }

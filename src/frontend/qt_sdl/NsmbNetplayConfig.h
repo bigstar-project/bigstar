@@ -168,7 +168,7 @@ struct RollbackConfig {
   std::uint32_t PredictionProbeStartFrame = 0;
   std::uint32_t PredictionProbeEndFrame = 0;
   std::uint32_t PredictionProbeKeyMask = 1;
-  bool PredictionProbeConfirmAfterOneFrame = false;
+  int PredictionProbeConfirmDelayFrames = 0;
   RollbackBackend Backend = RollbackBackend::Savestate;
   int Window = 20;
   int CheckpointInterval = 1;

@@ -539,7 +539,7 @@ void TestRollbackConfigDefaultsAndBackendAliases() {
   CHECK(config.PredictionProbeOffset == 0);
   CHECK(config.PredictionProbeLimit == -1);
   CHECK(config.PredictionProbeKeyMask == 1u);
-  CHECK(!config.PredictionProbeConfirmAfterOneFrame);
+  CHECK(config.PredictionProbeConfirmDelayFrames == 0);
   CHECK(config.Backend == RollbackBackend::Savestate);
   CHECK(config.Window == 20);
   CHECK(config.CheckpointInterval == 1);
@@ -562,6 +562,12 @@ void TestRollbackConfigDefaultsAndBackendAliases() {
     config = NsmbMvlNetplay::Config::LoadRollbackConfig(environment);
     CHECK(config.Backend == alias.second);
   }
+
+  MapEnvironment legacyProbeEnvironment;
+  legacyProbeEnvironment.Values[
+      "MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_AFTER_ONE_FRAME"] = "1";
+  config = NsmbMvlNetplay::Config::LoadRollbackConfig(legacyProbeEnvironment);
+  CHECK(config.PredictionProbeConfirmDelayFrames == 1);
 }
 
 void TestRollbackConfigReadsClampsAndDependencies() {
@@ -580,6 +586,7 @@ void TestRollbackConfigReadsClampsAndDependencies() {
       {"MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_START_FRAME", "100"},
       {"MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_END_FRAME", "90"},
       {"MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK", "0"},
+      {"MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_DELAY_FRAMES", "999"},
       {"MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_AFTER_ONE_FRAME", "1"},
       {"MELONDS_NSML_ROLLBACK_WINDOW", "999"},
       {"MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL", "0"},
@@ -605,7 +612,7 @@ void TestRollbackConfigReadsClampsAndDependencies() {
   CHECK(config.PredictionProbeStartFrame == 100u);
   CHECK(config.PredictionProbeEndFrame == 100u);
   CHECK(config.PredictionProbeKeyMask == 1u);
-  CHECK(config.PredictionProbeConfirmAfterOneFrame);
+  CHECK(config.PredictionProbeConfirmDelayFrames == 180);
   CHECK(config.Window == 180);
   CHECK(config.CheckpointInterval == 1);
   CHECK(config.DeltaKeyframeInterval == 60);
