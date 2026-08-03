@@ -9,6 +9,8 @@ param(
     [int]$InternalWaitTimeoutMs = 0,
     [int]$InputSendDelayFrames = 0,
     [int]$InputSendJitterFrames = 0,
+    [int]$HostInputSendDelayFrames = -1,
+    [int]$ClientInputSendDelayFrames = -1,
     [switch]$InputUnreliable,
     [int]$InputBundleHistory = 0,
     [switch]$NetworkPumpThread,
@@ -44,7 +46,7 @@ param(
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
     [switch]$CopyRomToLog,
     [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
-    [switch]$RecordInput,
+    [switch]$RecordInput = $true,
     [string]$InputRecordDir = "",
     [int]$InputRecordStartFrame = 0,
     [int]$InputRecordEndFrame = 0,
@@ -520,6 +522,26 @@ if ($RecordInput) {
     $clientArgs += @("-InputRecordFile", (Join-Path $InputRecordDir "client.inputs"))
 }
 
+function Set-RoleArgumentValue {
+    param(
+        [object[]]$Arguments,
+        [string]$Name,
+        [int]$Value
+    )
+
+    if ($Value -lt 0) {
+        return
+    }
+    $index = [Array]::IndexOf($Arguments, $Name)
+    if ($index -lt 0 -or $index + 1 -ge $Arguments.Count) {
+        throw "role argument was not found: $Name"
+    }
+    $Arguments[$index + 1] = "$Value"
+}
+
+Set-RoleArgumentValue $hostArgs "-InputSendDelayFrames" $HostInputSendDelayFrames
+Set-RoleArgumentValue $clientArgs "-InputSendDelayFrames" $ClientInputSendDelayFrames
+
 $hostOut = Join-Path $wrapperLog "host-wrapper.out.txt"
 $hostErr = Join-Path $wrapperLog "host-wrapper.err.txt"
 $clientOut = Join-Path $wrapperLog "client-wrapper.out.txt"
@@ -663,7 +685,7 @@ if ($ClientOnly) {
     Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
 }
 Write-Host "physical input neutralized host=$([bool]$NeutralizeHostInput) client=$([bool]$NeutralizeClientInput)"
-Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames jitter=$InputSendJitterFrames networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame startBarrier=$([bool]$WaitForPeerAtNetplayStart) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
+Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames hostSendDelay=$(if ($HostInputSendDelayFrames -ge 0) { $HostInputSendDelayFrames } else { 'common' }) clientSendDelay=$(if ($ClientInputSendDelayFrames -ge 0) { $ClientInputSendDelayFrames } else { 'common' }) jitter=$InputSendJitterFrames networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame startBarrier=$([bool]$WaitForPeerAtNetplayStart) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
 Write-Host "gameplay heartbeat interval=$GameplayHeartbeatInterval"
 if ($HostAIPlayLog -or $ClientAIPlayLog) {
     Write-Host "AI play log host=$(if ($HostAIPlayLog) { $HostAIPlayLog } else { 'off' }) client=$(if ($ClientAIPlayLog) { $ClientAIPlayLog } else { 'off' }) interval=$AIPlayLogInterval flushInterval=$AIPlayLogFlushInterval maxObjects=$AIPlayLogMaxObjects"

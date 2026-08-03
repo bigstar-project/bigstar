@@ -28,7 +28,11 @@ checkpointとrestoreは同じguest control pointでなければならない。�
 
 手動launcherは`-SlippiRollback`または`-RomLoopRollback`でこのbackendを選ぶ。game-tick patch済みhost/client ROMを別名とmanifestで生成し、checkpoint interval 1、window 16、ROM-loop実効最大depth 11、input delay 0、既定send delay 2/jitter 1、JIT exact chain/self-loopを設定する。bootstrap入力終了後は各melonDS windowの物理入力がそのままnetplay timelineへ入る。実行系スクリプトはrollback用途に限らずsoftware rendererを既定とし、OpenGLを明示的に選ばない限り `Screen.UseGL=false`、3D renderer 0で起動する。
 
-現段階はbounded live PoCのままである。時刻drift、history不足、stale checkpoint再利用という三つの恒久差原因は修正し、今回の手動入力prefixを自動再現して訂正後再一致まで確認した。未解決なのは、修正版を物理入力の長時間両画面プレイで再確認すること、密なstressで残る単発 `45.868ms`、死亡/復帰・土管・item・result/restart、訂正中画像、音声波形である。次は手動再試験とcheckpoint copy spikeの計測・削減を優先し、correctnessまたは `33ms` gateを落とす間はproduction安定版としない。
+現段階はbounded live PoCのままである。最新手動run `logs/nsmb-mvl-manual-local-20260804-034019` は、offset `241`一定、cannot-arm/depth clampゼロ、全transaction完了でも、frame 3600からplayer/object/hazardが分岐し、最後の訂正完了後4080-4320にもplayer座標差が残った。従って時刻drift、history不足、stale checkpoint再利用の三原因を直してもcorrectnessは未達である。frame 1320/2640/3480の一時差は後続訂正で再一致しており、永続化境界は3600付近のobject/event更新に絞られる。
+
+旧手動launcherは物理入力recordがopt-inだった。mismatchのactual列だけから作る入力は、予測前に届いたtransitionを含まない。最新runの60-frame `InputNetplay` sampleと照合すると、部分復元列はplayer 0で21点、player 1で24点が実状態と異なる。同じmatch seedと部分復元入力を使い、role別send delayでdepth 1-8も作った自動runは再一致したが、元runとはframe 3360のplayer座標・object列が別ルートなので反証にならない。今後は手動launcherの `RecordInput` を既定有効にして各roleの完全入力を保存し、非対称delivery再現用にrole別send delayも指定可能とした。mismatch列からのexporterはpartial reconstructionであることを出力内とwarningで明示する。
+
+現在のblockerは、最新runそのものをexact replayできる入力がないことである。Main RAMから除外したSDK runtime、DTCM/CPU/scheduler、event/RNGなどは候補に留まり、どれかを原因と断定する証拠はない。次の完全記録付き手動runで恒久差を自動再現し、分岐直前checkpointからnormal tickとROM replayのRAM/RNG/object lifecycleを比較して最初の異なるwrite/callを探す。correctnessが通るまでは単発 `45.868ms` の性能最適化、描画・音声、長時間production gateへ進めない。
 
 ### 診断PoCの根拠（live接続前）
 

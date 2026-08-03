@@ -55,12 +55,17 @@ function Get-RomLoopTimelineSummary {
 
     $armedCount = 0
     $cannotArmCount = 0
+    $failedResimCount = 0
     $cappedResimCount = 0
     $offsetMin = [int]::MaxValue
     $offsetMax = [int]::MinValue
     foreach ($line in ($Text -split "`r?`n")) {
         if ($line -match "NSMB Rollback: cannot arm ROM-loop correction") {
             $cannotArmCount++
+            continue
+        }
+        if ($line -match "NSMB Rollback: (cannot resimulate|failed to schedule ROM-loop RAM restore)") {
+            $failedResimCount++
             continue
         }
         if ($line -match "NSMB Rollback: capping resim window") {
@@ -84,6 +89,7 @@ function Get-RomLoopTimelineSummary {
     return [pscustomobject]@{
         ArmedCount = $armedCount
         CannotArmCount = $cannotArmCount
+        FailedResimCount = $failedResimCount
         CappedResimCount = $cappedResimCount
         OffsetMin = if ($armedCount -gt 0) { $offsetMin } else { 0 }
         OffsetMax = if ($armedCount -gt 0) { $offsetMax } else { 0 }
@@ -588,6 +594,7 @@ foreach ($role in @("host", "client")) {
     } elseif ($wrapperFailure -match "stalled") {
         $status = "stalled"
     } elseif ($romLoopTimeline.CannotArmCount -gt 0 -or
+              $romLoopTimeline.FailedResimCount -gt 0 -or
               $romLoopTimeline.CappedResimCount -gt 0 -or
               $romLoopTimeline.HasDrift) {
         $status = "rollback-fail"
@@ -619,6 +626,7 @@ foreach ($role in @("host", "client")) {
         LongestGameplayPlateau = $gameplayPlateau.Rows
         RomLoopArmed = $romLoopTimeline.ArmedCount
         RomLoopCannotArm = $romLoopTimeline.CannotArmCount
+        RomLoopFailedResim = $romLoopTimeline.FailedResimCount
         RomLoopCappedResim = $romLoopTimeline.CappedResimCount
         RomLoopGameFrameOffsetMin = $romLoopTimeline.OffsetMin
         RomLoopGameFrameOffsetMax = $romLoopTimeline.OffsetMax

@@ -2,16 +2,19 @@
 
 ## Live Slippi-style ROM-loop rollback milestone - 2026-08-04
 
-- **Current conclusion:** 1 tick欠落修正後の手動run `logs/nsmb-mvl-manual-local-20260804-020633` でも画面がずれたという報告は正しかった。今回は両peerの `checkpoint - gameFrame` が全訂正で `241`、cannot-armもゼロなので前回原因の再発ではない。frame 960では一致し、1080からplayer状態差、1680からobject/hazard差、入力を止めた3000-3480でもplayer座標差が残った。
+- **Current conclusion:** 最新の手動run `logs/nsmb-mvl-manual-local-20260804-034019` でも恒久的な画面ずれを確認した。両peerの `checkpoint - gameFrame` は全訂正で `241`、cannot-armとdepth clampはゼロ、全transactionが完了しており、tick欠落・history不足・stale checkpoint再利用の再発ではない。frame 1320/2640/3480のplayer差はいったん再一致するが、3600でplayer/object/hazardが分岐し、最後の訂正が完了した4069以降のneutral区間4080-4320でも両player座標差が残る。したがって現ROM-loop経路はまだcorrectではない。
 - restore gateは「現在tickの実行前」にあるため、history countを `preRestoreGameFrame - historyStartFrame` ではなく両端を含む `+1` とした。さらにlead 8でもcheckpointがmismatchより古い場合に8件を超えるため、入力historyを、注入済みinput gateと重ならない最大の12件へ拡張した。旧手動runのhostには25件の `cannot arm` もあり、この不足も別の訂正欠落要因だった。
 - `scripts/analyze-nsmb-mvl-rollback-log.ps1` はROM-loopの `checkpoint - gameFrame` の変動と `cannot arm` を `rollback-fail` と判定する。旧手動runはhost offset `241..1459` / cannot-arm 25、client `241..1226` / 0として自動的にfailし、同じ不具合を見逃さない。
 - 根本原因は、ROM-loop訂正後もrestore地点より新しいcheckpointをringへ残していたことだった。それらは訂正前の誤予測を含む。近接した次のmismatchがこのstale checkpointから再開すると、前の誤予測が復活して恒久差になる。full-frame経路はstore suffixを消すが、ROM-loop経路には同等処理がなかった。
 - 手動ログのprediction mismatch列からauthoritative入力を復元した `tests/nsmb_us_direct_mvl_romloop_manual_020633_prefix.inputs` で同じ失敗を自動再現した。修正前はframe 1101以降ほぼ連続不一致、suffix無効化だけでは近接4入力で12-entry上限を超えた。現行修正はrestore地点より後を無効化し、ROM catch-upの各guest gateで訂正済み中間checkpointを再構築する。ROM-loopのclampは旧depth 7ではなく12-entryで実行可能な最大depth 11へ合わせ、clamp発生自体もanalyzerで `rollback-fail` とする。
 - 最終コードのcorrectness run `logs/romloop-manual-020633-final-verified-run1` は、手動prefixに対して差が各prediction待ち区間だけに限定され、最後の入力訂正後は再一致した。host/client 24/25 correction、cannot-arm・depth clampゼロ、時刻offsetは常に `241`。永続差を解消した一方、同じ外側frameの未確定中は一時差が見えるというrollback固有の挙動は残る。
+- 最新runのmismatch列から復元した入力はexactではなかった。remote inputが予測より先に届いたframeはmismatchを出さないため、定期 `InputNetplay` sampleとの照合だけでもplayer 0で21点、player 1で24点の入力状態が欠ける。同じseed `0x7458E749` と復元入力、さらにrole別send delayでdepth 1-8を作った自動runはいずれも訂正後再一致したが、frame 3360時点で元runと全く別のplayer座標・object列だったため、元のevent分岐の再現試験にはならない。このnegative resultをrollback成功の根拠にはしない。
+- 今後の手動runは `scripts/run-nsmb-mvl-manual-local.ps1` の `RecordInput` を既定有効にし、roleごとの完全な物理入力列を `recorded-inputs/host.inputs` と `client.inputs` へ保存する。旧ログをmismatchから部分復元する `scripts/export-nsmb-mvl-manual-inputs.ps1` も追加したが、出力にはalready-confirmed transitionが欠けることを明示する。再現時の非対称進行を作れるよう `HostInputSendDelayFrames` / `ClientInputSendDelayFrames` も追加した。
+- analyzerは `cannot arm` とdepth clampだけでなく、checkpoint missingやschedule failureによる `cannot resimulate` も `rollback-fail` とする。実際、ROM-loop patchなしROMを誤って使ったnegative control `logs/romloop-manual-034019-repro-run1` は全訂正がcheckpoint missingだったため、成功runとして扱わない。
 - no-trace性能run `logs/romloop-manual-020633-prefix-rebuild-perf-run1` はsoftware rendererで `59.54/59.57fps`、outer max `23.281/25.197ms`、`33ms`超ゼロ。より密な121 correction/peerの `logs/romloop-checkpoint-rebuild-stress-perf-run1` は `59.73/59.71fps` を維持したが、outer max `30.535/45.868ms`、clientに `33ms`超が2回あった。全中間checkpoint再構築は正しさのため保持し、この単発spikeを無視してproduction昇格はしない。
 - ロールバック以外も含む実行スクリプトはsoftware renderer（`Screen.UseGL=false`、3D renderer 0）を既定にした。OpenGL computeを使うのは明示的にsoftware rendererを無効化した場合だけとする。JIT matrixも既定を `Software` に変更した。
-- **Current blocker:** stale checkpoint由来の恒久差は再現入力で解消したが、修正後コードを物理入力の長時間両画面プレイではまだ再確認していない。密な人工stressで単発45.868msも残り、depth 11を超えた場合のstall/fallback方針も未実装である。死亡/復帰・土管・item・result/restart、訂正中画像、音声波形も未検証であり、production安定版とはまだ扱わない。
-- **Next action:** まず同じ手動コマンドで一致を再確認する。その後、正しい中間checkpointを維持したまま単発spikeを計測・削減し、`33ms`超を再現的にゼロへ戻す。状態drift/cannot-armを一度でも出す最適化は採用せず、性能gate後にevent、描画、音声、長時間へ進む。
+- **Current blocker:** 最新の恒久差を発生させた完全な物理入力列が旧runにはなく、元runと同じobject/event境界を自動再現できない。現時点でMain RAM除外範囲、DTCM/CPU/scheduler、event/RNG等のどれが原因かを選ぶ証拠はなく、推測でrestore範囲を変える段階ではない。密な人工stressの単発45.868ms、depth 11超のstall/fallbackも引き続き未解決である。
+- **Next action:** 同じ手動試験を一度だけ再実行し、自動保存されるhost/client入力を同じmatch seed・同じrole別delivery条件で再生する。恒久差を自動再現したら、分岐直前のcheckpointから正常simulationとROM replayのRAM/RNG/object lifecycleを比較し、最初の異なるwrite/callを特定する。correctnessが通るまで性能最適化や描画・音声のブラッシュアップへは進まない。
 
 ## Exact rollback depth and presentation gate - 2026-08-02
 
