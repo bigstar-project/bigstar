@@ -99,7 +99,7 @@ param(
     [switch]$NoJit,
     [switch]$NoFrameLimit,
     [switch]$SkipFrameLimitCheck,
-    [switch]$SoftwareRenderer,
+    [switch]$SoftwareRenderer = $true,
     [switch]$Wait
 )
 

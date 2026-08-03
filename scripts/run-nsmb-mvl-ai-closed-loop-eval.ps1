@@ -23,7 +23,7 @@ param(
     [int]$ImitationHazardGuardCloseRange = -1,
     [switch]$SkipGameStateComparison,
     [int]$ScreenshotInterval = 0,
-    [switch]$SoftwareRenderer,
+    [switch]$SoftwareRenderer = $true,
     [switch]$AllowJit,
     [switch]$ForcePlayerPowerups,
     [int]$ForcePlayerPowerupsStartFrame = 0,

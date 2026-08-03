@@ -10,7 +10,7 @@ param(
     [int]$AIPlayLogInterval = 1,
     [int]$AIPlayLogMaxObjects = 128,
     [switch]$AllowJit,
-    [switch]$SoftwareRenderer,
+    [switch]$SoftwareRenderer = $true,
     [int]$ScreenshotInterval = 0,
     [int]$ForceStarStartFrame = 900,
     [int]$ForceStarEndFrame = 1500,

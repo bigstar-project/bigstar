@@ -151,7 +151,7 @@ param(
     [int]$AIPlayLogMaxObjects = 128,
     [switch]$AIPlayLogIncludeNonGameplay,
     [switch]$FpsSpikeTrace,
-    [switch]$SoftwareRenderer,
+    [switch]$SoftwareRenderer = $true,
     [switch]$AllowJit
 )
 

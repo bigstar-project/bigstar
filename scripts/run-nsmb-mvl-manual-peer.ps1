@@ -39,7 +39,7 @@ param(
     [switch]$NoStartBarrier,
     [switch]$NoDynamicCameraLead,
     [switch]$RuntimeDynamicCameraLead,
-    [switch]$SoftwareRenderer,
+    [switch]$SoftwareRenderer = $true,
     [switch]$PerformanceLog,
     [ValidateSet("Normal", "AboveNormal", "High")]
     [string]$ProcessPriority = "AboveNormal",

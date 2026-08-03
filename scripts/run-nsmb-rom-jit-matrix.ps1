@@ -11,7 +11,7 @@ param(
     [ValidateRange(1, 1000000)]
     [int]$GameStateTraceInterval = 60,
     [ValidateSet("Configured", "Software")]
-    [string]$Renderer = "Configured",
+    [string]$Renderer = "Software",
     [ValidateSet("All", "BaseNoJit", "PatchedNoJit", "BaseJit", "PatchedJit")]
     [string[]]$Cases = @("All")
 )

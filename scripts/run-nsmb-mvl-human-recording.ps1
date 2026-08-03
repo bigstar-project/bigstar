@@ -10,7 +10,7 @@ param(
     [int]$AIPlayLogFlushInterval = 60,
     [int]$AIPlayLogMaxObjects = 128,
     [int]$ScreenshotInterval = 0,
-    [switch]$SoftwareRenderer,
+    [switch]$SoftwareRenderer = $true,
     [string]$Scenario = "",
     [ValidateSet("host", "client", "both")]
     [string]$HumanSide = "client",
@@ -128,7 +128,7 @@ if ($packetCaptureEnabled) { $manualArgs.PacketCapture = $true }
 if ($GenerateMvlConfiguredRoms) { $manualArgs.GenerateMvlConfiguredRoms = $true }
 if ($MvlMatchSeed -ne "") { $manualArgs.MvlMatchSeed = $MvlMatchSeed }
 if ($AllowJit -or -not $NoJit) { $manualArgs.AllowJit = $true }
-if ($SoftwareRenderer) { $manualArgs.SoftwareRenderer = $true }
+$manualArgs.SoftwareRenderer = [bool]$SoftwareRenderer
 if ($ForcePlayerPowerups) {
     $manualArgs.ForcePlayerPowerups = $true
     $manualArgs.ForcePlayerPowerupsStartFrame = $ForcePlayerPowerupsStartFrame

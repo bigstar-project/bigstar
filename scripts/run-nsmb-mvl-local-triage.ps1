@@ -65,7 +65,7 @@ param(
     [int]$MelonLaunchGapMs = 500,
     [switch]$SkipRomEnsure,
     [switch]$NoJit,
-    [switch]$SoftwareRenderer
+    [switch]$SoftwareRenderer = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -379,9 +379,7 @@ if ($Mode -eq "DirectUdp") {
     if (-not $NoJit) {
         $manualParams.AllowJit = $true
     }
-    if ($SoftwareRenderer) {
-        $manualParams.SoftwareRenderer = $true
-    }
+    $manualParams.SoftwareRenderer = [bool]$SoftwareRenderer
     & $manualLocal @manualParams
     Write-Host ""
     Write-Host "DirectUdp: WebRTC is not involved. If this reproduces the green/frozen client, focus on Rust ROM generation or melonDS input-netplay/runtime env."
