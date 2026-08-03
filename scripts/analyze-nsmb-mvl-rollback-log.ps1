@@ -55,11 +55,16 @@ function Get-RomLoopTimelineSummary {
 
     $armedCount = 0
     $cannotArmCount = 0
+    $cappedResimCount = 0
     $offsetMin = [int]::MaxValue
     $offsetMax = [int]::MinValue
     foreach ($line in ($Text -split "`r?`n")) {
         if ($line -match "NSMB Rollback: cannot arm ROM-loop correction") {
             $cannotArmCount++
+            continue
+        }
+        if ($line -match "NSMB Rollback: capping resim window") {
+            $cappedResimCount++
             continue
         }
         if ($line -notmatch "NSMB Rollback: armed ROM-loop correction checkpoint=([0-9]+).* gameFrame=([0-9]+)") {
@@ -79,6 +84,7 @@ function Get-RomLoopTimelineSummary {
     return [pscustomobject]@{
         ArmedCount = $armedCount
         CannotArmCount = $cannotArmCount
+        CappedResimCount = $cappedResimCount
         OffsetMin = if ($armedCount -gt 0) { $offsetMin } else { 0 }
         OffsetMax = if ($armedCount -gt 0) { $offsetMax } else { 0 }
         HasDrift = $armedCount -gt 1 -and $offsetMin -ne $offsetMax
@@ -581,14 +587,15 @@ foreach ($role in @("host", "client")) {
         $status = "abort"
     } elseif ($wrapperFailure -match "stalled") {
         $status = "stalled"
-    } elseif ($romLoopTimeline.CannotArmCount -gt 0 -or $romLoopTimeline.HasDrift) {
+    } elseif ($romLoopTimeline.CannotArmCount -gt 0 -or
+              $romLoopTimeline.CappedResimCount -gt 0 -or
+              $romLoopTimeline.HasDrift) {
         $status = "rollback-fail"
     } elseif ($maxFrameMs -gt $MaxSingleFrameMs -or $slowRun -gt $MaxConsecutiveSlowFrames -or $wrapperFailure -match "active frame spike too high") {
         $status = "perf-fail"
     } elseif ($wrapperFailure) {
         $status = "failed"
-    } elseif (($maxPlateau.Rows -ge $FreezeMinRows -or
-               $gameplayPlateau.Rows -ge $GameplayFreezeMinRows) -and
+    } elseif ($gameplayPlateau.Rows -ge $GameplayFreezeMinRows -and
               -not $hasResultScene) {
         $status = "freeze-suspect"
     }
@@ -612,6 +619,7 @@ foreach ($role in @("host", "client")) {
         LongestGameplayPlateau = $gameplayPlateau.Rows
         RomLoopArmed = $romLoopTimeline.ArmedCount
         RomLoopCannotArm = $romLoopTimeline.CannotArmCount
+        RomLoopCappedResim = $romLoopTimeline.CappedResimCount
         RomLoopGameFrameOffsetMin = $romLoopTimeline.OffsetMin
         RomLoopGameFrameOffsetMax = $romLoopTimeline.OffsetMax
         GameplayPlateauStart = $gameplayPlateau.StartFrame

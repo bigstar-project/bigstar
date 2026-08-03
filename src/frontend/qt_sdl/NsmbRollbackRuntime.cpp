@@ -537,15 +537,20 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
     }
     if (mismatchFrame >= frame)
       return false;
+    const bool romLoopBackend =
+        context.Config.Backend == Config::RollbackBackend::RomLoop;
     const melonDS::u32 originalMismatchFrame = mismatchFrame;
+    const int maxResimFrames =
+        romLoopBackend ? static_cast<int>(kRomLoopHistoryCapacity - 1)
+                       : context.Config.MaxResimFrames;
     mismatchFrame = RollbackStorage::ClampResimulationMismatch(
-        mismatchFrame, frame, context.Config.MaxResimFrames);
+        mismatchFrame, frame, maxResimFrames);
     if (mismatchFrame != originalMismatchFrame && context.Input.NetplayTrace) {
       std::printf("NSMB Rollback: capping resim window "
                   "originalMismatch=%u cappedMismatch=%u current=%u "
                   "maxFrames=%u\n",
                   originalMismatchFrame, mismatchFrame, frame,
-                  static_cast<melonDS::u32>(context.Config.MaxResimFrames));
+                  static_cast<melonDS::u32>(maxResimFrames));
       std::fflush(stdout);
     }
     const auto observedFrame =
@@ -554,8 +559,6 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
             frame, observedFrame, context.Config.ResimulateDelayFrames))
       return false;
 
-    const bool romLoopBackend =
-        context.Config.Backend == Config::RollbackBackend::RomLoop;
     const bool checkpointFound =
         romLoopBackend
             ? nds->CopyNSMLGameRAMCheckpointAtOrBefore(
@@ -643,13 +646,20 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
       });
     }
 
-    if (!nds->ScheduleNSMLGameRAMRestore(std::move(checkpoint.MainRAMCopy))) {
+    if (!nds->ScheduleNSMLGameRAMRestore(std::move(checkpoint.MainRAMCopy),
+                                         restoreFrame)) {
       std::printf("NSMB Rollback: failed to schedule ROM-loop RAM restore "
                   "inst=%d restoreFrame=%u current=%u\n",
                   instanceID, restoreFrame, frame);
       std::fflush(stdout);
       return false;
     }
+    // Checkpoints newer than the restore point contain the prediction that is
+    // being corrected.  Reusing one for a nearby later mismatch silently
+    // resurrects the earlier wrong input.  Full-frame rollback erases the same
+    // suffix from its store; the ROM-loop ring must do so as well.
+    const melonDS::u32 invalidatedCheckpoints =
+        nds->DiscardNSMLGameRAMCheckpointsAfter(restoreFrame);
 
     nds->ARM9Write32(kRomLoopHistoryIndexAddress, 0);
     nds->ARM9Write32(kRomLoopHistoryCountAddress, transactionFrames);
@@ -670,9 +680,10 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
       std::printf(
           "NSMB Rollback: armed ROM-loop correction checkpoint=%u "
           "mismatch=%u current=%u depth=%u ticks=%u gameFrame=%u "
-          "bytes=%u\n",
+          "bytes=%u invalidated=%u\n",
           restoreFrame, mismatchFrame, frame, frame - restoreFrame,
-          transactionFrames, checkpoint.GameFrame, 0x400000u);
+          transactionFrames, checkpoint.GameFrame, 0x400000u,
+          invalidatedCheckpoints);
       std::fflush(stdout);
     }
     return true;

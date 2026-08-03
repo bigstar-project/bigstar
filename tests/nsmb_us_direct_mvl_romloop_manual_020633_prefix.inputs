@@ -1,0 +1,64 @@
+# Reconstructed prefix of manual run logs/nsmb-mvl-manual-local-20260804-020633.
+# Authoritative player-0 changes come from the client mismatch log and
+# authoritative player-1 changes come from the host mismatch log.
+
+inst0 0-619 NONE
+inst0 620-627 DOWN
+inst0 628-659 NONE
+inst0 660-667 A
+inst0 668-924 NONE
+inst0 925-938 RIGHT
+inst0 939-972 RIGHT+Y
+inst0 973-987 B+RIGHT+Y
+inst0 988-990 B+Y
+inst0 991-992 Y
+inst0 993-995 NONE
+inst0 996-1004 DOWN
+inst0 1005-1027 NONE
+inst0 1028-1028 Y
+inst0 1029-1030 RIGHT+Y
+inst0 1031-1037 B+RIGHT+Y
+inst0 1038-1050 RIGHT+Y
+inst0 1051-1060 Y
+inst0 1061-1091 DOWN+Y
+inst0 1092-1099 Y
+inst0 1100-1102 B+Y
+inst0 1103-1120 B+LEFT+Y
+inst0 1121-1123 B+Y
+inst0 1124-1127 Y
+inst0 1128-1156 DOWN
+inst0 1157-1162 NONE
+inst0 1163-1166 Y
+inst0 1167-1170 B+Y
+inst0 1171-1200 RIGHT+Y
+inst0 1201-1600 NONE
+
+inst1 0-619 NONE
+inst1 620-627 DOWN
+inst1 628-659 NONE
+inst1 660-667 A
+inst1 668-924 NONE
+inst1 925-937 RIGHT
+inst1 938-971 RIGHT+Y
+inst1 972-987 B+RIGHT+Y
+inst1 988-990 B+Y
+inst1 991-995 Y
+inst1 996-1003 DOWN
+inst1 1004-1027 NONE
+inst1 1028-1028 Y
+inst1 1029-1030 RIGHT+Y
+inst1 1031-1037 B+RIGHT+Y
+inst1 1038-1050 RIGHT+Y
+inst1 1051-1060 Y
+inst1 1061-1090 DOWN+Y
+inst1 1091-1099 Y
+inst1 1100-1102 B+Y
+inst1 1103-1120 B+LEFT+Y
+inst1 1121-1123 B+Y
+inst1 1124-1127 Y
+inst1 1128-1156 DOWN
+inst1 1157-1162 NONE
+inst1 1163-1166 Y
+inst1 1167-1170 B+Y
+inst1 1171-1200 RIGHT+Y
+inst1 1201-1600 NONE

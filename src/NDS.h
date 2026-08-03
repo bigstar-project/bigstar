@@ -301,20 +301,23 @@ public: // TODO: Encapsulate the rest of these members
     unsigned long long NSMLGameRAMRestoreUs = 0;
     u32 NSMLGameRAMRestoreBytes = 0;
     bool NSMLGameRAMHistoryReachedExitGate = false;
+    u32 NSMLGameRAMReplayDisplayStartFrame = 0xFFFFFFFF;
     struct NSMLGameRAMCheckpoint
     {
+        bool Valid = false;
         u32 DisplayFrame = 0;
         u32 GameFrame = 0;
         std::vector<u8> MainRAM;
     };
     std::vector<NSMLGameRAMCheckpoint> NSMLGameRAMCheckpoints;
     u32 NSMLNextGameRAMCheckpoint = 0;
-    void CaptureNSMLGameRAMCheckpointAtGate();
+    void CaptureNSMLGameRAMCheckpointAtGate(u32 displayFrame);
     bool CopyNSMLGameRAMCheckpointAtOrBefore(
         u32 frame, u32& checkpointFrame, u32& gameFrame, std::vector<u8>& image) const;
+    u32 DiscardNSMLGameRAMCheckpointsAfter(u32 frame);
     bool IsNSMLGameRAMRollbackTransactionInFlight();
     bool FinalizeNSMLGameRAMRollbackTransaction();
-    bool ScheduleNSMLGameRAMRestore(std::vector<u8>&& image);
+    bool ScheduleNSMLGameRAMRestore(std::vector<u8>&& image, u32 displayStartFrame);
     void ApplyNSMLPendingGameRAMRestore();
     void CaptureNSMLGameTickProbeSchedulerState(NSMLGameTickProbeSchedulerState& state) const;
     void RestoreNSMLGameTickProbeSchedulerState(const NSMLGameTickProbeSchedulerState& state);

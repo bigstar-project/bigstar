@@ -20,9 +20,15 @@ checkpointとrestoreは同じguest control pointでなければならない。�
 
 修正後のneutral-tail run `logs/romloop-live-timeline-capacity12-neutral-tail-20260804-run1` は両peerとも121 mismatchを121回arm/completedし、cannot-arm、schedule failure、abort、freezeはゼロだった。全armed recordの `checkpoint - gameFrame` はhost/clientとも最初から最後まで `241` で一定である。入力変化終了後のframes 1820/1840/1880/1920/2000/2100/2200では両player座標・速度、moving hazard座標・速度、active object数が一致した。software rendererかつ描画ありで `59.90/59.89fps`、outer max `24.961/29.005ms`、`33ms`超ゼロだった。
 
-手動launcherは`-SlippiRollback`または`-RomLoopRollback`でこのbackendを選ぶ。game-tick patch済みhost/client ROMを別名とmanifestで生成し、checkpoint interval 1、window 16、最大depth 7、input delay 0、既定send delay 2/jitter 1、JIT exact chain/self-loopを設定する。bootstrap入力終了後は各melonDS windowの物理入力がそのままnetplay timelineへ入る。実行系スクリプトはrollback用途に限らずsoftware rendererを既定とし、OpenGLを明示的に選ばない限り `Screen.UseGL=false`、3D renderer 0で起動する。
+このneutral-tailだけでは不足だった。次の手動run `logs/nsmb-mvl-manual-local-20260804-020633` は時刻offset `241`一定・cannot-armゼロでも、frame 960の一致から1080のplayer差、1680のobject/hazard差へ進み、3000以降のneutral tailでも座標差が残った。手動ログのmismatch列から復元した `tests/nsmb_us_direct_mvl_romloop_manual_020633_prefix.inputs` は、修正前にframe 1101以降のほぼ連続差を自動再現した。
 
-現段階はbounded live PoCのままだが、旧runの恒久的な時刻driftとhistory不足は原因を特定し、stress + neutral tailで意味状態の収束まで確認した。analyzerはoffset変動またはcannot-armを `rollback-fail` とし、旧手動runを自動的にfail、新runを `ok` とする。未解決なのは、修正版を物理入力の長時間両画面プレイで再確認すること、死亡/復帰・土管・item・result/restart、訂正中画像、音声波形である。次は手動再試験とevent route自動化を行い、ここまで完了するまではproduction安定版としない。
+原因は訂正済みcheckpoint ringの管理だった。ROM-loopは過去RAMを再演算してもrestore地点より新しいsnapshotを残していたため、近接する次のmismatchが訂正前prediction入りsnapshotを選び、前の誤予測を復活させた。full-frame経路の `Store.EraseAfter(restoreFrame)` に相当する処理が欠けていた。現行版は各snapshotにvalidityを持たせ、restore地点より後を無効化し、ROM catch-up中の各guest input gateで訂正済み中間checkpointを同じdisplay frame番号へ再構築する。suffix無効化だけでは4連続入力で12-entry上限を超えたため、中間再構築は correctness requirement であり省略しない。ROM-loopのclampは容量に合わせて最大depth 11とし、旧設定7での不要な切り捨てを避ける。depth 11超のstall/fallbackは未実装なので、clampが一度でも出たrunをanalyzerで `rollback-fail` とする。
+
+最終コードの `logs/romloop-manual-020633-final-verified-run1` はhost/client 24/25 correction、cannot-arm・depth clampゼロ、offset `241`一定で、差を各未確定prediction区間だけに限定し、各訂正後に再一致した。no-trace反復 `logs/romloop-manual-020633-prefix-rebuild-perf-run1` は `59.54/59.57fps`、outer max `23.281/25.197ms`、`33ms`超ゼロ。密な121 correction/peerの `logs/romloop-checkpoint-rebuild-stress-perf-run1` は `59.73/59.71fps` だが、outer max `30.535/45.868ms`、client `33ms`超2回である。未確定境界だけのsnapshot保存は再び恒久差を出し、restore staging buffer再利用は約0.37秒spikeを出したため、どちらも棄却した。
+
+手動launcherは`-SlippiRollback`または`-RomLoopRollback`でこのbackendを選ぶ。game-tick patch済みhost/client ROMを別名とmanifestで生成し、checkpoint interval 1、window 16、ROM-loop実効最大depth 11、input delay 0、既定send delay 2/jitter 1、JIT exact chain/self-loopを設定する。bootstrap入力終了後は各melonDS windowの物理入力がそのままnetplay timelineへ入る。実行系スクリプトはrollback用途に限らずsoftware rendererを既定とし、OpenGLを明示的に選ばない限り `Screen.UseGL=false`、3D renderer 0で起動する。
+
+現段階はbounded live PoCのままである。時刻drift、history不足、stale checkpoint再利用という三つの恒久差原因は修正し、今回の手動入力prefixを自動再現して訂正後再一致まで確認した。未解決なのは、修正版を物理入力の長時間両画面プレイで再確認すること、密なstressで残る単発 `45.868ms`、死亡/復帰・土管・item・result/restart、訂正中画像、音声波形である。次は手動再試験とcheckpoint copy spikeの計測・削減を優先し、correctnessまたは `33ms` gateを落とす間はproduction安定版としない。
 
 ### 診断PoCの根拠（live接続前）
 

@@ -549,6 +549,7 @@ void NDS::Reset()
     NSMLGameRAMRestoreLength = 0;
     NSMLGameRAMRestoreOwnedBuffer.clear();
     NSMLGameRAMHistoryReachedExitGate = false;
+    NSMLGameRAMReplayDisplayStartFrame = 0xFFFFFFFF;
     NSMLGameRAMCheckpoints.clear();
     NSMLNextGameRAMCheckpoint = 0;
     NSMLGameRAMRestoreUs = 0;
@@ -2278,15 +2279,27 @@ void NDS::ApplyNSMLPendingGameRAMRestore()
         constexpr u32 historyEnabledAddr = 0x02001ACC;
         constexpr u32 historyIndexAddr = 0x02001AD0;
         constexpr u32 historyCountAddr = 0x02001AD4;
-        if (ARM9Read32(historyEnabledAddr) != 0 &&
-            ARM9Read32(historyIndexAddr) >= ARM9Read32(historyCountAddr))
+        if (ARM9Read32(historyEnabledAddr) != 0)
         {
-            NSMLGameRAMHistoryReachedExitGate = true;
-            ARM9Write32(historyEnabledAddr, 0);
+            const u32 historyIndex = ARM9Read32(historyIndexAddr);
+            if (historyIndex >= ARM9Read32(historyCountAddr))
+            {
+                NSMLGameRAMHistoryReachedExitGate = true;
+                ARM9Write32(historyEnabledAddr, 0);
+                return;
+            }
+            // Rebuild checkpoints invalidated by the correction. A later
+            // mismatch in the same input burst must start from corrected RAM,
+            // not from a snapshot that still contains the earlier prediction.
+            if (historyIndex != 0 && NSMLGameRAMReplayDisplayStartFrame != 0xFFFFFFFF)
+            {
+                CaptureNSMLGameRAMCheckpointAtGate(
+                    NSMLGameRAMReplayDisplayStartFrame + historyIndex);
+            }
             return;
         }
         if (!NSMLGameRAMHistoryReachedExitGate)
-            CaptureNSMLGameRAMCheckpointAtGate();
+            CaptureNSMLGameRAMCheckpointAtGate(NumFrames);
         return;
     }
     if (!MainRAM)
@@ -2370,7 +2383,7 @@ void NDS::ApplyNSMLPendingGameRAMRestore()
     NSMLGameRAMRestoreOwnedBuffer.clear();
 }
 
-void NDS::CaptureNSMLGameRAMCheckpointAtGate()
+void NDS::CaptureNSMLGameRAMCheckpointAtGate(u32 displayFrame)
 {
     static const bool enabled = []
     {
@@ -2379,7 +2392,7 @@ void NDS::CaptureNSMLGameRAMCheckpointAtGate()
             (!strcmp(backend, "romloop") || !strcmp(backend, "rom-loop") ||
              !strcmp(backend, "slippi"));
     }();
-    if (!enabled || !MainRAM || ARM9Read32(0x02001ACC) != 0)
+    if (!enabled || !MainRAM)
         return;
 
     constexpr u32 capacity = 16;
@@ -2390,13 +2403,17 @@ void NDS::CaptureNSMLGameRAMCheckpointAtGate()
     {
         NSMLGameRAMCheckpoints.resize(capacity);
         for (auto& checkpoint : NSMLGameRAMCheckpoints)
+        {
+            checkpoint.Valid = false;
             checkpoint.MainRAM.resize(length);
+        }
         NSMLNextGameRAMCheckpoint = 0;
     }
 
     NSMLGameRAMCheckpoint& checkpoint =
         NSMLGameRAMCheckpoints[NSMLNextGameRAMCheckpoint];
-    checkpoint.DisplayFrame = NumFrames;
+    checkpoint.Valid = true;
+    checkpoint.DisplayFrame = displayFrame;
     checkpoint.GameFrame = ARM9Read32(0x0208B668);
     memcpy(checkpoint.MainRAM.data(), MainRAM, length);
     NSMLNextGameRAMCheckpoint =
@@ -2409,7 +2426,7 @@ bool NDS::CopyNSMLGameRAMCheckpointAtOrBefore(
     const NSMLGameRAMCheckpoint* best = nullptr;
     for (const auto& checkpoint : NSMLGameRAMCheckpoints)
     {
-        if (checkpoint.MainRAM.empty() || checkpoint.DisplayFrame > frame)
+        if (!checkpoint.Valid || checkpoint.MainRAM.empty() || checkpoint.DisplayFrame > frame)
             continue;
         if (!best || checkpoint.DisplayFrame > best->DisplayFrame)
             best = &checkpoint;
@@ -2420,6 +2437,30 @@ bool NDS::CopyNSMLGameRAMCheckpointAtOrBefore(
     gameFrame = best->GameFrame;
     image = best->MainRAM;
     return true;
+}
+
+u32 NDS::DiscardNSMLGameRAMCheckpointsAfter(u32 frame)
+{
+    u32 discarded = 0;
+    u32 firstDiscarded = NSMLNextGameRAMCheckpoint;
+    u32 firstDiscardedFrame = 0xFFFFFFFF;
+    for (u32 index = 0; index < NSMLGameRAMCheckpoints.size(); index++)
+    {
+        auto& checkpoint = NSMLGameRAMCheckpoints[index];
+        if (!checkpoint.Valid || checkpoint.DisplayFrame <= frame)
+            continue;
+
+        if (checkpoint.DisplayFrame < firstDiscardedFrame)
+        {
+            firstDiscarded = index;
+            firstDiscardedFrame = checkpoint.DisplayFrame;
+        }
+        checkpoint.Valid = false;
+        discarded++;
+    }
+    if (discarded != 0)
+        NSMLNextGameRAMCheckpoint = firstDiscarded;
+    return discarded;
 }
 
 bool NDS::IsNSMLGameRAMRollbackTransactionInFlight()
@@ -2450,10 +2491,11 @@ bool NDS::FinalizeNSMLGameRAMRollbackTransaction()
     ARM9Write32(historyTargetAddr, 0);
     ARM9Write32(historyStartFrameAddr, 0);
     NSMLGameRAMHistoryReachedExitGate = false;
+    NSMLGameRAMReplayDisplayStartFrame = 0xFFFFFFFF;
     return true;
 }
 
-bool NDS::ScheduleNSMLGameRAMRestore(std::vector<u8>&& image)
+bool NDS::ScheduleNSMLGameRAMRestore(std::vector<u8>&& image, u32 displayStartFrame)
 {
     const u32 length = std::min(MainRAMMask + 1, 0x400000u);
     if (!MainRAM || image.size() != length || IsNSMLGameRAMRollbackTransactionInFlight())
@@ -2463,6 +2505,7 @@ bool NDS::ScheduleNSMLGameRAMRestore(std::vector<u8>&& image)
     NSMLGameRAMRestoreData = NSMLGameRAMRestoreOwnedBuffer.data();
     NSMLGameRAMRestoreLength = static_cast<u32>(NSMLGameRAMRestoreOwnedBuffer.size());
     NSMLGameRAMHistoryReachedExitGate = false;
+    NSMLGameRAMReplayDisplayStartFrame = displayStartFrame;
     NSMLGameRAMRestorePending = true;
     return true;
 }

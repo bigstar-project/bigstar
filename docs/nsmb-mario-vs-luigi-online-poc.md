@@ -2,14 +2,16 @@
 
 ## Live Slippi-style ROM-loop rollback milestone - 2026-08-04
 
-- **Current conclusion:** 2026-08-04の手動runは停止しなかったが、画面状態が序盤から一致しないという報告は正しかった。`logs/nsmb-mvl-manual-local-20260804-013956` では、ROM-loop訂正のたびにguest game frameがちょうど1 tick欠落し、host/clientの訂正回数差がそのまま恒久的な時刻差になっていた。初期の `checkpoint - gameFrame` は両側 `241` だったのに、終了付近はhost `1459`、client `1226` まで増えている。
+- **Current conclusion:** 1 tick欠落修正後の手動run `logs/nsmb-mvl-manual-local-20260804-020633` でも画面がずれたという報告は正しかった。今回は両peerの `checkpoint - gameFrame` が全訂正で `241`、cannot-armもゼロなので前回原因の再発ではない。frame 960では一致し、1080からplayer状態差、1680からobject/hazard差、入力を止めた3000-3480でもplayer座標差が残った。
 - restore gateは「現在tickの実行前」にあるため、history countを `preRestoreGameFrame - historyStartFrame` ではなく両端を含む `+1` とした。さらにlead 8でもcheckpointがmismatchより古い場合に8件を超えるため、入力historyを、注入済みinput gateと重ならない最大の12件へ拡張した。旧手動runのhostには25件の `cannot arm` もあり、この不足も別の訂正欠落要因だった。
 - `scripts/analyze-nsmb-mvl-rollback-log.ps1` はROM-loopの `checkpoint - gameFrame` の変動と `cannot arm` を `rollback-fail` と判定する。旧手動runはhost offset `241..1459` / cannot-arm 25、client `241..1226` / 0として自動的にfailし、同じ不具合を見逃さない。
-- 修正後の決定的なneutral-tail run `logs/romloop-live-timeline-capacity12-neutral-tail-20260804-run1` は、両peerとも121 mismatchを121回arm/completedし、cannot-arm、schedule failure、abort、freezeはゼロだった。offsetは全242 transaction sampleで常に `241`。入力変化が終わったframe 1800以降、frames 1820/1840/1880/1920/2000/2100/2200で両player座標・速度、moving hazard座標・速度、active object数が一致した。
-- 同runはsoftware rendererかつ描画ありでhost/client `59.90/59.89fps`、outer max `24.961/29.005ms`、`33ms`超ゼロだった。継続入力中の同じ外側frameには未確定predictionによる一時差があり得るが、訂正済みneutral tailは意味状態へ収束した。この結果は「旧runの恒久不一致の原因と修正」を支持するが、イベント全般のproduction安定性までは証明しない。
+- 根本原因は、ROM-loop訂正後もrestore地点より新しいcheckpointをringへ残していたことだった。それらは訂正前の誤予測を含む。近接した次のmismatchがこのstale checkpointから再開すると、前の誤予測が復活して恒久差になる。full-frame経路はstore suffixを消すが、ROM-loop経路には同等処理がなかった。
+- 手動ログのprediction mismatch列からauthoritative入力を復元した `tests/nsmb_us_direct_mvl_romloop_manual_020633_prefix.inputs` で同じ失敗を自動再現した。修正前はframe 1101以降ほぼ連続不一致、suffix無効化だけでは近接4入力で12-entry上限を超えた。現行修正はrestore地点より後を無効化し、ROM catch-upの各guest gateで訂正済み中間checkpointを再構築する。ROM-loopのclampは旧depth 7ではなく12-entryで実行可能な最大depth 11へ合わせ、clamp発生自体もanalyzerで `rollback-fail` とする。
+- 最終コードのcorrectness run `logs/romloop-manual-020633-final-verified-run1` は、手動prefixに対して差が各prediction待ち区間だけに限定され、最後の入力訂正後は再一致した。host/client 24/25 correction、cannot-arm・depth clampゼロ、時刻offsetは常に `241`。永続差を解消した一方、同じ外側frameの未確定中は一時差が見えるというrollback固有の挙動は残る。
+- no-trace性能run `logs/romloop-manual-020633-prefix-rebuild-perf-run1` はsoftware rendererで `59.54/59.57fps`、outer max `23.281/25.197ms`、`33ms`超ゼロ。より密な121 correction/peerの `logs/romloop-checkpoint-rebuild-stress-perf-run1` は `59.73/59.71fps` を維持したが、outer max `30.535/45.868ms`、clientに `33ms`超が2回あった。全中間checkpoint再構築は正しさのため保持し、この単発spikeを無視してproduction昇格はしない。
 - ロールバック以外も含む実行スクリプトはsoftware renderer（`Screen.UseGL=false`、3D renderer 0）を既定にした。OpenGL computeを使うのは明示的にsoftware rendererを無効化した場合だけとする。JIT matrixも既定を `Software` に変更した。
-- **Current blocker:** 修正後コードを物理入力による長時間の両画面プレイではまだ再確認していない。死亡/復帰・土管・item・result/restart、訂正中画像、音声波形も未検証であり、production安定版とはまだ扱わない。
-- **Next action:** 同じ手動コマンドで物理入力の一致を再確認し、次にイベントrouteを自動化する。状態時刻のdriftまたはcannot-armが一度でも出たrunは先へ進めず、描画・音声・長時間gateを通してから周辺機能へ進む。
+- **Current blocker:** stale checkpoint由来の恒久差は再現入力で解消したが、修正後コードを物理入力の長時間両画面プレイではまだ再確認していない。密な人工stressで単発45.868msも残り、depth 11を超えた場合のstall/fallback方針も未実装である。死亡/復帰・土管・item・result/restart、訂正中画像、音声波形も未検証であり、production安定版とはまだ扱わない。
+- **Next action:** まず同じ手動コマンドで一致を再確認する。その後、正しい中間checkpointを維持したまま単発spikeを計測・削減し、`33ms`超を再現的にゼロへ戻す。状態drift/cannot-armを一度でも出す最適化は採用せず、性能gate後にevent、描画、音声、長時間へ進む。
 
 ## Exact rollback depth and presentation gate - 2026-08-02
 
