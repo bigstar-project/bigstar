@@ -1,5 +1,14 @@
 # NSMB Mario vs Luigi Online PoC
 
+## ARM9ジャンプ診断の性能修正をmainへ移植 - 2026-08-03
+
+- 完了: `ARMv5::JumpTo()`が診断無効時にも毎回`getenv()`とPC/LR/SP/CPSR取得を行っていた性能退行を修正した。`MELONDS_NSML_BAD_JUMP_TRACE`はプロセス起動時に一度だけ読み、診断無効時はレジスタ取得と対象アドレス検査も省略する。
+- 移植方法: 元コミット`6b0dcf2f`はmainにないロールバック実験コミットを親に持ち、文書も実験ブランチの状態へ進めるため、単純なcherry-pickは適用不能だった。`src/ARM.cpp`の独立した修正だけをmainのコードへ手動移植した。
+- 既知の測定根拠: 元ブランチの実MvL測定では、修正前のJIT off/on `21.68/91.90fps`に対し、修正後は`264.55/530.04fps`だった。これは今回のmainビルド自体の再測定値ではない。
+- Verification: mainのRelease `melonDS`ビルドに成功し、CTestは`16/16`件成功した。初回の並行ビルド呼び出しは同一Ninjaディレクトリの再生成競合で失敗したが、先に開始済みだったビルド自体は同じ作業ツリーの修正を含んで正常完了しており、生成後の全テストも成功した。
+- Current blocker: なし。今回の目的であるmainへの性能修正移植とコード回帰確認は完了した。
+- Next action: main単独の性能数値が必要になった場合のみ、既存の固定入力・実ROM測定を再実行する。
+
 ## NsmbMvlNetplayRuntime リファクタ調査 - 2026-07-15
 
 - 現状: composition rootは`src/frontend/qt_sdl/NsmbMvlNetplayRuntime.cpp` 1,794行、namespaceは`NsmbMvlNetplay`である。リファクタ開始前の`NsmbNetplayPoC.cpp` 21,253行から19,459行（約91.6%）減り、39行の共有`State G`、RuleAI adapter、型付きContext／hook、初期化、frame orchestrationだけが残る。正式な有効化変数は`MELONDS_NSML_NETPLAY`で、旧`MELONDS_NSML_POC`は新変数未指定時だけ読む互換aliasとする。4,261行のAI observation／feature／imitation推論は、学習logとruntime推論のcanonicalな意味関数を共有する1 subsystemとして維持する。

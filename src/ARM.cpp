@@ -79,6 +79,14 @@ static u32 NSMLEnvU32(const char* name, u32 fallback)
     return static_cast<u32>(strtoul(value, nullptr, 0));
 }
 
+static bool NSMLBadJumpTraceEnabled()
+{
+    // JumpTo() is an ARM9 hot path. Smoke runners configure this launch-time
+    // diagnostic before creating the process, so avoid getenv() on every jump.
+    static const bool enabled = NSMLEnvFlag("MELONDS_NSML_BAD_JUMP_TRACE");
+    return enabled;
+}
+
 static u32 NSMLMvlStage()
 {
     u32 stage = NSMLEnvU32("MELONDS_NSML_MVL_STAGE", 0);
@@ -2710,10 +2718,18 @@ void ARM::SetupCodeMem(u32 addr)
 
 void ARMv5::JumpTo(u32 addr, bool restorecpsr)
 {
-    const u32 sourcePC = R[15];
-    const u32 sourceLR = R[14];
-    const u32 sourceSP = R[13];
-    const u32 sourceCPSR = CPSR;
+    const bool traceBadJump = Num == 0 && NSMLBadJumpTraceEnabled();
+    u32 sourcePC = 0;
+    u32 sourceLR = 0;
+    u32 sourceSP = 0;
+    u32 sourceCPSR = 0;
+    if (traceBadJump)
+    {
+        sourcePC = R[15];
+        sourceLR = R[14];
+        sourceSP = R[13];
+        sourceCPSR = CPSR;
+    }
     if (restorecpsr)
     {
         RestoreCPSR();
@@ -2728,41 +2744,43 @@ void ARMv5::JumpTo(u32 addr, bool restorecpsr)
 
     u32 oldregion = R[15] >> 24;
     u32 newregion = addr >> 24;
-    const u32 targetBase = addr & ((addr & 0x1) ? ~0x1u : ~0x3u);
 
-    if (Num == 0 && NSMLEnvFlag("MELONDS_NSML_BAD_JUMP_TRACE")
-        && !(PU_Map[targetBase >> 12] & 0x04))
+    if (traceBadJump)
     {
-        Log(LogLevel::Warn,
-            "NSMB BadJump: frame=%u from=%08X target=%08X lr=%08X sp=%08X cpsr=%08X instr=%08X "
-            "r0=%08X r1=%08X r2=%08X r3=%08X r4=%08X r5=%08X r6=%08X r7=%08X r8=%08X r9=%08X r10=%08X r11=%08X r12=%08X restore=%d\n",
-            NDS.NumFrames,
-            sourcePC,
-            addr,
-            sourceLR,
-            sourceSP,
-            sourceCPSR,
-            CurInstr,
-            R[0],
-            R[1],
-            R[2],
-            R[3],
-            R[4],
-            R[5],
-            R[6],
-            R[7],
-            R[8],
-            R[9],
-            R[10],
-            R[11],
-            R[12],
-            restorecpsr ? 1 : 0);
-        fputs("NSMB BadJump from_dump=", stdout);
-        WriteNSMLHexDump(stdout, this, sourcePC >= 512 ? sourcePC - 512 : sourcePC, 768);
-        fputs(" stack_dump=", stdout);
-        WriteNSMLHexDump(stdout, this, sourceSP >= 128 ? sourceSP - 128 : sourceSP, 256);
-        fputc('\n', stdout);
-        fflush(stdout);
+        const u32 targetBase = addr & ((addr & 0x1) ? ~0x1u : ~0x3u);
+        if (!(PU_Map[targetBase >> 12] & 0x04))
+        {
+            Log(LogLevel::Warn,
+                "NSMB BadJump: frame=%u from=%08X target=%08X lr=%08X sp=%08X cpsr=%08X instr=%08X "
+                "r0=%08X r1=%08X r2=%08X r3=%08X r4=%08X r5=%08X r6=%08X r7=%08X r8=%08X r9=%08X r10=%08X r11=%08X r12=%08X restore=%d\n",
+                NDS.NumFrames,
+                sourcePC,
+                addr,
+                sourceLR,
+                sourceSP,
+                sourceCPSR,
+                CurInstr,
+                R[0],
+                R[1],
+                R[2],
+                R[3],
+                R[4],
+                R[5],
+                R[6],
+                R[7],
+                R[8],
+                R[9],
+                R[10],
+                R[11],
+                R[12],
+                restorecpsr ? 1 : 0);
+            fputs("NSMB BadJump from_dump=", stdout);
+            WriteNSMLHexDump(stdout, this, sourcePC >= 512 ? sourcePC - 512 : sourcePC, 768);
+            fputs(" stack_dump=", stdout);
+            WriteNSMLHexDump(stdout, this, sourceSP >= 128 ? sourceSP - 128 : sourceSP, 256);
+            fputc('\n', stdout);
+            fflush(stdout);
+        }
     }
 
     RegionCodeCycles = MemTimings[addr >> 12][0];
