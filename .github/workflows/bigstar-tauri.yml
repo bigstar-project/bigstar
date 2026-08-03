@@ -315,12 +315,30 @@ jobs:
         with:
           path: build/release-windows-x86_64/melonDS.exe
           key: melonds-exe-windows-x86_64-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**', 'src/**', 'vcpkg.json') }}
-      - uses: actions/cache/restore@v4
+      - name: Resolve vcpkg cache compatibility
+        if: steps.melonds-exe-cache.outputs.cache-hit != 'true'
+        id: vcpkg-cache-compat
+        shell: pwsh
+        run: |
+          if (-not $env:ImageVersion) {
+            throw "The GitHub-hosted runner did not expose ImageVersion"
+          }
+          $imageVersion = $env:ImageVersion
+          "image_version=$imageVersion" >> $env:GITHUB_OUTPUT
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
         if: steps.melonds-exe-cache.outputs.cache-hit != 'true'
         with:
           path: ${{ github.workspace }}/vcpkg_cache
-          key: vcpkg-x86_64-windows-${{ hashFiles('vcpkg.json') }}
-          restore-keys: vcpkg-x86_64-windows-
+          # GitHub caches are immutable. Keep one completed package set per runner
+          # image, then seed a new image/dependency set from the newest older one.
+          # vcpkg's per-package ABI hashes decide which seeded binaries are safe.
+          key: vcpkg-x86_64-windows-v2-${{ hashFiles('vcpkg.json', 'CMakePresets.json', 'cmake/ConfigureVcpkg.cmake', 'cmake/overlay-ports/**', 'cmake/overlay-triplets/**') }}-image-${{ steps.vcpkg-cache-compat.outputs.image_version }}
+          restore-keys: |
+            vcpkg-x86_64-windows-v2-${{ hashFiles('vcpkg.json', 'CMakePresets.json', 'cmake/ConfigureVcpkg.cmake', 'cmake/overlay-ports/**', 'cmake/overlay-triplets/**') }}-image-
+            vcpkg-x86_64-windows-v2-
+            vcpkg-x86_64-windows-
       - uses: lukka/run-vcpkg@v11
         if: steps.melonds-exe-cache.outputs.cache-hit != 'true'
         with:
@@ -335,11 +353,12 @@ jobs:
         with:
           name: melonDS-windows-x86_64
           path: build/release-windows-x86_64/melonDS.exe
-      - uses: actions/cache/save@v4
-        if: always() && steps.melonds-exe-cache.outputs.cache-hit != 'true'
+      - name: Save vcpkg binary cache for runner image
+        uses: actions/cache/save@v4
+        if: success() && steps.melonds-exe-cache.outputs.cache-hit != 'true' && steps.vcpkg-cache.outputs.cache-hit != 'true'
         with:
           path: ${{ github.workspace }}/vcpkg_cache
-          key: vcpkg-x86_64-windows-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-x86_64-windows-v2-${{ hashFiles('vcpkg.json', 'CMakePresets.json', 'cmake/ConfigureVcpkg.cmake', 'cmake/overlay-ports/**', 'cmake/overlay-triplets/**') }}-image-${{ steps.vcpkg-cache-compat.outputs.image_version }}
       - name: Save cached melonDS exe
         if: steps.melonds-exe-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
