@@ -29,7 +29,10 @@ constexpr melonDS::u32 kRomLoopHistoryAddress = 0x02001AE0;
 constexpr melonDS::u32 kPacketBridgeScratchTickAddress = 0x023C1200;
 constexpr melonDS::u32 kPacketBridgeScratchKeysAddress = 0x023C1208;
 constexpr melonDS::u32 kRomLoopMagic = 0x52505447;
-constexpr melonDS::u32 kRomLoopHistoryCapacity = 8;
+// The injected input gate starts at 0x02001B40, leaving twelve 8-byte entries
+// between kRomLoopHistoryAddress and the gate. Lead-8 live play can need more
+// than eight entries when the latest checkpoint predates the mismatch frame.
+constexpr melonDS::u32 kRomLoopHistoryCapacity = 12;
 using StoredState = RollbackStorage::StoredState;
 
 InputState NeutralInput() { return {}; }

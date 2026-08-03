@@ -1,16 +1,15 @@
 # NSMB Mario vs Luigi Online PoC
 
-## Live Slippi-style ROM-loop rollback milestone - 2026-08-02
+## Live Slippi-style ROM-loop rollback milestone - 2026-08-04
 
-- **Current conclusion:** 最新2回の手動runで起きた「片画面だけゲームが止まり、外側frameと通信は進む」問題を自動再現し、主因を修正した。両peerが独立して短間隔入力を変える `tests/nsmb_us_direct_mvl_romloop_bidirectional_stress.inputs` を追加し、修正前ログ `logs/nsmb-mvl-manual-local-20260802-203801` はgameplay heartbeatがhost 7行、client 8行連続で不変になる。analyzerもこの条件を `freeze-suspect` と判定するようにした。
-- LCD defer有無、ARM9 register/DTCM復元、history終了処理を個別にA/Bした結果、それらだけでは停止を解消しなかった。Main RAM復元を省くcontrolは57 transactionを完走し、復元長の二分では `0x02094600` まで継続、`0x02094700` を含めると停止した。シンボル上、この境界はNitroSDKの `OSi_UseTick` / `OSi_UseAlarm` / `OSi_AlarmQueue` と一致する。
-- 根本問題は4 MiB Main RAM全体を「ゲーム状態」と見なし、現在のCPU・scheduler・peripheral timelineへ過去のNitroSDK thread/tick/alarm/WM stateを混ぜていたことである。現行restoreはゲームRAMを戻しつつ、`0x020942A0..0x02097FFF` のSDK runtime領域とROM-loop control blockを現在値のまま保持する。失敗したARM9 register/DTCM復元案は採用していない。
-- transaction中に次のmismatchが既存historyを上書きしないよう予約を直列化し、実際のrestore gateまでに通常tickが完了した分だけhistory countを調整した。履歴を消費した次のinput gateで終了を確定し、after-frameまでtransactionをin-flightとして扱う。ROMのinput/loop/font/render wrapperは元のBL return addressをLRへ戻してから復帰する。
-- 修正後run `logs/nsmb-mvl-manual-local-20260802-215215` はsend delay 2 + jitter 1、継続入力、1800 framesで各peer 120 transactionをarm/completedし、gameplay plateauは両側とも最長1行だった。active rateはhost/client `60.00/59.97fps`、outer max `28.076/24.289ms`、`33ms`超ゼロ。frames 1560/1680/1800でもplayer座標とobject/hazard stateが更新された。
-- stage traceなしの反復 `logs/nsmb-mvl-manual-local-20260802-215331` も各peer 120 transaction、1800 framesを完走し、outer max `22.949/26.147ms`、`33ms`超ゼロだった。wrapper終了は既存screenshot probeがPNGを生成しないためfailureになったが、両melonDS本体はframe-limitへ到達しており、rollback停止や性能failureではない。
-- `scripts/run-nsmb-mvl-manual-local.ps1 -SlippiRollback` はgame-tick patch済みROMを生成し、JIT exact chain/self-loop、`romloop` backend、checkpoint interval 1、input delay 0、既定send delay 2 + jitter 1を設定する。物理入力を使う手動再試験も同じ経路で実行できる。
-- **Current blocker:** 画面停止のbounded再現は解消したが、修正後ログのshared heartbeat 8点中4点でhost/clientのsignificant object/hazard差がある。role-local表示差か永続simulation divergenceかをまだ分離できていない。またlive rollbackのPNG取得は既存screenshot probe不調のため未完で、死亡/復帰・土管・item・result/restart、長時間、音声も未検証である。
-- **Next action:** 同一game tickへ揃えたcross-peer semantic比較でobject/hazard差を分類し、永続差ならrestore対象境界を修正する。その後にscreenshot取得経路を直して訂正中/直後の描画を比較し、手動操作で今回の停止が消えたことを確認する。これらを通すまでproduction安定版とは扱わない。
+- **Current conclusion:** 2026-08-04の手動runは停止しなかったが、画面状態が序盤から一致しないという報告は正しかった。`logs/nsmb-mvl-manual-local-20260804-013956` では、ROM-loop訂正のたびにguest game frameがちょうど1 tick欠落し、host/clientの訂正回数差がそのまま恒久的な時刻差になっていた。初期の `checkpoint - gameFrame` は両側 `241` だったのに、終了付近はhost `1459`、client `1226` まで増えている。
+- restore gateは「現在tickの実行前」にあるため、history countを `preRestoreGameFrame - historyStartFrame` ではなく両端を含む `+1` とした。さらにlead 8でもcheckpointがmismatchより古い場合に8件を超えるため、入力historyを、注入済みinput gateと重ならない最大の12件へ拡張した。旧手動runのhostには25件の `cannot arm` もあり、この不足も別の訂正欠落要因だった。
+- `scripts/analyze-nsmb-mvl-rollback-log.ps1` はROM-loopの `checkpoint - gameFrame` の変動と `cannot arm` を `rollback-fail` と判定する。旧手動runはhost offset `241..1459` / cannot-arm 25、client `241..1226` / 0として自動的にfailし、同じ不具合を見逃さない。
+- 修正後の決定的なneutral-tail run `logs/romloop-live-timeline-capacity12-neutral-tail-20260804-run1` は、両peerとも121 mismatchを121回arm/completedし、cannot-arm、schedule failure、abort、freezeはゼロだった。offsetは全242 transaction sampleで常に `241`。入力変化が終わったframe 1800以降、frames 1820/1840/1880/1920/2000/2100/2200で両player座標・速度、moving hazard座標・速度、active object数が一致した。
+- 同runはsoftware rendererかつ描画ありでhost/client `59.90/59.89fps`、outer max `24.961/29.005ms`、`33ms`超ゼロだった。継続入力中の同じ外側frameには未確定predictionによる一時差があり得るが、訂正済みneutral tailは意味状態へ収束した。この結果は「旧runの恒久不一致の原因と修正」を支持するが、イベント全般のproduction安定性までは証明しない。
+- ロールバック以外も含む実行スクリプトはsoftware renderer（`Screen.UseGL=false`、3D renderer 0）を既定にした。OpenGL computeを使うのは明示的にsoftware rendererを無効化した場合だけとする。JIT matrixも既定を `Software` に変更した。
+- **Current blocker:** 修正後コードを物理入力による長時間の両画面プレイではまだ再確認していない。死亡/復帰・土管・item・result/restart、訂正中画像、音声波形も未検証であり、production安定版とはまだ扱わない。
+- **Next action:** 同じ手動コマンドで物理入力の一致を再確認し、次にイベントrouteを自動化する。状態時刻のdriftまたはcannot-armが一度でも出たrunは先へ進めず、描画・音声・長時間gateを通してから周辺機能へ進む。
 
 ## Exact rollback depth and presentation gate - 2026-08-02
 

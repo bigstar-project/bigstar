@@ -50,6 +50,41 @@ function Get-Backend {
     return ""
 }
 
+function Get-RomLoopTimelineSummary {
+    param([string]$Text)
+
+    $armedCount = 0
+    $cannotArmCount = 0
+    $offsetMin = [int]::MaxValue
+    $offsetMax = [int]::MinValue
+    foreach ($line in ($Text -split "`r?`n")) {
+        if ($line -match "NSMB Rollback: cannot arm ROM-loop correction") {
+            $cannotArmCount++
+            continue
+        }
+        if ($line -notmatch "NSMB Rollback: armed ROM-loop correction checkpoint=([0-9]+).* gameFrame=([0-9]+)") {
+            continue
+        }
+
+        $armedCount++
+        $offset = [int64]$Matches[1] - [int64]$Matches[2]
+        if ($offset -lt $offsetMin) {
+            $offsetMin = $offset
+        }
+        if ($offset -gt $offsetMax) {
+            $offsetMax = $offset
+        }
+    }
+
+    return [pscustomobject]@{
+        ArmedCount = $armedCount
+        CannotArmCount = $cannotArmCount
+        OffsetMin = if ($armedCount -gt 0) { $offsetMin } else { 0 }
+        OffsetMax = if ($armedCount -gt 0) { $offsetMax } else { 0 }
+        HasDrift = $armedCount -gt 1 -and $offsetMin -ne $offsetMax
+    }
+}
+
 function Get-MaxSlowRun {
     param([string]$Text, [double]$ThresholdMs)
 
@@ -530,6 +565,7 @@ foreach ($role in @("host", "client")) {
     $plateau1 = Get-LongestActorPlateau -CsvPath $csvPath -Player 1
     $maxPlateau = @($plateau0, $plateau1) | Sort-Object Rows -Descending | Select-Object -First 1
     $gameplayPlateau = Get-LongestGameplayHeartbeatPlateau -Text $stdout
+    $romLoopTimeline = Get-RomLoopTimelineSummary -Text $stdout
     $hasResultScene = Test-TraceHasResultScene -CsvPath $csvPath
     $abort = Get-FirstMatchLine -Text $combined -Pattern "ARM[79]: (data|prefetch) abort"
     $slowRun = Get-MaxSlowRun -Text $stdout -ThresholdMs $SlowFrameThresholdMs
@@ -545,6 +581,8 @@ foreach ($role in @("host", "client")) {
         $status = "abort"
     } elseif ($wrapperFailure -match "stalled") {
         $status = "stalled"
+    } elseif ($romLoopTimeline.CannotArmCount -gt 0 -or $romLoopTimeline.HasDrift) {
+        $status = "rollback-fail"
     } elseif ($maxFrameMs -gt $MaxSingleFrameMs -or $slowRun -gt $MaxConsecutiveSlowFrames -or $wrapperFailure -match "active frame spike too high") {
         $status = "perf-fail"
     } elseif ($wrapperFailure) {
@@ -572,6 +610,10 @@ foreach ($role in @("host", "client")) {
         HasResultScene = $hasResultScene
         LongestActorPlateau = $maxPlateau.Rows
         LongestGameplayPlateau = $gameplayPlateau.Rows
+        RomLoopArmed = $romLoopTimeline.ArmedCount
+        RomLoopCannotArm = $romLoopTimeline.CannotArmCount
+        RomLoopGameFrameOffsetMin = $romLoopTimeline.OffsetMin
+        RomLoopGameFrameOffsetMax = $romLoopTimeline.OffsetMax
         GameplayPlateauStart = $gameplayPlateau.StartFrame
         GameplayPlateauEnd = $gameplayPlateau.EndFrame
         PlateauPlayer = $maxPlateau.Player
@@ -589,6 +631,8 @@ if ($roleRows.Status -contains "abort") {
     $overall = "abort"
 } elseif ($roleRows.Status -contains "stalled") {
     $overall = "stalled"
+} elseif ($roleRows.Status -contains "rollback-fail") {
+    $overall = "rollback-fail"
 } elseif ($roleRows.Status -contains "perf-fail") {
     $overall = "perf-fail"
 } elseif ($roleRows.Status -contains "failed") {

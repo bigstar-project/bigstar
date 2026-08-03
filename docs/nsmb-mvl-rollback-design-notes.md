@@ -2,13 +2,13 @@
 
 > 現在の判断は直下の game-memory restore節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
 
-## 2026-08-02 Slippi-style game-memory restore
+## 2026-08-04 Slippi-style game-memory restore
 
 ### 現在のlive実装と境界
 
 `RollbackBackend::RomLoop`を実late-input timelineへ接続した。`WritePacketBridgeJitScratchIfNeeded()`がnetwork pump、送信、remote prediction/confirmation、現在frameのlocal input記録を終えた直後にだけROM-loop訂正を予約する。これにより、訂正historyにはcheckpoint frameから現在frameまでの両player入力とpacket tickが揃い、固定診断triggerを使わない。
 
-手動停止を再現できなかった旧自動入力は片側中心で変化間隔も長く、実際のprediction mismatch列を再現していなかった。両peerを独立に短間隔操作する `tests/nsmb_us_direct_mvl_romloop_bidirectional_stress.inputs` へ置き換えると、修正前の `logs/nsmb-mvl-manual-local-20260802-203801` で両画面のgameplay heartbeatが長時間不変となり、同じ停止をboundedに再現できた。rollback log analyzerはgameplay heartbeat plateauもfreeze判定へ含め、同ログを `freeze-suspect` とする。
+両peerを独立に短間隔操作する `tests/nsmb_us_direct_mvl_romloop_bidirectional_stress.inputs` により、旧版の画面停止をboundedに再現してSDK runtime領域の誤restoreを修正した。しかし、2026-08-04の手動run `logs/nsmb-mvl-manual-local-20260804-013956` は停止しない一方で序盤から状態が一致しなかった。ログを訂正単位で比較すると、初期の `checkpoint - gameFrame` は両側 `241` なのに、訂正完了ごとに1ずつ増え、終了付近はhost `1459`、client `1226` だった。両peerの訂正回数が違うため、この1 tick欠落が恒久的なsimulation時刻差になっていた。
 
 LCD defer無効化は同じ入力で停止し、ARM9 register/DTCMをcheckpointへ追加しても停止した。一方、history loopを維持してMain RAM copyだけ省いたcontrolは57 transactionを完走した。復元prefixの二分では `0x02094600` まで継続し、`0x02094700` を含めると最終tick後に通常game loopへ戻れなかった。この256-byte境界は `symbols9.x` の `OSi_UseTick=0x020945A4`、`OSi_UseAlarm=0x020945B4`、`OSi_AlarmQueue=0x020945B8` と一致する。
 
@@ -16,13 +16,13 @@ checkpointとrestoreは同じguest control pointでなければならない。�
 
 主因はMain RAM全体をgame-owned stateとして戻したことだった。NitroSDKのthread/tick/alarm/filesystem/WM stateは現在のCPU・scheduler・peripheral timelineに属し、過去game memoryと同時に復元できない。現行版はcheckpointの4 MiBを保持するが、restore時は `0x020942A0..0x02097FFF` のSDK runtimeと `0x02001AC0` からのROM-loop controlを現在値のまま残す。DTCMとCPU registerは現在値を維持する。
 
-加えて、一つのtransaction中は次のlate mismatchをpendingのまま保持してhistory上書きを防ぎ、restore gate時点の実game-frame差へhistory countを合わせる。履歴消費後の次gate到達を明示的な完了境界とし、after-frameでcontrolをclearする。ROM wrapperは入力・loop counter・font・renderの元BL return addressをLRへ復元してから戻る。
+加えて、一つのtransaction中は次のlate mismatchをpendingのまま保持してhistory上書きを防ぎ、restore gate時点の実game-frame差へhistory countを合わせる。restore gateは現在tickの実行前なのでhistory範囲は両端を含み、countは `preRestoreGameFrame - historyStartFrame + 1` が正しい。旧式の `+1` なしは訂正ごとに現在tickを捨てていた。履歴容量も8件ではlead 8時の実checkpoint差を覆えず、旧手動runのhostで25件の `cannot arm` を生んだため、注入input gate直前まで使える12件へ拡張した。履歴消費後の次gate到達を明示的な完了境界とし、after-frameでcontrolをclearする。ROM wrapperは入力・loop counter・font・renderの元BL return addressをLRへ復元してから戻る。
 
-修正後の `logs/nsmb-mvl-manual-local-20260802-215215` はsend delay 2 + jitter 1、継続入力、1800 framesで各peer 120 transactionを完了した。gameplay plateauは最長1 heartbeat、active rateは `60.00/59.97fps`、outer maxは `28.076/24.289ms`、`33ms`超ゼロである。stage traceなしの反復 `215331` も各120 transaction、1800 framesを完走し、outer max `22.949/26.147ms`、`33ms`超ゼロだった。
+修正後のneutral-tail run `logs/romloop-live-timeline-capacity12-neutral-tail-20260804-run1` は両peerとも121 mismatchを121回arm/completedし、cannot-arm、schedule failure、abort、freezeはゼロだった。全armed recordの `checkpoint - gameFrame` はhost/clientとも最初から最後まで `241` で一定である。入力変化終了後のframes 1820/1840/1880/1920/2000/2100/2200では両player座標・速度、moving hazard座標・速度、active object数が一致した。software rendererかつ描画ありで `59.90/59.89fps`、outer max `24.961/29.005ms`、`33ms`超ゼロだった。
 
-手動launcherは`-SlippiRollback`または`-RomLoopRollback`でこのbackendを選ぶ。game-tick patch済みhost/client ROMを別名とmanifestで生成し、checkpoint interval 1、window 16、最大depth 7、input delay 0、既定send delay 2/jitter 1、JIT exact chain/self-loopを設定する。bootstrap入力終了後は各melonDS windowの物理入力がそのままnetplay timelineへ入る。
+手動launcherは`-SlippiRollback`または`-RomLoopRollback`でこのbackendを選ぶ。game-tick patch済みhost/client ROMを別名とmanifestで生成し、checkpoint interval 1、window 16、最大depth 7、input delay 0、既定send delay 2/jitter 1、JIT exact chain/self-loopを設定する。bootstrap入力終了後は各melonDS windowの物理入力がそのままnetplay timelineへ入る。実行系スクリプトはrollback用途に限らずsoftware rendererを既定とし、OpenGLを明示的に選ばない限り `Screen.UseGL=false`、3D renderer 0で起動する。
 
-現段階はbounded live PoCのままだが、報告された画面停止の自動再現と1800-frame反復gateはpassへ変わった。未解決なのは、`215215` のshared heartbeat 8点中4点にあるsignificant object/hazard差がrole-local stateか永続simulation divergenceか、既存screenshot probeがPNGを生成しないため訂正中画像を比較できないこと、イベント・長時間・音声である。次は同一game tick semantic比較で差を分類し、PNG経路と手動再試験を通す。ここまで完了するまではproduction安定版としない。
+現段階はbounded live PoCのままだが、旧runの恒久的な時刻driftとhistory不足は原因を特定し、stress + neutral tailで意味状態の収束まで確認した。analyzerはoffset変動またはcannot-armを `rollback-fail` とし、旧手動runを自動的にfail、新runを `ok` とする。未解決なのは、修正版を物理入力の長時間両画面プレイで再確認すること、死亡/復帰・土管・item・result/restart、訂正中画像、音声波形である。次は手動再試験とevent route自動化を行い、ここまで完了するまではproduction安定版としない。
 
 ### 診断PoCの根拠（live接続前）
 
