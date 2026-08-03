@@ -13,6 +13,7 @@
   "capabilities": {
     "automaticUnresolvedSessionReport": false,
     "feedbackSubmission": true,
-    "aiDevToolsInLocalBuilds": false
+    "aiDevToolsInLocalBuilds": false,
+    "configurableSignalServerInDistribution": false
   }
 }

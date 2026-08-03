@@ -92,6 +92,7 @@ export function validateEditionConfig(config, expectedEdition) {
     'automaticUnresolvedSessionReport',
     'feedbackSubmission',
     'aiDevToolsInLocalBuilds',
+    'configurableSignalServerInDistribution',
   ]) {
     if (typeof config.capabilities?.[capability] !== 'boolean') {
       throw new Error(

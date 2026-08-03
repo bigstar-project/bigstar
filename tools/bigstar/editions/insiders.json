@@ -16,6 +16,7 @@
   "capabilities": {
     "automaticUnresolvedSessionReport": true,
     "feedbackSubmission": true,
-    "aiDevToolsInLocalBuilds": true
+    "aiDevToolsInLocalBuilds": true,
+    "configurableSignalServerInDistribution": true
   }
 }
