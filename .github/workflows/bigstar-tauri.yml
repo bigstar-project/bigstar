@@ -316,7 +316,6 @@ jobs:
           path: build/release-windows-x86_64/melonDS.exe
           key: melonds-exe-windows-x86_64-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/**', 'src/**', 'vcpkg.json') }}
       - name: Resolve vcpkg cache compatibility
-        if: steps.melonds-exe-cache.outputs.cache-hit != 'true'
         id: vcpkg-cache-compat
         shell: pwsh
         run: |
@@ -325,10 +324,9 @@ jobs:
           }
           $imageVersion = $env:ImageVersion
           "image_version=$imageVersion" >> $env:GITHUB_OUTPUT
-      - name: Restore vcpkg binary cache
+      - name: Restore and refresh vcpkg binary cache
         id: vcpkg-cache
         uses: actions/cache/restore@v4
-        if: steps.melonds-exe-cache.outputs.cache-hit != 'true'
         with:
           path: ${{ github.workspace }}/vcpkg_cache
           # GitHub caches are immutable. Keep one completed package set per runner
