@@ -1,8 +1,9 @@
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
 use regex::Regex;
+use sha2::{Digest, Sha256};
 
 #[cfg(feature = "insiders-edition")]
 use crate::models::MatchPlayerNames;
@@ -21,6 +22,15 @@ const USER_LOG_ARCHIVE_PREFIX: &str = "bigstar-feedback";
 const PROCESS_TAIL_BYTES: usize = 512 * 1024;
 const APP_ERROR_TAIL_BYTES: usize = 1024 * 1024;
 const PERFORMANCE_MAX_BYTES: usize = 8 * 1024 * 1024;
+const INSIDERS_SCREENSHOT_MAX_BYTES: u64 = 8 * 1024 * 1024;
+const INSIDERS_SCREENSHOT_MAX_FILES: usize = 16;
+const INSIDERS_DETAILED_TEXT_FILES: &[(&str, usize)] = &[
+    ("melonds-events.jsonl", 12 * 1024 * 1024),
+    ("bridge-events.jsonl", 8 * 1024 * 1024),
+    ("melonds-game-state.csv", 4 * 1024 * 1024),
+    ("melonds-phase-events.jsonl", 4 * 1024 * 1024),
+    ("melonds-watchdog.jsonl", 2 * 1024 * 1024),
+];
 
 pub(crate) struct FeedbackArchive {
     pub(crate) path: PathBuf,
@@ -30,6 +40,7 @@ pub(crate) struct FeedbackArchive {
 pub(crate) struct FeedbackArchiveOptions<'a> {
     pub(crate) category: &'a str,
     pub(crate) include_performance: bool,
+    pub(crate) include_detailed_diagnostics: bool,
     pub(crate) app_error_files: &'a [PathBuf],
     pub(crate) app_context_file: Option<&'a Path>,
 }
@@ -130,6 +141,7 @@ pub(crate) fn create_log_archive(log_dir: &Path) -> Result<PathBuf, String> {
         &FeedbackArchiveOptions {
             category: "crash",
             include_performance: true,
+            include_detailed_diagnostics: false,
             app_error_files: &[],
             app_context_file: None,
         },
@@ -144,6 +156,22 @@ pub(crate) fn create_user_log_archive(log_dir: &Path) -> Result<PathBuf, String>
         &FeedbackArchiveOptions {
             category: "other",
             include_performance: true,
+            include_detailed_diagnostics: false,
+            app_error_files: &[],
+            app_context_file: None,
+        },
+    )
+    .map(|archive| archive.path)
+}
+
+#[cfg(test)]
+pub(crate) fn create_user_log_archive_with_diagnostics(log_dir: &Path) -> Result<PathBuf, String> {
+    create_feedback_archive(
+        log_dir,
+        &FeedbackArchiveOptions {
+            category: "other",
+            include_performance: false,
+            include_detailed_diagnostics: true,
             app_error_files: &[],
             app_context_file: None,
         },
@@ -216,6 +244,16 @@ fn create_feedback_archive_at(
         )?;
     }
 
+    if options.include_detailed_diagnostics {
+        add_detailed_diagnostics(
+            &mut zip,
+            zip_options,
+            log_dir,
+            &sensitive_values,
+            &mut included_files,
+        )?;
+    }
+
     for process in ["bridge", "melonds"] {
         for stream in ["stdout", "stderr"] {
             let source = log_dir.join(format!("{process}.{stream}.txt"));
@@ -256,6 +294,7 @@ fn feedback_summary(
     let launcher = read_json(log_dir.join("launcher.json"));
     let bridge = read_json(log_dir.join("bridge-status.json"));
     let melon = read_json(log_dir.join("melonds-diagnostics.json"));
+    let runtime_identity = read_json(log_dir.join("melonds-runtime-identity.json"));
     let app_context = app_context_file
         .map(|path| read_json(path.to_path_buf()))
         .unwrap_or_default();
@@ -272,9 +311,29 @@ fn feedback_summary(
         .unwrap_or_default();
     let performance = performance_summary(&log_dir.join("melonds-performance.jsonl"));
     let lifecycle = session_event_summary(&log_dir.join("session-events.jsonl"));
+    let artifacts = launcher.get("artifacts").cloned().unwrap_or_default();
+    let melon_path = launcher
+        .pointer("/paths/melonds")
+        .and_then(serde_json::Value::as_str)
+        .map(PathBuf::from);
+    let rom_path = launcher
+        .pointer("/paths/rom")
+        .and_then(serde_json::Value::as_str)
+        .map(PathBuf::from);
+    let config_identity = melon_path
+        .as_deref()
+        .and_then(Path::parent)
+        .map(|parent| file_identity(&parent.join("melonDS.toml")))
+        .unwrap_or(serde_json::Value::Null);
+    let save_identity = rom_path
+        .map(|mut path| {
+            path.set_extension("sav");
+            file_identity(&path)
+        })
+        .unwrap_or(serde_json::Value::Null);
 
     serde_json::json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "category": category,
         "app": {
             "version": app_version(),
@@ -301,7 +360,10 @@ fn feedback_summary(
                 "rollback_enabled": settings.get("rollback_enabled"),
             },
             "rom": {
+                "rom_pair_id": rom_identity.get("rom_pair_id"),
                 "generator_id": rom_identity.get("generator_id"),
+                "host_rom_sha256": rom_identity.get("host_rom_sha256"),
+                "client_rom_sha256": rom_identity.get("client_rom_sha256"),
                 "bridge_sha256": rom_identity.get("bridge_sha256"),
             },
         },
@@ -321,6 +383,15 @@ fn feedback_summary(
                 .map(|value| sanitize_feedback_text(value, 4096, sensitive_values)),
         },
         "emulator": {
+            "runtime_identity": runtime_identity,
+            "artifacts": {
+                "melonds": feedback_artifact_identity(artifacts.get("melonds")),
+                "bridge": feedback_artifact_identity(artifacts.get("bridge")),
+                "rom": feedback_artifact_identity(artifacts.get("rom")),
+                "input_script": feedback_artifact_identity(artifacts.get("input_script")),
+            },
+            "config": config_identity,
+            "save": save_identity,
             "game_state_mismatch": {
                 "frame": mismatch.get("frame"),
                 "basic_matches": mismatch.get("basic_matches"),
@@ -546,6 +617,81 @@ fn add_sanitized_text_file<W: Write + std::io::Seek>(
     )
 }
 
+fn add_detailed_diagnostics<W: Write + std::io::Seek>(
+    zip: &mut zip::ZipWriter<W>,
+    options: zip::write::SimpleFileOptions,
+    log_dir: &Path,
+    sensitive_values: &[String],
+    included_files: &mut Vec<String>,
+) -> Result<(), String> {
+    for (file_name, max_bytes) in INSIDERS_DETAILED_TEXT_FILES {
+        add_sanitized_text_file(
+            zip,
+            options,
+            &log_dir.join(file_name),
+            file_name,
+            *max_bytes,
+            sensitive_values,
+            included_files,
+        )?;
+    }
+    add_recent_screenshots(zip, options, log_dir, included_files)
+}
+
+fn add_recent_screenshots<W: Write + std::io::Seek>(
+    zip: &mut zip::ZipWriter<W>,
+    options: zip::write::SimpleFileOptions,
+    log_dir: &Path,
+    included_files: &mut Vec<String>,
+) -> Result<(), String> {
+    let Ok(entries) = fs::read_dir(log_dir.join("screens")) else {
+        return Ok(());
+    };
+    let mut screenshots = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            if !file_type.is_file() {
+                return None;
+            }
+            let path = entry.path();
+            if !path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
+            {
+                return None;
+            }
+            let metadata = entry.metadata().ok()?;
+            let modified = metadata.modified().unwrap_or(std::time::UNIX_EPOCH);
+            Some((modified, metadata.len(), path))
+        })
+        .collect::<Vec<_>>();
+    screenshots.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+
+    let mut included_bytes = 0_u64;
+    let mut included_count = 0_usize;
+    for (_, size, path) in screenshots {
+        if included_count >= INSIDERS_SCREENSHOT_MAX_FILES {
+            break;
+        }
+        if size > INSIDERS_SCREENSHOT_MAX_BYTES.saturating_sub(included_bytes) {
+            continue;
+        }
+        let Ok(content) = fs::read(&path) else {
+            continue;
+        };
+        let Some(file_stem) = path.file_stem().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let archive_name = format!("screens/{}.png", sanitize_file_name(file_stem));
+        add_bytes(zip, options, &archive_name, &content, included_files)?;
+        included_bytes = included_bytes.saturating_add(size);
+        included_count += 1;
+    }
+    Ok(())
+}
+
 fn add_bytes<W: Write + std::io::Seek>(
     zip: &mut zip::ZipWriter<W>,
     options: zip::write::SimpleFileOptions,
@@ -566,6 +712,75 @@ fn read_json(path: PathBuf) -> serde_json::Value {
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
+}
+
+fn feedback_artifact_identity(value: Option<&serde_json::Value>) -> serde_json::Value {
+    let Some(value) = value else {
+        return serde_json::Value::Null;
+    };
+    serde_json::json!({
+        "bytes": value.get("bytes"),
+        "modified_unix_ms": value.get("modified_unix_ms"),
+        "sha256": value.get("sha256"),
+        "error": value
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .map(|error| sanitize_text(error, 512)),
+    })
+}
+
+fn file_identity(path: &Path) -> serde_json::Value {
+    if !path.is_file() {
+        return serde_json::json!({ "present": false });
+    }
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) => {
+            return serde_json::json!({
+                "present": true,
+                "error": sanitize_text(&err.to_string(), 512),
+            });
+        }
+    };
+    let modified_unix_ms = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| {
+            modified
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .ok()
+        })
+        .map(|duration| duration.as_millis());
+    match sha256_file(path) {
+        Ok(sha256) => serde_json::json!({
+            "present": true,
+            "bytes": metadata.len(),
+            "modified_unix_ms": modified_unix_ms,
+            "sha256": sha256,
+        }),
+        Err(err) => serde_json::json!({
+            "present": true,
+            "bytes": metadata.len(),
+            "modified_unix_ms": modified_unix_ms,
+            "error": sanitize_text(&err, 512),
+        }),
+    }
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let mut file = File::open(path).map_err(|err| format!("file open failed: {err}"))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|err| format!("file read failed: {err}"))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 fn feedback_sensitive_values(log_dir: &Path) -> Vec<String> {

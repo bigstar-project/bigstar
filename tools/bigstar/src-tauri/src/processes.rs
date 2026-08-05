@@ -586,6 +586,13 @@ pub(crate) fn melon_env(
         "2020-01-01T00:00:00".into(),
     );
     env.insert("MELONDS_NSML_ALLOW_JIT".into(), "1".into());
+    env.insert(
+        "MELONDS_NSML_RUNTIME_IDENTITY_FILE".into(),
+        log_dir
+            .join("melonds-runtime-identity.json")
+            .to_string_lossy()
+            .into_owned(),
+    );
     env.insert("MELONDS_NSML_INPUT_NETPLAY_ONLY".into(), "1".into());
     env.insert("MELONDS_NSML_REMOTE_INPUT_TIMEOUT_FATAL".into(), "1".into());
     env.insert("MELONDS_NSML_WAIT_TIMEOUT_MS".into(), "60000".into());

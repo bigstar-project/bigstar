@@ -298,7 +298,7 @@ describe('フィードバック upload API', () => {
     size: 3,
   };
 
-  test('必須情報と10MB上限を検証して一時upload tokenを発行する', async () => {
+  test('必須情報とedition別上限を検証して一時upload tokenを発行する', async () => {
     const missingDescription = await SELF.fetch(
       'https://match.test/feedback/uploads',
       {
@@ -339,6 +339,35 @@ describe('フィードバック upload API', () => {
       report_id: expect.any(String),
       upload_id: expect.any(String),
       upload_token: expect.any(String),
+    });
+
+    const oversizedInsiders = await SELF.fetch(
+      'https://match.test/feedback/uploads',
+      {
+        body: JSON.stringify({
+          ...feedback,
+          edition: 'insiders',
+          size: 50 * 1024 * 1024 + 1,
+        }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      },
+    );
+    expect(oversizedInsiders.status).toBe(400);
+
+    const insiders = await SELF.fetch('https://match.test/feedback/uploads', {
+      body: JSON.stringify({
+        ...feedback,
+        edition: 'insiders',
+        size: 10 * 1024 * 1024 + 1,
+      }),
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    });
+    expect(insiders.status).toBe(201);
+    expect(await json(insiders)).toMatchObject({
+      max_part_size: 5 * 1024 * 1024,
+      max_size: 50 * 1024 * 1024,
     });
 
     const partUrl = `https://match.test/feedback/uploads/${createdBody.report_id}/${createdBody.upload_id}/parts/1`;

@@ -22,8 +22,10 @@
 #include <stdlib.h>
 
 #include <codecvt>
+#include <filesystem>
 #include <locale>
 #include <memory>
+#include <sstream>
 #include <tuple>
 #include <string>
 #include <utility>
@@ -48,6 +50,7 @@
 #include "DSi_I2C.h"
 #include "FreeBIOS.h"
 #include "main.h"
+#include "version.h"
 
 #include "NDSCart/CartSD.h"
 
@@ -65,6 +68,101 @@ MainWindow* topWindow = nullptr;
 
 const string kWifiSettingsPath = "wfcsettings.bin";
 extern Net net;
+
+static std::string NSMLRuntimeIdentityJsonString(const char* value)
+{
+    std::ostringstream out;
+    out << '"';
+    for (const unsigned char ch : std::string(value ? value : ""))
+    {
+        switch (ch)
+        {
+        case '\\': out << "\\\\"; break;
+        case '"': out << "\\\""; break;
+        case '\b': out << "\\b"; break;
+        case '\f': out << "\\f"; break;
+        case '\n': out << "\\n"; break;
+        case '\r': out << "\\r"; break;
+        case '\t': out << "\\t"; break;
+        default:
+            if (ch < 0x20)
+            {
+                constexpr char Hex[] = "0123456789ABCDEF";
+                out << "\\u00" << Hex[ch >> 4] << Hex[ch & 0x0F];
+            }
+            else
+            {
+                out << static_cast<char>(ch);
+            }
+            break;
+        }
+    }
+    out << '"';
+    return out.str();
+}
+
+static void WriteNSMLRuntimeIdentity(bool jitConfigEnabled, bool jitEnabled,
+                                     bool packetBridgeAllowsJIT, bool nsmlAllowsJIT,
+                                     bool runtimeDisabledJIT)
+{
+    const char* identityPath = getenv("MELONDS_NSML_RUNTIME_IDENTITY_FILE");
+    if (!identityPath || !*identityPath)
+        return;
+
+    const std::filesystem::path path(identityPath);
+    const std::filesystem::path tempPath = path.string() + ".tmp";
+    std::error_code error;
+    if (path.has_parent_path())
+        std::filesystem::create_directories(path.parent_path(), error);
+
+    std::ofstream file(tempPath, std::ios::binary | std::ios::trunc);
+    if (!file)
+    {
+        std::printf("NSMB Test: failed to open runtime identity file=%s\n", identityPath);
+        return;
+    }
+
+    file << "{\n"
+         << "  \"schema_version\": 1,\n"
+         << "  \"version\": " << NSMLRuntimeIdentityJsonString(MELONDS_VERSION) << ",\n"
+         << "  \"jit\": {\n"
+         << "    \"enabled\": " << (jitEnabled ? "true" : "false") << ",\n"
+         << "    \"config_enabled\": " << (jitConfigEnabled ? "true" : "false") << ",\n"
+         << "    \"allow_env\": " << (nsmlAllowsJIT ? "true" : "false") << ",\n"
+         << "    \"packet_bridge_allow_env\": "
+         << (packetBridgeAllowsJIT ? "true" : "false") << ",\n"
+         << "    \"disabled_by_runtime_env\": "
+         << (runtimeDisabledJIT ? "true" : "false") << "\n"
+         << "  },\n"
+         << "  \"build\": {\n";
+#ifdef MELONDS_EMBED_BUILD_INFO
+    file << "    \"embedded\": true,\n"
+         << "    \"branch\": " << NSMLRuntimeIdentityJsonString(MELONDS_GIT_BRANCH) << ",\n"
+         << "    \"commit\": " << NSMLRuntimeIdentityJsonString(MELONDS_GIT_HASH) << ",\n"
+         << "    \"provider\": " << NSMLRuntimeIdentityJsonString(MELONDS_BUILD_PROVIDER) << "\n";
+#else
+    file << "    \"embedded\": false,\n"
+         << "    \"branch\": null,\n"
+         << "    \"commit\": null,\n"
+         << "    \"provider\": null\n";
+#endif
+    file << "  }\n"
+         << "}\n";
+    file.flush();
+    if (!file)
+    {
+        std::printf("NSMB Test: failed to write runtime identity file=%s\n", identityPath);
+        return;
+    }
+    file.close();
+
+    std::filesystem::remove(path, error);
+    error.clear();
+    std::filesystem::rename(tempPath, path, error);
+    if (error)
+        std::printf("NSMB Test: failed to publish runtime identity file=%s error=%s\n",
+                    identityPath, error.message().c_str());
+}
 
 
 EmuInstance::EmuInstance(int inst) : deleting(false),
@@ -1314,13 +1412,18 @@ bool EmuInstance::updateConsole() noexcept
     auto jitargs = (jitopt.GetBool("Enable") || packetBridgeAllowsJIT || nsmlAllowsJIT)
         ? std::make_optional(_jitargs)
         : std::nullopt;
-    if (getenv("MELONDS_NSML_DISABLE_JIT") ||
+    const bool runtimeDisabledJIT =
+        getenv("MELONDS_NSML_DISABLE_JIT") ||
         getenv("MELONDS_NSML_WATCH_ADDR") ||
         getenv("MELONDS_NSML_CALL_TRACE") ||
         getenv("MELONDS_NSML_PACKET_REPLAY_FILE") ||
         getenv("MELONDS_NSML_PACKET_CAPTURE_LOG") ||
-        (getenv("MELONDS_NSML_PACKET_BRIDGE") && !packetBridgeAllowsJIT))
+        (getenv("MELONDS_NSML_PACKET_BRIDGE") && !packetBridgeAllowsJIT);
+    if (runtimeDisabledJIT)
         jitargs = std::nullopt;
+    WriteNSMLRuntimeIdentity(jitopt.GetBool("Enable"), jitargs.has_value(),
+                             packetBridgeAllowsJIT, nsmlAllowsJIT,
+                             runtimeDisabledJIT);
     if (getenv("MELONDS_NSML_TEST") || getenv("MELONDS_NSML_NETPLAY") ||
         getenv("MELONDS_NSML_POC"))
     {
@@ -1331,6 +1434,8 @@ bool EmuInstance::updateConsole() noexcept
     }
 #else
     std::optional<JITArgs> jitargs = std::nullopt;
+    WriteNSMLRuntimeIdentity(false, false, false,
+                             getenv("MELONDS_NSML_ALLOW_JIT") != nullptr, true);
 #endif
 
 #ifdef GDBSTUB_ENABLED

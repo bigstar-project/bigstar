@@ -42,6 +42,9 @@ use crate::settings::validate_request;
 use crate::state::AppState;
 use crate::windowing::show_main_window;
 
+#[cfg(feature = "insiders-edition")]
+const MAX_LOG_ARCHIVE_BYTES: u64 = 50 * 1024 * 1024;
+#[cfg(not(feature = "insiders-edition"))]
 const MAX_LOG_ARCHIVE_BYTES: u64 = 10 * 1024 * 1024;
 const LOG_ARCHIVE_UPLOAD_PART_BYTES: usize = 5 * 1024 * 1024;
 const DETAILED_LOG_FILES: &[&str] = &[
@@ -259,6 +262,7 @@ pub(crate) fn create_log_archive(
         &FeedbackArchiveOptions {
             category: "other",
             include_performance: true,
+            include_detailed_diagnostics: cfg!(feature = "insiders-edition"),
             app_error_files: &app_errors,
             app_context_file: Some(&app_context),
         },
@@ -303,6 +307,7 @@ pub(crate) async fn upload_log_archive(
             &FeedbackArchiveOptions {
                 category: request.category.as_str(),
                 include_performance: request.include_performance,
+                include_detailed_diagnostics: cfg!(feature = "insiders-edition"),
                 app_error_files: &app_errors,
                 app_context_file: Some(&app_context),
             },
@@ -601,8 +606,9 @@ fn upload_log_archive_inner(
     let size = archive_size(archive_path)?;
     if size > MAX_LOG_ARCHIVE_BYTES {
         return Err(format!(
-            "feedback archive が10MBを超えています: {} bytes",
-            size
+            "feedback archive が{}MiBを超えています: {} bytes",
+            MAX_LOG_ARCHIVE_BYTES / (1024 * 1024),
+            size,
         ));
     }
     let base_url = normalized_upload_url(&request.upload_url)?;
