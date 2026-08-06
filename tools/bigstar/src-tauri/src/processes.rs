@@ -628,6 +628,8 @@ pub(crate) fn melon_env(
                 .into_owned(),
         );
     }
+    #[cfg(feature = "insiders-edition")]
+    env.insert("MELONDS_NSML_DISABLE_LOG_ROTATION".into(), "1".into());
     if request.detailed_logs_enabled {
         env.insert("MELONDS_NSML_HANG_DIAGNOSTICS".into(), "1".into());
         env.insert(
@@ -873,14 +875,32 @@ fn capture_child_stdio(child: &mut Child, log_dir: &Path, name: &str) -> Result<
     } else {
         2 * 1024 * 1024
     };
-    spawn_rotating_stream_writer(stdout, stdout_path, stdout_limit, format!("{name}-stdout"))?;
-    spawn_rotating_stream_writer(stderr, stderr_path, 1024 * 1024, format!("{name}-stderr"))
+    spawn_log_stream_writer(
+        stdout,
+        stdout_path,
+        capture_log_rotation_limit(stdout_limit),
+        format!("{name}-stdout"),
+    )?;
+    spawn_log_stream_writer(
+        stderr,
+        stderr_path,
+        capture_log_rotation_limit(1024 * 1024),
+        format!("{name}-stderr"),
+    )
 }
 
-fn spawn_rotating_stream_writer<R>(
+pub(crate) fn capture_log_rotation_limit(public_limit: u64) -> Option<u64> {
+    if cfg!(feature = "insiders-edition") {
+        None
+    } else {
+        Some(public_limit)
+    }
+}
+
+fn spawn_log_stream_writer<R>(
     mut reader: R,
     path: PathBuf,
-    max_bytes: u64,
+    max_bytes: Option<u64>,
     thread_name: String,
 ) -> Result<(), String>
 where
@@ -903,7 +923,7 @@ where
                 };
                 let mut offset = 0;
                 while offset < read {
-                    if written >= max_bytes {
+                    if max_bytes.is_some_and(|limit| written >= limit) {
                         let _ = file.flush();
                         drop(file);
                         let _ = fs::remove_file(&rotated);
@@ -914,7 +934,9 @@ where
                         };
                         written = 0;
                     }
-                    let available = (max_bytes - written).min((read - offset) as u64) as usize;
+                    let available = max_bytes
+                        .map(|limit| (limit - written).min((read - offset) as u64) as usize)
+                        .unwrap_or(read - offset);
                     if file.write_all(&buffer[offset..offset + available]).is_err() {
                         return;
                     }

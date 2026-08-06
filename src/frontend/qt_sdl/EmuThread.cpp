@@ -163,6 +163,7 @@ class NsmlPerformanceLog
 public:
     explicit NsmlPerformanceLog(const char* path)
     {
+        RotationDisabled = getenv("MELONDS_NSML_DISABLE_LOG_ROTATION") != nullptr;
         if (path && *path)
         {
             Path = path;
@@ -441,7 +442,7 @@ private:
     void Write(const std::string& line, bool flush)
     {
         constexpr std::size_t MaxLogBytes = 8 * 1024 * 1024;
-        if (BytesWritten + line.size() > MaxLogBytes && !Path.empty())
+        if (!RotationDisabled && BytesWritten + line.size() > MaxLogBytes && !Path.empty())
         {
             Platform::FileFlush(File);
             Platform::CloseFile(File);
@@ -468,6 +469,7 @@ private:
 
     Platform::FileHandle* File = nullptr;
     std::string Path;
+    bool RotationDisabled = false;
     std::size_t BytesWritten = 0;
     std::vector<NsmlPerformanceSample> Samples;
     unsigned long long LastSpikeUnixMs = 0;

@@ -16,10 +16,11 @@ use crate::models::{
 };
 use crate::paths::{allowed_log_dir, load_match_history_document_content, migrate_legacy_app_data};
 use crate::processes::{
-    build_bridge_command, build_melon_command, finalize_ai_observation_v3_log, melon_env,
-    read_bridge_diagnostics, read_melon_diagnostics, read_mvl_results,
-    remove_inherited_melonds_env_keys, run_bridge_signaling_smoke, session_status_inner,
-    should_show_game_state_mismatch_in_gui, start_match_resolved, stop_existing, LaunchPaths,
+    build_bridge_command, build_melon_command, capture_log_rotation_limit,
+    finalize_ai_observation_v3_log, melon_env, read_bridge_diagnostics, read_melon_diagnostics,
+    read_mvl_results, remove_inherited_melonds_env_keys, run_bridge_signaling_smoke,
+    session_status_inner, should_show_game_state_mismatch_in_gui, start_match_resolved,
+    stop_existing, LaunchPaths,
 };
 use crate::roms::{
     reusable_rom_is_current, reusable_rom_marker_path, validate_rom_save, write_reusable_rom_marker,
@@ -562,6 +563,21 @@ fn melon_env_enables_performance_log_when_requested() {
 
     assert!(env["MELONDS_NSML_PERFORMANCE_LOG"].ends_with("melonds-performance.jsonl"));
     assert!(!env.contains_key("MELONDS_NSML_PERF_SPIKE_PHASE_TRACE"));
+    if cfg!(feature = "insiders-edition") {
+        assert_eq!(env["MELONDS_NSML_DISABLE_LOG_ROTATION"], "1");
+    } else {
+        assert!(!env.contains_key("MELONDS_NSML_DISABLE_LOG_ROTATION"));
+    }
+}
+
+#[test]
+fn child_log_rotation_is_disabled_only_for_insiders() {
+    let limit = capture_log_rotation_limit(8 * 1024 * 1024);
+    if cfg!(feature = "insiders-edition") {
+        assert_eq!(limit, None);
+    } else {
+        assert_eq!(limit, Some(8 * 1024 * 1024));
+    }
 }
 
 #[test]
