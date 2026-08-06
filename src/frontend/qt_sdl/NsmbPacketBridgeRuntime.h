@@ -41,6 +41,10 @@ melonDS::u32 CanonicalTick(const Config::PacketBridgeConfig &config,
                            melonDS::u32 frame, melonDS::u32 observedTick);
 bool IsAcceptedIncomingPacket(const WireProtocol::WireNSMLPacket &packet,
                               melonDS::u32 expectedGeneration);
+bool ShouldWriteJitScratchInputs(bool jitHookApplied, bool inputNetplayOnly,
+                                 bool inputEpochReady,
+                                 melonDS::u32 sharedLogicalEpoch,
+                                 melonDS::u32 logicalFrame);
 
 class Runtime {
 public:

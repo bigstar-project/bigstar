@@ -1,5 +1,15 @@
 # NSMB Mario vs Luigi Online PoC
 
+## 再戦後に入力がゲームへ反映されない回帰 - 2026-08-06
+
+- 結論: 直近のGUI 2-process実ログ2組で再戦後の入力停止を再現し、原因をraw frameとlogical frameの比較混在へ絞り込んだ。通信断や入力取得失敗ではない。`WritePacketBridgeJitScratchIfNeeded()`は再戦後も物理入力を取得・世代1の入力packetとして送受信しているが、JIT scratchへ書く直前の`beforeStart`だけ、840から再開した`logicalFrame`をrebase後のraw `PacketBridgeJitHelperPatchFrame`／`LocalStartupRawFrame`と比較している。このため再戦中の入力packetは流れても、ROM内`Net::getConsoleKeys()`が読むscratchが更新されず、キャラクターが入力を受け付けない。
+- 実ログ根拠: `bigstar-1786026172770-46556-2`／`bigstar-1786026172795-49024-2`ではcheckpoint restore後にraw開始が`2652`、ready rawが`2670`、共有logical epochが`840`になった。世代1では両peerとも非neutral入力を約290 frame送信し、`lastSent`／`lastRecv`も連続して進んだが、判定は`logicalFrame < 2652`の間ずっと開始前となる。このrunはlogical `1290`付近で終了したためscratch書込みは一度も再開しない。同じ症状の`bigstar-1786026020989-49024-1`／`bigstar-1786026021017-46556-1`ではraw開始が`6887`、ready rawが`6905`、logical epochが同じ`840`で、さらに長く入力が抑止される。
+- 回帰境界: 比較元を旧`Connection.StartFrame`から`Connection.LocalStartupRawFrame`へ変更したのはcommit `bbf24e16`。raw/logicalの責務分離、generation、start-ready検証自体は実ログで機能しており、再戦readyは両peerでgeneration 1として受理され、旧generation 0 state packetも拒否されている。問題は分離方針全体ではなく、JIT scratch開始判定にraw座標を渡した一箇所と、rebaseされたJIT patch frameをlogical frameと比較する既存構造の組合せである。
+- 修正: JIT helper patchの適用時刻判定は従来どおりraw frameで行い、scratchへの入力反映可否を独立した`ShouldWriteJitScratchInputs()`へ分離した。input netplayではJIT patch適用済み、start-ready受理済み、当該共有epochの入力初期化済み、`logicalFrame >= SharedLogicalEpoch`をすべて満たした時だけ書き込む。raw `PacketBridgeJitHelperPatchFrame`／`LocalStartupRawFrame`は入力gateから除去した。非input-netplay経路はpatch適用後なら従来どおり書き込む。
+- 回帰test: 実障害値を直接使い、raw patch frame `2652`／`6887`に対して共有logical epoch `840`の直前は拒否、`840`から許可されることを検証した。patch未適用、start-ready/epoch未準備も拒否し、通常経路の互換性も確認する。
+- Current blocker: 実装上のblockerはなし。旧GUIログと同じstart-ready経路を実GUIで再戦して目視確認する作業は追加可能だが、修正の正しさを妨げる未解決事項ではない。
+- Verification status: Release全体buildとCTest 16/16が成功した。さらにrole別の実入力scriptを使うsplit 2-process実ROM smokeを10,000 frames実行し、複数勝利設定の再戦を通過した。再戦ではraw frame `4204`で両peerのJIT patchが再適用され、その後もHostの非neutral入力`0x7DE`が送受信され、`RequireSecondMvlGame`を含め完走した。unit testが問題のGUI実値`2652`／`6887`とlogical `840`を直接担保し、実ROM試験が再戦後の入力経路を補完している。
+
 ## Canonical save bootstrap・対戦直前hard gate - 2026-08-06
 
 - 完了: 正しさの中心をオンボーディングや`roms_prepared_once`から切り離し、ベースROM SHA-256ごとのBigstar管理canonical saveを検証・必要時生成する共通ensureへ移した。同一ROMの同時ensureはsingle-flight、ROM生成全体もprocess内mutexで直列化する。起動時とROM path変更時は対戦中でなければeagerに準備し、部屋作成／参加後の全`start_match`直前には同じensureを同期的に再実行する。直前identity、role別ROM path、canonical由来save hashが一致しなければbridge/melonDSを起動しない。
@@ -36,9 +46,10 @@
 - 完了: start-readyを64 bytesへ拡張し、generation、sender raw ready frame、共有epoch、stage ID/group、match seed、packet tick、RNG値/call count/branch、role-local値やaddress/animationを除外したsemantic hashを交換する。全項目が一致した場合だけ入力epochを解放し、不一致時は理由と両値をlogへ出してgameplay開始を拒否する。Host/Clientで本質的に異なる値を含むfull savestate hashの単純比較は採用していない。
 - 完了: state-syncの比較・適用・送信frameを入力と同じlogical座標へ統一し、start-ready検証完了前のstate packetと異世代packetを拒否する。これでraw ready差による同一frame名の誤比較と、前試合stateの混入を防ぐ。
 - 完了: 当初は選択元ROM横の`.sav`を検査・複製する実装だったが、後続のcanonical save bootstrapで廃止した。現在はベースROM SHA-256別のBigstar管理canonicalを自動生成・厳格検証し、Host/Client作業saveへ毎回copyする。save SHA-256をROM manifest、`rom_pair_id`、signaling schema、launcher/feedback identityへ含め、起動直前にも共通ensureとidentity hard gateを通す。
-- 現在のblocker: ROMなしの単体・build検証は完了したが、実ROMを使うHost/Client GUI 2-processで新start-readyが正常状態を受理し、意図した不一致だけを拒否するend-to-end確認は未実施である。特にready時packet tick/RNGが本当にrole-invariantかは実機logで確認が必要。protocol version 2とsignaling schemaは旧版と非互換なので、実対戦では両peerのmelonDS/Bigstarとserverを同じ変更へ揃える必要がある。
-- 次のaction: まずlocal 2-processまたはノートPC・テザリングで初戦と複数再戦を行い、`start ready ... accepted`、generation、raw ready差、shared epoch、semantic hashを両peerで確認する。不一致拒否が出た場合はreason別の両値からsemantic fieldを調整し、正常開始を確認後に退避した100回自動再現ハーネスを新protocolへ載せ直す。
-- Verification: melonDS Release build成功、CTest 16/16成功。Bigstar Rust test 56/56、`cargo fmt`、strict Clippy成功。Bigstar GUI full CIはedition 15件、unit 36件、browser 68件、Playwright 2件を含め全成功。signaling server CIは11件成功し、typecheck/Biomeも成功した。
+- 実機確認更新: local GUI 2-processの複数runで、新start-readyは初戦generation 0と再戦generation 1を両peerで受理し、共有epoch、stage、seed、packet tick、RNG、semantic hashの検証を通過した。異世代の遅延game-state packetも再戦直後にgeneration mismatchとして拒否されている。これによりstart-ready/generation実装のend-to-end未確認という旧blockerは解消した。
+- 現在のblocker: なし。再戦後のJIT scratch入力反映判定に残っていたraw/logical比較混在は上節の修正で解消した。
+- 次のaction: 必須作業はなし。追加の信頼性確認として、旧GUIログと同じ通常GUI起動経路で複数勝利の再戦を目視できる。退避した100回自動再現ハーネスを再利用する場合は、protocol version 2とcanonical saveへ追従させる。
+- Verification: protocol version 2のstart-ready受理と異世代拒否をGUI 2-process実ログで確認済み。入力gate修正後はRelease build、CTest 16/16、再戦必須の10,000-frame split 2-process実ROM smokeが成功した。
 
 ## Bigstar Insiders 0.10.2 の同期エラー再発調査（実装前の根拠） - 2026-08-05
 

@@ -54,6 +54,18 @@ bool IsAcceptedIncomingPacket(const WireProtocol::WireNSMLPacket &packet,
   return packet.Generation == expectedGeneration;
 }
 
+bool ShouldWriteJitScratchInputs(bool jitHookApplied, bool inputNetplayOnly,
+                                 bool inputEpochReady,
+                                 melonDS::u32 sharedLogicalEpoch,
+                                 melonDS::u32 logicalFrame) {
+  if (!jitHookApplied)
+    return false;
+  if (!inputNetplayOnly)
+    return true;
+  return inputEpochReady && sharedLogicalEpoch != 0 &&
+         logicalFrame >= sharedLogicalEpoch;
+}
+
 void Runtime::ResetQueuesForRestart() {
   PacketInputs_.clear();
   PendingPackets_.clear();

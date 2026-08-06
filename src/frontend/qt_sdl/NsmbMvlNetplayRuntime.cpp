@@ -757,12 +757,6 @@ void WritePacketBridgeJitScratchIfNeeded(
         return;
     if (!G.Enabled)
         return;
-    melonDS::u32 startFrame = 0;
-    if (G.Input.NetplayOnly)
-    {
-        startFrame = std::max(startFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
-        startFrame = std::max(startFrame, G.Connection.LocalStartupRawFrame);
-    }
     const bool traceScratch = G.Diagnostics.ActiveFrameSpikeTrace;
     const auto scratchStart = std::chrono::steady_clock::now();
     unsigned long long peerStartWaitUs = 0;
@@ -884,8 +878,20 @@ void WritePacketBridgeJitScratchIfNeeded(
         }
     }
 
-    const bool beforeStart = logicalFrame < startFrame;
-    if (!beforeStart)
+    const bool inputEpochReady =
+        !G.Input.NetplayOnly
+        || (G.NetplaySession.Handshake.WaitedForPeerAtStart()
+            && G.NetplaySession.Handshake.StartReadyValidated()
+            && G.NetplaySession.Handshake.InputEpochPrimedFor(
+                G.Connection.SharedLogicalEpoch));
+    const bool writeScratch = PacketBridge::ShouldWriteJitScratchInputs(
+        G.PacketBridgeRuntime.IsJitHookApplied(instanceID),
+        G.Input.NetplayOnly,
+        inputEpochReady,
+        G.Connection.SharedLogicalEpoch,
+        logicalFrame);
+    const bool beforeStart = !writeScratch;
+    if (writeScratch)
     {
         const auto writeStart = std::chrono::steady_clock::now();
         PacketBridge::WriteJitScratchInputs(

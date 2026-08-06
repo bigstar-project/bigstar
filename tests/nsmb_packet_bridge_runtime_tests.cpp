@@ -15,6 +15,7 @@ using NsmbMvlNetplay::PacketBridge::JitHookRestoreAction;
 using NsmbMvlNetplay::PacketBridge::kUnsetProgress;
 using NsmbMvlNetplay::PacketBridge::Runtime;
 using NsmbMvlNetplay::PacketBridge::SelectPlayerInput;
+using NsmbMvlNetplay::PacketBridge::ShouldWriteJitScratchInputs;
 using NsmbMvlNetplay::WireProtocol::WireNSMLPacket;
 
 void Require(bool condition, const std::string &message) {
@@ -208,6 +209,42 @@ void TestJitHookRestorePolicy() {
           "short restore delay is not reduced below one frame");
 }
 
+void TestJitScratchInputGateUsesLogicalEpochAfterRestart() {
+  Require(!ShouldWriteJitScratchInputs(false, true, true, 840, 840),
+          "scratch input waits for the raw-frame JIT hook application");
+  Require(ShouldWriteJitScratchInputs(true, false, false, 0, 0),
+          "non-input-netplay scratch is available once the hook is applied");
+  Require(!ShouldWriteJitScratchInputs(true, true, false, 840, 840),
+          "input netplay waits for the accepted and primed input epoch");
+  Require(!ShouldWriteJitScratchInputs(true, true, true, 840, 839) &&
+              ShouldWriteJitScratchInputs(true, true, true, 840, 840),
+          "input netplay opens on the shared logical epoch");
+
+  Runtime restarted;
+  RuntimePatchConfig config;
+  config.PacketBridgeJitHelperPatchEnabled = true;
+  config.PacketBridgeJitHelperPatchFrame = 2652;
+  Require(restarted.ShouldApplyJitHook(
+              0, 2652, config.PacketBridgeJitHelperPatchFrame),
+          "restart reaches the rebased raw JIT hook frame");
+  restarted.MarkJitHookApplied(0);
+  Require(ShouldWriteJitScratchInputs(restarted.IsJitHookApplied(0), true,
+                                      true, 840, 840),
+          "restart writes scratch at logical epoch 840 even when the raw hook "
+          "frame is 2652");
+
+  Runtime lateRestart;
+  config.PacketBridgeJitHelperPatchFrame = 6887;
+  Require(lateRestart.ShouldApplyJitHook(
+              0, 6887, config.PacketBridgeJitHelperPatchFrame),
+          "late restart reaches its rebased raw JIT hook frame");
+  lateRestart.MarkJitHookApplied(0);
+  Require(ShouldWriteJitScratchInputs(lateRestart.IsJitHookApplied(0), true,
+                                      true, 840, 840),
+          "logical input application is independent of a later raw restart "
+          "frame");
+}
+
 void TestRestartQueueReset() {
   Runtime runtime;
   InputState input;
@@ -238,6 +275,7 @@ int main() {
   TestPacketQueuesAndDelay();
   TestProgressAndTraceMarkers();
   TestJitHookRestorePolicy();
+  TestJitScratchInputGateUsesLogicalEpochAfterRestart();
   TestRestartQueueReset();
   std::cout << "nsmb_packet_bridge_runtime_tests: pass\n";
   return 0;
