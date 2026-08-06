@@ -41,6 +41,8 @@ SaveManager::SaveManager(const std::string& path) : QThread()
 
     FlushVersion = 0;
     PreviousFlushVersion = 0;
+    CompletedFileFlush = 0;
+    FailedFileFlush = 0;
     TimeAtLastFlushRequest = 0;
 
     if (!path.empty())
@@ -182,9 +184,21 @@ void SaveManager::FlushSecondaryBuffer(u8* dst, u32 dstLength)
         FileHandle* f = Platform::OpenFile(Path, FileMode::Write);
         if (f)
         {
-            FileWrite(SecondaryBuffer.get(), SecondaryBufferLength, 1, f);
-            Log(LogLevel::Info, "SaveManager: Wrote %u bytes to %s\n", SecondaryBufferLength, Path.c_str());
+            const bool wrote = FileWrite(SecondaryBuffer.get(), SecondaryBufferLength, 1, f) == 1;
             CloseFile(f);
+            if (wrote)
+            {
+                Log(LogLevel::Info, "SaveManager: Wrote %u bytes to %s\n", SecondaryBufferLength, Path.c_str());
+                CompletedFileFlush.store(FlushVersion, std::memory_order_release);
+            }
+            else
+            {
+                FailedFileFlush.store(FlushVersion, std::memory_order_release);
+            }
+        }
+        else
+        {
+            FailedFileFlush.store(FlushVersion, std::memory_order_release);
         }
     }
     PreviousFlushVersion = FlushVersion;
@@ -195,4 +209,14 @@ void SaveManager::FlushSecondaryBuffer(u8* dst, u32 dstLength)
 bool SaveManager::NeedsFlush()
 {
     return FlushVersion != PreviousFlushVersion;
+}
+
+u32 SaveManager::CompletedFileFlushVersion() const
+{
+    return CompletedFileFlush.load(std::memory_order_acquire);
+}
+
+u32 SaveManager::FailedFileFlushVersion() const
+{
+    return FailedFileFlush.load(std::memory_order_acquire);
 }

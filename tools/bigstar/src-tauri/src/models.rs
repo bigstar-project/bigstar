@@ -272,7 +272,7 @@ pub(crate) struct GenerateRomResponse {
     pub(crate) rom_identity: RomIdentity,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Type)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Type)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct RomIdentity {
     pub(crate) rom_pair_id: String,

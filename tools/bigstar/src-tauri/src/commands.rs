@@ -2,6 +2,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 
@@ -37,7 +38,7 @@ use crate::processes::{
     remove_inherited_melonds_env_keys, session_status_inner, start_match_resolved,
     stop_existing_with_unresolved_report, LaunchPaths,
 };
-use crate::roms::prepare_roms;
+use crate::roms::{prepare_roms, prepared_roms_are_current};
 use crate::settings::validate_request;
 use crate::state::AppState;
 use crate::windowing::show_main_window;
@@ -82,7 +83,7 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
         base_rom_path: saved.base_rom_path.trim().to_owned(),
         player_name: saved.player_name.trim().to_owned(),
         player_profile_id: saved.player_profile_id.trim().to_owned(),
-        roms_prepared_once: saved.roms_prepared_once,
+        roms_prepared_once: prepared_roms_are_current(&app, saved.base_rom_path.trim()),
         input_config_opened_once: saved.input_config_opened_once,
         port: DEFAULT_PORT,
         diagnostic_events_enabled: saved.diagnostic_events_enabled,
@@ -95,10 +96,21 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn save_rom_paths(app: AppHandle, request: SaveRomPathsRequest) -> Result<(), String> {
+pub(crate) fn save_rom_paths(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: SaveRomPathsRequest,
+) -> Result<(), String> {
     let mut settings = load_launcher_settings(&app)?;
-    settings.base_rom_path = request.base_rom_path;
-    save_launcher_settings(&app, &settings)
+    if settings.base_rom_path.trim() != request.base_rom_path.trim() {
+        settings.roms_prepared_once = false;
+    }
+    settings.base_rom_path = request.base_rom_path.trim().to_owned();
+    save_launcher_settings(&app, &settings)?;
+    if !settings.base_rom_path.is_empty() && !session_is_active(state.inner())? {
+        spawn_eager_rom_prepare(app, settings.base_rom_path);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -386,11 +398,46 @@ pub(crate) fn start_match(
     request: LaunchRequest,
 ) -> Result<LaunchResponse, String> {
     validate_request(&request)?;
+    if session_is_active(state.inner())? {
+        return Err("対戦中のため新しい対戦準備を開始できません".to_owned());
+    }
+    if state
+        .launch_in_progress
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Err("別の対戦準備が進行中です".to_owned());
+    }
+    let _launch_guard = LaunchPreparationGuard(&state.launch_in_progress);
+    let settings = load_launcher_settings(&app)?;
+    let source_rom = settings.base_rom_path.trim();
+    if source_rom.is_empty() {
+        return Err("ベースROMが設定されていません".to_owned());
+    }
+    let prepared = prepare_roms(
+        &app,
+        GenerateRomRequest {
+            source_rom: source_rom.to_owned(),
+        },
+        false,
+    )?;
+    let expected_rom = match &request.role {
+        crate::models::Role::Host => &prepared.host_rom,
+        crate::models::Role::Client => &prepared.client_rom,
+    };
+    let requested_rom = absolutize_existing(&request.rom_path)?;
+    let expected_rom = absolutize_existing(expected_rom)?;
+    if requested_rom != expected_rom {
+        return Err("対戦直前に準備したROMと起動対象ROMが一致しません".to_owned());
+    }
+    if request.rom_identity.as_ref() != Some(&prepared.rom_identity) {
+        return Err("対戦直前のROM・セーブ同一性が部屋作成／参加時から変化しました".to_owned());
+    }
     let log_dir = create_log_dir(&app)?;
     let bridge_path = find_bridge_binary(&app)?;
     let melon_path = find_melonds_binary(&app)?;
     let input_script = find_input_script(&app)?;
-    let rom_path = absolutize_existing(&request.rom_path)?;
+    let rom_path = requested_rom;
 
     start_match_resolved(
         state.inner(),
@@ -403,6 +450,63 @@ pub(crate) fn start_match(
             rom_path,
         },
     )
+}
+
+pub(crate) fn start_eager_saved_rom_prepare(app: AppHandle) {
+    let settings = match load_launcher_settings(&app) {
+        Ok(settings) => settings,
+        Err(err) => {
+            crate::diagnostics::record_backend_error(&app, "eager_rom_settings", &err);
+            return;
+        }
+    };
+    let source_rom = settings.base_rom_path.trim().to_owned();
+    if source_rom.is_empty() {
+        return;
+    }
+    let state = app.state::<AppState>();
+    if session_is_active(state.inner()).unwrap_or(true) {
+        return;
+    }
+    spawn_eager_rom_prepare(app, source_rom);
+}
+
+fn spawn_eager_rom_prepare(app: AppHandle, source_rom: String) {
+    let _ = std::thread::Builder::new()
+        .name("bigstar-eager-rom-prepare".to_owned())
+        .spawn(move || {
+            if let Err(err) = prepare_roms(
+                &app,
+                GenerateRomRequest {
+                    source_rom: source_rom.clone(),
+                },
+                false,
+            ) {
+                crate::diagnostics::record_backend_error(&app, "eager_rom_prepare", &err);
+                return;
+            }
+            if let Ok(mut settings) = load_launcher_settings(&app) {
+                if settings.base_rom_path.trim() == source_rom {
+                    settings.roms_prepared_once = true;
+                    let _ = save_launcher_settings(&app, &settings);
+                }
+            }
+        });
+}
+
+fn session_is_active(state: &AppState) -> Result<bool, String> {
+    if state.launch_in_progress.load(Ordering::Acquire) {
+        return Ok(true);
+    }
+    session_status_inner(state).map(|status| status.active)
+}
+
+struct LaunchPreparationGuard<'a>(&'a std::sync::atomic::AtomicBool);
+
+impl Drop for LaunchPreparationGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 #[tauri::command]

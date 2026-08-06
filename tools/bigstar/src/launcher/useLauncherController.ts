@@ -769,7 +769,8 @@ export function useLauncherController() {
 
     try {
       setRomGenerationBusy(true);
-      setActivityStatus({ text: '共通 ROM を準備中', kind: 'idle' });
+      setOnboardingRomsPrepared(false);
+      setActivityStatus({ text: '基準セーブを初期化中', kind: 'idle' });
       const response = await generateRoms(request);
       preparedRomCacheRef.current = {
         sourceRom: sourceForm.baseRomPath,
@@ -789,6 +790,7 @@ export function useLauncherController() {
       });
       setActivityStatus({ text: '共通 ROM の準備が完了しました', kind: 'ok' });
     } catch (error) {
+      setOnboardingRomsPrepared(false);
       setActivityStatus({ text: String(error), kind: 'error' });
     } finally {
       setRomGenerationBusy(false);
@@ -807,6 +809,7 @@ export function useLauncherController() {
       }
       const nextForm = { ...form, baseRomPath: selected };
       setForm(nextForm);
+      setOnboardingRomsPrepared(false);
       await persistSettingMutation.mutateAsync({
         kind: 'baseRomPath',
         value: selected,
@@ -887,14 +890,30 @@ export function useLauncherController() {
       return;
     }
     startupRomPreparationKeyRef.current = key;
-    void ensurePreparedRoms(form).catch((error) => {
-      startupRomPreparationKeyRef.current = null;
-      setActivityStatus({
-        text: `起動時のROM準備に失敗しました: ${String(error)}`,
-        kind: 'warn',
+    const initializingCanonicalSave = !onboardingRomsPrepared;
+    if (initializingCanonicalSave) {
+      setActivityStatus({ text: '基準セーブを初期化中', kind: 'idle' });
+    }
+    void ensurePreparedRoms(form)
+      .then(() => {
+        if (initializingCanonicalSave) {
+          setActivityStatus({ text: 'ROMの準備が完了しました', kind: 'ok' });
+        }
+      })
+      .catch((error) => {
+        startupRomPreparationKeyRef.current = null;
+        setActivityStatus({
+          text: `起動時のROM準備に失敗しました: ${String(error)}`,
+          kind: 'warn',
+        });
       });
-    });
-  }, [defaultsLoaded, form, connectionActive, ensurePreparedRoms]);
+  }, [
+    defaultsLoaded,
+    form,
+    connectionActive,
+    ensurePreparedRoms,
+    onboardingRomsPrepared,
+  ]);
 
   const startMatchFor = useCallback(
     async (
@@ -1593,7 +1612,8 @@ export function useLauncherController() {
     onboarding: {
       loaded: defaultsLoaded,
       romsPrepared: onboardingRomsPrepared,
-      romGenerationBusy,
+      romGenerationBusy:
+        romGenerationBusy || (romEnsureBusy && !onboardingRomsPrepared),
       inputConfigOpened: onboardingInputConfigOpened,
       playerNameConfigured: onboardingPlayerNameConfigured,
     },

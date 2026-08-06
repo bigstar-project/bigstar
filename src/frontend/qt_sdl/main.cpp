@@ -63,6 +63,7 @@
 #include "MPInterface.h"
 #include "Net.h"
 #include "NsmbMvlNetplayRuntime.h"
+#include "SaveBootstrap.h"
 
 #include "CLI.h"
 
@@ -241,6 +242,13 @@ void broadcastInstanceCommand(int cmd, QVariant& param, int sourceinst)
 
 void pathInit()
 {
+    const QString bootstrapConfig = qEnvironmentVariable("MELONDS_SAVE_BOOTSTRAP_CONFIG_DIR");
+    if (!bootstrapConfig.isEmpty())
+    {
+        QDir().mkpath(bootstrapConfig);
+        emuDirectory = QDir(bootstrapConfig).absolutePath();
+        return;
+    }
     // First, check for the portable directory next to the executable.
     QString appdirpath = QCoreApplication::applicationDirPath();
     QString portablepath = appdirpath + QDir::separator() + "portable";
@@ -381,6 +389,7 @@ int main(int argc, char** argv)
     pathInit();
 
     CLI::CommandLineOptions* options = CLI::ManageArgs(melon);
+    SaveBootstrap::Initialize(options->dsRomPath);
 
     // http://stackoverflow.com/questions/14543333/joystick-wont-work-using-sdl
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");

@@ -4,6 +4,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use flate2::read::GzDecoder;
+
 use crate::commands::cleanup_detailed_logs_in_root;
 use crate::crash_report::{
     create_log_archive, create_user_log_archive, create_user_log_archive_with_diagnostics,
@@ -79,6 +81,24 @@ fn temp_log_dir(name: &str) -> PathBuf {
     path
 }
 
+fn canonical_test_save() -> Vec<u8> {
+    const GZIP_HEX: &str = "1f8b0800000000000400edd7410ac2301046e109d4c3b80b75513c848710bad095e009bc4e77b988e08d52699bf598424218dfb77dd012f80b4d385eaecffba31fe5ecbd179197fc9118df5d3affb09e7f71a8f0ee8ff560b46a6216f6572c18ad1af6d748305a3579fbbb4d697fa7effedcf60cb7eb590000e03781fb3fffbf6582d1aac9fbfed85fb160b46ad85f23c168d5e4ed8ffb3f0000f5cdd5f07dd200200000";
+    let compressed = GZIP_HEX
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            u8::from_str_radix(std::str::from_utf8(pair).expect("gzip hex utf8"), 16)
+                .expect("gzip hex byte")
+        })
+        .collect::<Vec<_>>();
+    let mut decoder = GzDecoder::new(compressed.as_slice());
+    let mut save = Vec::new();
+    decoder
+        .read_to_end(&mut save)
+        .expect("decompress canonical save");
+    save
+}
+
 #[test]
 fn rom_save_validation_accepts_only_initialized_8192_byte_save() {
     let dir = temp_log_dir("save-validation");
@@ -93,9 +113,7 @@ fn rom_save_validation_accepts_only_initialized_8192_byte_save() {
     fs::write(rom.with_extension("sav"), vec![0xFF_u8; 8_192]).expect("write FF save");
     assert!(validate_rom_save(&rom).is_err());
 
-    let mut valid = vec![0_u8; 8_192];
-    valid[37] = 1;
-    fs::write(rom.with_extension("sav"), valid).expect("write valid save");
+    fs::write(rom.with_extension("sav"), canonical_test_save()).expect("write valid save");
     assert_eq!(validate_rom_save(&rom).expect("valid save").len(), 64);
 
     let _ = fs::remove_dir_all(dir);
@@ -287,9 +305,7 @@ fn launch_paths(dir: &Path, bridge_path: PathBuf, melon_path: PathBuf) -> Launch
     let rom_path = dir.join("host.nds");
     fs::write(&input_script, b"").expect("write input script");
     fs::write(&rom_path, b"fake rom").expect("write fake rom");
-    let mut save = vec![0_u8; 8_192];
-    save[0] = 1;
-    fs::write(rom_path.with_extension("sav"), save).expect("write fake save");
+    fs::write(rom_path.with_extension("sav"), canonical_test_save()).expect("write fake save");
     LaunchPaths {
         log_dir: dir.join("logs"),
         bridge_path,

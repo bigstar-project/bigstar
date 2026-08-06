@@ -1,5 +1,33 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Canonical save bootstrap・対戦直前hard gate - 2026-08-06
+
+- 完了: 正しさの中心をオンボーディングや`roms_prepared_once`から切り離し、ベースROM SHA-256ごとのBigstar管理canonical saveを検証・必要時生成する共通ensureへ移した。同一ROMの同時ensureはsingle-flight、ROM生成全体もprocess内mutexで直列化する。起動時とROM path変更時は対戦中でなければeagerに準備し、部屋作成／参加後の全`start_match`直前には同じensureを同期的に再実行する。直前identity、role別ROM path、canonical由来save hashが一致しなければbridge/melonDSを起動しない。
+- 完了: 元ROM横の`.sav`依存を廃止した。known US ROM SHA-256だけを受理し、canonicalがmissing／破損ならBigstar app-dataの隔離directoryへ未改変ROMをcopyして、netplay／bridge／ROM patch／入力なしでmelonDSを起動する。元ROM、元save、元設定は読取対象または非参照のままで、書き換えない。
+- 完了: melonDSに専用save-bootstrap modeを追加した。SaveManagerが8192-byte saveを実ファイルへwriteしてhandleをcloseしたversionをatomicに公開し、その通知後だけROM/save SHA-256、path、size、frame、経過時間、成否、errorをJSONへatomic writeしてQtの通常`quit`へ入る。bootstrap用config directoryも隔離する。timeout／cancelは失敗JSONを書いて通常終了を先に要求し、Bigstarはさらに5秒待った後だけkillする。既存の`std::_Exit` test終了経路は使わない。
+- 完了: Bigstarは正常exit後にresult JSONと生成saveを独立再読込し、報告pathが隔離saveそのものか、ROM hash、8192 bytes、known save hash、4 KiB duplicate、`Mario2d`識別子、未使用`FF`領域を再検証する。成功時だけ同一filesystem内のrenameでcanonicalへatomic promoteする。失敗時はROM/save/config copyを破棄し、stdout/stderr/resultだけを診断directoryに残す。
+- 完了: canonicalはmelonDSへ直接渡さず、ROM準備ごとにHost/Client作業saveへatomic copyして再検証する。ROM manifest versionを3へ上げ、canonical save hashをinputs、`RomIdentity.save_sha256`、`rom_pair_id`、signaling／feedback identityの根拠にした。対戦中または対戦準備中のROM path変更は設定だけ保存して作業saveへ触らず、対戦終了後のeagerまたは次回対戦直前hard gateで処理する。
+- 完了: ローカルdebug Bigstarがinstalled旧sidecarをrepo buildより先に選び、bootstrapを知らない旧melonDSを35秒後にkillする問題を実統合試験で発見した。debug buildではrepoのmelonDS／bridgeを先に探索し、distribution buildでは従来どおりbundled sidecarを優先するよう修正した。
+- UI: canonical未準備時はオンボーディングbuttonと起動時eager処理に「基準セーブを初期化中」を表示し、失敗理由をactivity statusへ出す。失敗時は選択ROM pathを保持し、`romsPrepared=false`のまま再試行できる。first-run flagは表示上の正しさ判定に使わず、起動時defaultsもcanonical、manifest、ROM、両作業saveの実検証結果から算出する。
+- 実統合verification: compile-timeで専用app-data名へ隔離した実Bigstarを、canonicalなし・保存済みbase ROMだけの状態から起動し、実melonDS bootstrap、Host/Client ROM生成、両save copyまで完了した。canonical／Host／Client saveは3個ともSHA-256 `42ffb80e...`で、元ROM hashと元save hash/mtimeは不変だった。2回目はmelonDS processを一度も起動せずcanonicalを再利用し、canonical削除時と全0破損時はmelonDSを再起動して同じhashへ復旧した。不正ROMではmelonDSを起動せず、pathを保持し、既存Host/Client saveも不変だった。
+- 異常系verification: melonDS専用modeを直接起動し、通常成功はframe 286／5,487 msとframe 341／6,485 msで正常exit 0、1,000 ms timeoutとROM hash mismatchはいずれも失敗JSON、saveなし、正常exit 0だった。旧sidecarによるBigstar outer timeoutでもcanonicalは生成・promoteされず、修正後のdebug sidecar探索で解消した。
+- Current blocker: 実装・自動検証上のblockerはなし。実file dialogを含むGUI click-through自動化だけはWindows操作skillの必須documentation APIが実行環境に存在せず未実施だが、同じbackend eager／ensure経路の実Bigstar統合、Playwright onboarding、direct melonDS異常系を通している。
+- Verification status: melonDS Release build成功、CTest 16/16成功。Bigstar Rust 58 tests、`cargo fmt`、strict Clippy成功。Bigstar full CIはtypecheck／Biome、edition 15件、unit 36件、browser 68件、Playwright 2件を含め全成功した。Insiders local package buildもMSI／NSISまで成功し、repo build、staged binary、release targetのmelonDSはすべて35,558,400 bytes・SHA-256 `eab66ced74410f2c04e4e630e0db1de29c91022942d45a5d39af26230bb993c9`で一致した。
+
+## 未改変ROMからの正常save自動生成実測 - 2026-08-06
+
+- 結論: ユーザー所有の未改変US ROMを、saveが存在しない隔離directoryから通常direct bootし、入力を一切送らなくても、NSMB自身が正常な8,192-byte saveを生成した。生成物は既存の正常な`roms/nsmb-us.sav`とbyte-for-byte一致し、3回の計測runと計測なしの通常runを含む4回すべてSHA-256 `42ffb80e234c01d5784bdc291fee41c26e59f66295d7f105c798ba8dde11b2ee`になった。したがって少なくともこのUS ROM・現行melonDS設定では、タイトル画面操作や最小入力の探索は不要である。
+- ROM同一性: 使用元は`roms/nsmb-us.nds`、33,554,432 bytes、SHA-256 `9f67fef1b4c73e966767f6153431ada3751dc1b0da2c70f386c14a5e3017f354`。Downloads側のユーザー所有ROMも同じsize/hashである。各runではROM、`melonDS.exe`、`melonDS.toml`、`rtc.bin`を`logs/save-bootstrap-measurement-20260806/run*`へcopyして起動し、元ROM、元save、元設定をprocessから参照・更新していない。stdoutも各run固有のconfig/save pathだけをopenしたことを示す。
+- 計測なし通常run: `run1-normal-noinput`はsaveなしで起動し、起動後約7,729 msで`probe.sav`が出現した。45秒無入力で継続後、`CloseMainWindow`による通常window closeで終了した。saveは8,192 bytesで既存正常saveと同一hashだった。ファイル出現直後には終了しておらず、stdoutの`SaveManager: Wrote 8192 bytes`を保存している。
+- フレーム計測: saveの現在frameとUnix時刻をlogへ付けるだけの一時計測を`SaveManager`へ追加してRelease buildし、隔離copyで3回実行後に計測コードを完全にrevertした。全runで最初のflush requestはframe 167、50回目かつ最後の初期化requestはframe 216だった。request列は816–817 ms継続した。disk writeはSaveManagerのreal-time debounce後で、run2はframe 330 / 7,823 ms、run3はframe 290 / 7,475 ms、run4はframe 302 / 6,676 ms。書き込みframeの差はdebounceをwall clockで行うためで、生成内容には差がない。意味上のsave内容生成完了は全run共通のframe 216、disk永続化完了は起動後6.7–7.8秒である。
+- 画面・入力: saveなしの`run4-instrumented-noinput`を入力なしで10.5秒まで動かし、`New Super Mario Bros.`の`Select a Game`画面到達をWindows `PrintWindow` captureで確認した。ただしsaveのdisk writeは同runでframe 302 / 6,676 msに完了しており、タイトル画面への到達・操作はsave生成条件ではない。証跡は`run4-instrumented-noinput/noinput-title-after-10s.png`。
+- 再起動: 生成済みsaveを残した`run1-normal-noinput`と`run3-instrumented-noinput`を再起動し、stdoutで`probe.sav`のread openを確認した。10–12秒無入力でタイトル画面へ到達し、flush requestは0件、終了後hashも不変だった。どちらも`CloseMainWindow`で正常終了した。画面証跡は`run3-instrumented-noinput/restart-printwindow-after-10s.png`。
+- 構造比較: 正常saveと全生成saveは完全一致するため構造差は0 bytes。8 KiB全体は同一内容の4 KiB halfを2個持ち、各halfはoffset `0x0002`にASCII `Mario2d\0` + `9000\0`、`0x0102`/`0x0382`/`0x0602`に同じ`Mario2d\0` + `7000\0`を持つ同一0x280-byte block 3個、`0x0882`に`Mario2d\0` + `3000`を持つ。`0x089E..0x0FFF`は全`FF`で、second half `0x1000..0x1FFF`はfirst halfの完全duplicate。byte集計は`00`が3,894、`FF`が4,060、その他238、distinct byte値23種類である。先頭2 bytesなどをchecksumと断定する追加解析は行っていない。
+- 生成物・log: `logs/save-bootstrap-measurement-20260806`に通常run、3計測run、再起動stdout/stderr、各`probe.sav`、画面PNG、隔離ROM/config/binary copyを保持する。一時計測binaryのSHA-256は`4d6f887870594b831d30a2785f1bc983ce9ba36706f264cf7347acb294c28f97`。計測終了後はsourceをHEADと同一へ戻して通常binaryを再buildし、上のcanonical save bootstrap実装へ進んだ。
+- Current blocker: 実測自体のblockerはなし。この結果を採用した本実装と異常系検証は上節へ移した。
+- Next action: 必須作業はなし。実配布installerを別環境へinstallする場合は、完全初回オンボーディングの目視確認を追加できる。
+- Verification: source instrumentationのrevert後に`git hash-object`とHEAD blob hashが3 fileすべて一致することを確認し、通常Release `melonDS.exe`を再buildした。CTestは16/16成功。計測run終了後にmelonDS processは残っておらず、元ROM/save/configの変更もない。
+
 ## 開始状態・再戦epoch・セーブ同一性の防御実装 - 2026-08-06
 
 - 完了: 未コミットだった自動再現ハーネス一式を`stash@{0}`（`wip: 同期ズレ自動再現テストと調査記録を退避`）へ退避し、同期修正をcleanな`f7836da9`から実装した。stashは復元していない。
@@ -7,7 +35,7 @@
 - 完了: 初戦をgeneration 0、再戦をgeneration 1以降として、入力単体packet、入力bundle、start-ready、NSML packet、game-state packetへgenerationを付加した。再戦resetでqueueとhandshakeを世代ごとに初期化し、異なるgenerationの遅延packetは受信時に拒否する。wire/session/input protocolはversion 2へ更新した。
 - 完了: start-readyを64 bytesへ拡張し、generation、sender raw ready frame、共有epoch、stage ID/group、match seed、packet tick、RNG値/call count/branch、role-local値やaddress/animationを除外したsemantic hashを交換する。全項目が一致した場合だけ入力epochを解放し、不一致時は理由と両値をlogへ出してgameplay開始を拒否する。Host/Clientで本質的に異なる値を含むfull savestate hashの単純比較は採用していない。
 - 完了: state-syncの比較・適用・送信frameを入力と同じlogical座標へ統一し、start-ready検証完了前のstate packetと異世代packetを拒否する。これでraw ready差による同一frame名の誤比較と、前試合stateの混入を防ぐ。
-- 完了: Bigstarは選択元ROMと同basenameの`.sav`を起動前に検査し、8,192 bytes以外、全0、全`FF`、missingを拒否する。元saveは変更せず、同じbytesをBigstar管理下のHost/Client ROM双方の`.sav`へ複製する。save SHA-256をROM manifest、`rom_pair_id`、signaling schema、launcher/feedback identityへ含め、起動直前にも管理saveのhashを再照合する。
+- 完了: 当初は選択元ROM横の`.sav`を検査・複製する実装だったが、後続のcanonical save bootstrapで廃止した。現在はベースROM SHA-256別のBigstar管理canonicalを自動生成・厳格検証し、Host/Client作業saveへ毎回copyする。save SHA-256をROM manifest、`rom_pair_id`、signaling schema、launcher/feedback identityへ含め、起動直前にも共通ensureとidentity hard gateを通す。
 - 現在のblocker: ROMなしの単体・build検証は完了したが、実ROMを使うHost/Client GUI 2-processで新start-readyが正常状態を受理し、意図した不一致だけを拒否するend-to-end確認は未実施である。特にready時packet tick/RNGが本当にrole-invariantかは実機logで確認が必要。protocol version 2とsignaling schemaは旧版と非互換なので、実対戦では両peerのmelonDS/Bigstarとserverを同じ変更へ揃える必要がある。
 - 次のaction: まずlocal 2-processまたはノートPC・テザリングで初戦と複数再戦を行い、`start ready ... accepted`、generation、raw ready差、shared epoch、semantic hashを両peerで確認する。不一致拒否が出た場合はreason別の両値からsemantic fieldを調整し、正常開始を確認後に退避した100回自動再現ハーネスを新protocolへ載せ直す。
 - Verification: melonDS Release build成功、CTest 16/16成功。Bigstar Rust test 56/56、`cargo fmt`、strict Clippy成功。Bigstar GUI full CIはedition 15件、unit 36件、browser 68件、Playwright 2件を含め全成功。signaling server CIは11件成功し、typecheck/Biomeも成功した。
@@ -587,7 +615,7 @@
 - Fix applied for script runs: `scripts\run-nsmb-mvl-lan-route-smoke.ps1` now treats missing, all-zero, or all-`0xFF` 8192-byte `nsmb.sav` as unusable and falls back to the repo stable `roms\nsmb-us.sav`.
   - Verification: rerunning the no-save ROM source through `logs\codex-hipdrop-nosave-after-fallback-20260617-sw2` pre-seeded the stable save SHA-256 `42ffb80e234c01d5784bdc291fee41c26e59f66295d7f105c798ba8dde11b2ee`, opened `nsmb.sav` at startup, patched Net/Game random at frame 785 with `oldNetCount=0x01`, and no longer showed the solid white square in the frame 1048-1084 contact sheet.
 - Current blocker: none for the script-side white-square reproduction. The remaining underlying emulator/game behavior is that invalid/unformatted NSMB save contents change early boot/MvL timing and can produce corrupted-looking ground-pound smoke.
-- Next action: keep manual/script MvL launch paths from starting with invalid NSMB saves. If GUI ever runs without a valid AppData save, apply the same pre-seed/validation there.
+- Resolved follow-up: GUI/Bigstar側も2026-08-06のcanonical save bootstrapでmissing／不正saveを自動生成・厳格検証し、対戦直前にHost/Client作業saveへ再copyするようになった。manual/script経路の既存fallbackとは別に、GUIが無効saveで起動する残課題は解消した。
 - Verification: `cargo fmt --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, `cargo test --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, and `cargo clippy --manifest-path tools\nsmb-mvl-rom\Cargo.toml --all-targets -- -D warnings` passed. `cargo clippy-all` could not be used because the alias is not installed in this environment.
 
 ## Current low-overhead diagnostic event logging - 2026-06-17

@@ -65,6 +65,7 @@
 #include "Savestate.h"
 
 #include "EmuInstance.h"
+#include "SaveBootstrap.h"
 #include "NsmbMvlNetplayRuntime.h"
 
 using namespace melonDS;
@@ -870,7 +871,10 @@ void EmuThread::run()
             }
 
             if (emuInstance->ndsSave)
+            {
                 emuInstance->ndsSave->CheckFlush();
+                SaveBootstrap::Observe(emuInstance->ndsSave.get(), emuInstance->nds->NumFrames);
+            }
 
             if (emuInstance->gbaSave)
                 emuInstance->gbaSave->CheckFlush();

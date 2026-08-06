@@ -89,6 +89,8 @@ set(SOURCES_QT_SDL
     Platform_AAC.cpp
     QPathInput.h
     SaveManager.cpp
+    SaveBootstrap.cpp
+    SaveBootstrap.h
     CameraManager.cpp
     AboutDialog.cpp
     AboutDialog.h
