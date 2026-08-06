@@ -628,6 +628,7 @@ private:
 };
 
 struct DecodedGameState {
+  melonDS::u32 Generation = 0;
   melonDS::u32 Frame = 0;
   melonDS::u32 Instance = 0;
   GameStateSample Sample;
@@ -679,10 +680,13 @@ private:
 };
 
 melonDS::u64 ComputeBasicGameStateHash(const GameStateSample &sample);
+melonDS::u64 ComputeStartReadySemanticHash(const GameStateSample &sample,
+                                           melonDS::u32 stageSceneSettings);
 melonDS::u64 CombinedGameStateHash(const GameStateSyncHashes &hashes);
 
 WireProtocol::WireGameState
 EncodeWireGameState(melonDS::u32 frame, melonDS::u32 instance,
+                    melonDS::u32 generation,
                     const GameStateSample &sample,
                     const GameStateSyncHashes &hashes);
 bool DecodeWireGameState(const WireProtocol::WireGameState &packet,

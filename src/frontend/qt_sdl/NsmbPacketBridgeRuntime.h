@@ -37,9 +37,10 @@ InputState SelectPlayerInput(int player, int localPlayer,
                              const InputState &remoteInput,
                              bool hasRemoteInput);
 melonDS::u32 CanonicalTick(const Config::PacketBridgeConfig &config,
+                           melonDS::u32 sharedLogicalEpoch,
                            melonDS::u32 frame, melonDS::u32 observedTick);
 bool IsAcceptedIncomingPacket(const WireProtocol::WireNSMLPacket &packet,
-                              melonDS::u32 restartCutoffFrame);
+                              melonDS::u32 expectedGeneration);
 
 class Runtime {
 public:
@@ -58,7 +59,8 @@ public:
   std::size_t PendingPacketCount() const;
 
   std::optional<WireProtocol::WireNSMLPacket>
-  PrepareOutgoingPacket(melonDS::u32 frame, melonDS::u32 player,
+  PrepareOutgoingPacket(melonDS::u32 generation, melonDS::u32 frame,
+                        melonDS::u32 player,
                         melonDS::u32 tick, const melonDS::u8 packetBytes[52],
                         const Config::PacketBridgeConfig &config,
                         Clock::time_point now);

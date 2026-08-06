@@ -89,6 +89,7 @@ void TestBundleInputSelection()
     localInputs[2].KeyMask = 0xFDF;
 
     const auto entries = NsmbMvlNetplay::InputDelivery::SelectBundleInputs(
+        7,
         2,
         current,
         31,
@@ -122,7 +123,7 @@ void TestRuntimePreparesWirePayloads()
     current.KeyMask = 0xFFE;
     const auto now = Runtime::Clock::time_point(std::chrono::seconds(10));
 
-    auto prepared = runtime.Prepare(4, current, {}, localInputs, now);
+    auto prepared = runtime.Prepare(7, 4, current, {}, localInputs, now);
     CHECK(!prepared.Decision.Drop);
     CHECK(!prepared.Decision.Bundle);
     NsmbMvlNetplay::InputProtocol::FramedInput single;
@@ -136,7 +137,7 @@ void TestRuntimePreparesWirePayloads()
     SendConfig bundle;
     bundle.UseHistoryBundle = true;
     bundle.BundleHistory = 2;
-    prepared = runtime.Prepare(4, current, bundle, localInputs, now);
+    prepared = runtime.Prepare(7, 4, current, bundle, localInputs, now);
     std::vector<NsmbMvlNetplay::InputProtocol::FramedInput> entries;
     CHECK(prepared.Decision.Bundle);
     CHECK(NsmbMvlNetplay::InputProtocol::DecodeInputBundle(
@@ -148,7 +149,7 @@ void TestRuntimePreparesWirePayloads()
 
     SendConfig drop;
     drop.DropModulo = 1;
-    prepared = runtime.Prepare(5, current, drop, localInputs, now);
+    prepared = runtime.Prepare(7, 5, current, drop, localInputs, now);
     CHECK(prepared.Decision.Drop);
     CHECK(prepared.ImmediatePayload.empty());
     CHECK(runtime.PendingCount() == 0);
@@ -164,7 +165,7 @@ void TestRuntimeOwnsDelayedQueue()
     config.DelayFrames = 3;
     const auto now = Runtime::Clock::time_point(std::chrono::seconds(10));
 
-    const auto prepared = runtime.Prepare(10, current, config, localInputs, now);
+    const auto prepared = runtime.Prepare(7, 10, current, config, localInputs, now);
     CHECK(prepared.ImmediatePayload.empty());
     CHECK(prepared.Decision.DelayFrames == 3);
     CHECK(runtime.PendingCount() == 1);
@@ -183,12 +184,12 @@ void TestRuntimeOwnsDelayedQueue()
         due[0].data(), due[0].size(), decoded));
     CHECK(decoded.Frame == 10 && decoded.Input.KeyMask == 0xFDF);
 
-    runtime.Prepare(20, current, config, localInputs, now);
+    runtime.Prepare(7, 20, current, config, localInputs, now);
     due.clear();
     runtime.DrainDue(20, now + std::chrono::milliseconds(50), collect);
     CHECK(due.size() == 1);
-    runtime.Prepare(30, current, config, localInputs, now);
-    runtime.Prepare(31, current, config, localInputs, now);
+    runtime.Prepare(7, 30, current, config, localInputs, now);
+    runtime.Prepare(7, 31, current, config, localInputs, now);
     due.clear();
     runtime.DrainDue(33, now, collect);
     CHECK(due.size() == 1);

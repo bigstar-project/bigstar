@@ -32,22 +32,26 @@ InputState SelectPlayerInput(int player, int localPlayer,
 }
 
 melonDS::u32 CanonicalTick(const Config::PacketBridgeConfig &config,
+                           melonDS::u32 sharedLogicalEpoch,
                            melonDS::u32 frame, melonDS::u32 observedTick) {
-  if (!config.ForceTickEnabled || frame < config.ForceTickStartFrame ||
+  const melonDS::u32 startFrame = sharedLogicalEpoch != 0
+                                      ? sharedLogicalEpoch
+                                      : config.ForceTickStartFrame;
+  if (!config.ForceTickEnabled || frame < startFrame ||
       config.ForceTickBase < 0)
     return observedTick;
   return (static_cast<melonDS::u32>(config.ForceTickBase) +
-          (frame - config.ForceTickStartFrame)) &
+          (frame - startFrame)) &
          0xFFFF;
 }
 
 bool IsAcceptedIncomingPacket(const WireProtocol::WireNSMLPacket &packet,
-                              melonDS::u32 restartCutoffFrame) {
+                              melonDS::u32 expectedGeneration) {
   if (packet.Magic != WireProtocol::kMagic ||
       packet.Version != WireProtocol::kVersion ||
       packet.Kind != WireProtocol::kWireKindPacket || packet.Player > 1)
     return false;
-  return restartCutoffFrame == 0 || packet.Frame > restartCutoffFrame;
+  return packet.Generation == expectedGeneration;
 }
 
 void Runtime::ResetQueuesForRestart() {
@@ -106,7 +110,8 @@ std::size_t Runtime::PendingPacketCount() const {
 }
 
 std::optional<WireProtocol::WireNSMLPacket> Runtime::PrepareOutgoingPacket(
-    melonDS::u32 frame, melonDS::u32 player, melonDS::u32 tick,
+    melonDS::u32 generation, melonDS::u32 frame, melonDS::u32 player,
+    melonDS::u32 tick,
     const melonDS::u8 packetBytes[52], const Config::PacketBridgeConfig &config,
     Clock::time_point now) {
   if (!packetBytes || player > 1)
@@ -116,6 +121,7 @@ std::optional<WireProtocol::WireNSMLPacket> Runtime::PrepareOutgoingPacket(
   packet.Magic = WireProtocol::kMagic;
   packet.Version = WireProtocol::kVersion;
   packet.Kind = WireProtocol::kWireKindPacket;
+  packet.Generation = generation;
   packet.Frame = frame;
   packet.Player = player;
   packet.Tick = tick;

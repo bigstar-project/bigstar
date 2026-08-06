@@ -19,7 +19,9 @@ use crate::processes::{
     remove_inherited_melonds_env_keys, run_bridge_signaling_smoke, session_status_inner,
     should_show_game_state_mismatch_in_gui, start_match_resolved, stop_existing, LaunchPaths,
 };
-use crate::roms::{reusable_rom_is_current, reusable_rom_marker_path, write_reusable_rom_marker};
+use crate::roms::{
+    reusable_rom_is_current, reusable_rom_marker_path, validate_rom_save, write_reusable_rom_marker,
+};
 use crate::settings::{selected_stage, validate_request};
 use crate::state::AppState;
 
@@ -57,11 +59,46 @@ fn request(role: Role) -> LaunchRequest {
     }
 }
 
+fn request_for_launch(role: Role, paths: &LaunchPaths) -> LaunchRequest {
+    let mut request = request(role);
+    request.rom_identity = Some(RomIdentity {
+        rom_pair_id: "pair_hash".to_owned(),
+        generator_id: "generator_hash".to_owned(),
+        host_rom_sha256: "host_hash".to_owned(),
+        client_rom_sha256: "client_hash".to_owned(),
+        bridge_sha256: "bridge_hash".to_owned(),
+        save_sha256: validate_rom_save(&paths.rom_path).expect("hash test save"),
+    });
+    request
+}
+
 fn temp_log_dir(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("bigstar-test-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&path);
     fs::create_dir_all(&path).expect("create temp log dir");
     path
+}
+
+#[test]
+fn rom_save_validation_accepts_only_initialized_8192_byte_save() {
+    let dir = temp_log_dir("save-validation");
+    let rom = dir.join("game.nds");
+    fs::write(&rom, b"rom").expect("write rom");
+
+    assert!(validate_rom_save(&rom).is_err());
+    fs::write(rom.with_extension("sav"), vec![1_u8; 8_191]).expect("write short save");
+    assert!(validate_rom_save(&rom).is_err());
+    fs::write(rom.with_extension("sav"), vec![0_u8; 8_192]).expect("write zero save");
+    assert!(validate_rom_save(&rom).is_err());
+    fs::write(rom.with_extension("sav"), vec![0xFF_u8; 8_192]).expect("write FF save");
+    assert!(validate_rom_save(&rom).is_err());
+
+    let mut valid = vec![0_u8; 8_192];
+    valid[37] = 1;
+    fs::write(rom.with_extension("sav"), valid).expect("write valid save");
+    assert_eq!(validate_rom_save(&rom).expect("valid save").len(), 64);
+
+    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -250,6 +287,9 @@ fn launch_paths(dir: &Path, bridge_path: PathBuf, melon_path: PathBuf) -> Launch
     let rom_path = dir.join("host.nds");
     fs::write(&input_script, b"").expect("write input script");
     fs::write(&rom_path, b"fake rom").expect("write fake rom");
+    let mut save = vec![0_u8; 8_192];
+    save[0] = 1;
+    fs::write(rom_path.with_extension("sav"), save).expect("write fake save");
     LaunchPaths {
         log_dir: dir.join("logs"),
         bridge_path,
@@ -1028,7 +1068,8 @@ fn feedback_summary_includes_peer_runtime_and_artifact_identities_without_paths(
                     "generator_id": "generator_hash",
                     "host_rom_sha256": "host_rom_hash",
                     "client_rom_sha256": "client_rom_hash",
-                    "bridge_sha256": "bridge_hash"
+                    "bridge_sha256": "bridge_hash",
+                    "save_sha256": "save_hash"
                 }
             },
             "paths": {
@@ -1080,6 +1121,7 @@ fn feedback_summary_includes_peer_runtime_and_artifact_identities_without_paths(
         summary["session"]["rom"]["client_rom_sha256"],
         "client_rom_hash"
     );
+    assert_eq!(summary["session"]["rom"]["save_sha256"], "save_hash");
     assert_eq!(
         summary["emulator"]["artifacts"]["melonds"]["sha256"],
         "melon_hash"
@@ -1276,6 +1318,7 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
         host_rom_sha256: "host_hash".to_owned(),
         client_rom_sha256: "client_hash".to_owned(),
         bridge_sha256: "bridge_hash".to_owned(),
+        save_sha256: validate_rom_save(&paths.rom_path).expect("hash test save"),
     });
     let response = start_match_resolved(&state, launch_request, paths).expect("start fake match");
     assert!(response.bridge_pid > 0);
@@ -1386,8 +1429,8 @@ fn start_match_resolved_does_not_store_session_when_melon_spawn_fails() {
     fs::create_dir_all(&paths.log_dir).expect("create logs");
 
     let state = AppState::default();
-    let err =
-        start_match_resolved(&state, request(Role::Host), paths).expect_err("melon spawn fails");
+    let launch_request = request_for_launch(Role::Host, &paths);
+    let err = start_match_resolved(&state, launch_request, paths).expect_err("melon spawn fails");
     assert!(err.contains("melonDS の起動に失敗しました"));
 
     let status = session_status_inner(&state).expect("status after failed start");
@@ -1405,7 +1448,8 @@ fn session_status_terminates_bridge_when_melon_exits() {
     fs::create_dir_all(&paths.log_dir).expect("create logs");
 
     let state = AppState::default();
-    start_match_resolved(&state, request(Role::Host), paths).expect("start fake match");
+    let launch_request = request_for_launch(Role::Host, &paths);
+    start_match_resolved(&state, launch_request, paths).expect("start fake match");
     let ai_log = dir.join("logs").join("ai-observations-v3.jsonl");
     fs::write(&ai_log, "{\"frame\":1}\n").expect("write active AI log");
 

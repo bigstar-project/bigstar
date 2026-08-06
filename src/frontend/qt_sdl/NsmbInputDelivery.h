@@ -36,6 +36,7 @@ struct SendDecision
 
 SendDecision DecideSend(melonDS::u32 frame, const SendConfig& config);
 std::vector<InputProtocol::FramedInput> SelectBundleInputs(
+    melonDS::u32 generation,
     melonDS::u32 frame,
     const InputState& currentInput,
     int history,
@@ -58,6 +59,7 @@ public:
     using Clock = std::chrono::steady_clock;
 
     PreparedSend Prepare(
+        melonDS::u32 generation,
         melonDS::u32 frame,
         const InputState& input,
         const SendConfig& config,
@@ -68,6 +70,7 @@ public:
         Clock::time_point now,
         const std::function<void(const std::vector<char>&)>& send);
     std::vector<char> BuildPayload(
+        melonDS::u32 generation,
         melonDS::u32 frame,
         const InputState& input,
         int bundleHistory,

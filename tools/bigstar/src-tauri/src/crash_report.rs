@@ -365,6 +365,7 @@ fn feedback_summary(
                 "host_rom_sha256": rom_identity.get("host_rom_sha256"),
                 "client_rom_sha256": rom_identity.get("client_rom_sha256"),
                 "bridge_sha256": rom_identity.get("bridge_sha256"),
+                "save_sha256": rom_identity.get("save_sha256"),
             },
         },
         "network": {

@@ -281,6 +281,7 @@ pub(crate) struct RomIdentity {
     pub(crate) client_rom_sha256: String,
     #[serde(default)]
     pub(crate) bridge_sha256: String,
+    pub(crate) save_sha256: String,
 }
 
 #[derive(Serialize, Type)]

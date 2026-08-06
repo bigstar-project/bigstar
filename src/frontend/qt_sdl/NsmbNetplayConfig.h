@@ -37,7 +37,11 @@ struct ConnectionConfig {
   int WarmupFrames = 0;
   int Port = 8065;
   int LocalInstance = 0;
+  // Immutable configured baseline. Runtime code must use the two fields below
+  // so a peer-local restore frame never becomes a shared input coordinate.
   std::uint32_t StartFrame = 0;
+  std::uint32_t LocalStartupRawFrame = 0;
+  std::uint32_t SharedLogicalEpoch = 0;
   bool LocalWaitsForRemote = true;
   bool RemoteInputTimeoutFatal = false;
   std::string PeerHost = "127.0.0.1";

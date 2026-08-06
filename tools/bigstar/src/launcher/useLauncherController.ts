@@ -162,7 +162,7 @@ function feedbackUploadUrl(signalUrl: string) {
 function assertRomPairMatches(local: RomIdentity, remote: RomIdentity) {
   if (local.rom_pair_id !== remote.rom_pair_id) {
     throw new Error(
-      `ROMまたはbridgeが相手と一致しません local=${local.rom_pair_id.slice(0, 12)} remote=${remote.rom_pair_id.slice(0, 12)}`,
+      `ROM、セーブ、またはbridgeが相手と一致しません local=${local.rom_pair_id.slice(0, 12)} remote=${remote.rom_pair_id.slice(0, 12)}`,
     );
   }
 }

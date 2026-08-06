@@ -257,6 +257,43 @@ melonDS::u64 ComputeBasicGameStateHash(const GameStateSample &sample) {
   return hash;
 }
 
+melonDS::u64 ComputeStartReadySemanticHash(const GameStateSample &sample,
+                                           melonDS::u32 stageSceneSettings) {
+  // Deliberately excludes role-local network fields, raw-frame animation
+  // positions, object addresses/GUIDs, and input registers. These counters and
+  // configured identities must match before gameplay input is released.
+  melonDS::u64 hash = 1469598103934665603ull;
+  MixGameStateValue(hash, sample.StageID);
+  MixGameStateValue(hash, sample.StageGroup);
+  MixGameStateValue(hash, sample.VsMode);
+  MixGameStateValue(hash, stageSceneSettings);
+  MixGameStateValue(hash, sample.PlayerCount);
+  MixGameStateValue(hash, sample.Player0Powerup);
+  MixGameStateValue(hash, sample.Player1Powerup);
+  MixGameStateValue(hash, sample.Player0InventoryPowerup);
+  MixGameStateValue(hash, sample.Player1InventoryPowerup);
+  MixGameStateValue(hash, sample.Player0Dead);
+  MixGameStateValue(hash, sample.Player1Dead);
+  MixGameStateValue(hash, sample.Player0Character);
+  MixGameStateValue(hash, sample.Player1Character);
+  MixGameStateValue(hash, sample.Player0Lives);
+  MixGameStateValue(hash, sample.Player1Lives);
+  MixGameStateValue(hash, sample.Player0BattleStars);
+  MixGameStateValue(hash, sample.Player1BattleStars);
+  MixGameStateValue(hash, sample.Player0Coins);
+  MixGameStateValue(hash, sample.Player1Coins);
+  MixGameStateValue(hash, sample.Player0Score);
+  MixGameStateValue(hash, sample.Player1Score);
+  MixGameStateValue(hash, sample.Player0DisplayedStars);
+  MixGameStateValue(hash, sample.Player1DisplayedStars);
+  MixGameStateValue(hash, sample.Player0Deaths);
+  MixGameStateValue(hash, sample.Player1Deaths);
+  MixGameStateValue(hash, sample.Player0CollectedStars);
+  MixGameStateValue(hash, sample.Player1CollectedStars);
+  MixGameStateValue(hash, sample.VsCoinCount);
+  return hash;
+}
+
 melonDS::u64 CombinedGameStateHash(const GameStateSyncHashes &hashes) {
   melonDS::u64 combined = hashes.Basic;
   MixGameStateValue(combined, hashes.PlayerGlobal);
@@ -267,12 +304,14 @@ melonDS::u64 CombinedGameStateHash(const GameStateSyncHashes &hashes) {
 
 WireProtocol::WireGameState
 EncodeWireGameState(melonDS::u32 frame, melonDS::u32 instance,
+                    melonDS::u32 generation,
                     const GameStateSample &sample,
                     const GameStateSyncHashes &hashes) {
   WireProtocol::WireGameState packet{};
   packet.Magic = WireProtocol::kMagic;
   packet.Version = WireProtocol::kVersion;
   packet.Kind = WireProtocol::kWireKindState;
+  packet.Generation = generation;
   packet.Frame = frame;
   packet.Instance = instance;
 #define COPY_TO_WIRE(name) packet.name = sample.name;
@@ -303,6 +342,7 @@ bool DecodeWireGameState(const WireProtocol::WireGameState &packet,
     return false;
 
   DecodedGameState result;
+  result.Generation = packet.Generation;
   result.Frame = packet.Frame;
   result.Instance = packet.Instance;
 #define COPY_FROM_WIRE(name) result.Sample.name = packet.name;

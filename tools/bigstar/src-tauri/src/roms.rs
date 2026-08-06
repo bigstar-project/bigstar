@@ -13,7 +13,8 @@ use crate::settings::{course_mode_value, lives_value};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const MANIFEST_VERSION: u8 = 1;
+const MANIFEST_VERSION: u8 = 2;
+const EXPECTED_SAVE_SIZE: usize = 8_192;
 const ROM_GENERATOR_SOURCES: &[&str] = &[
     include_str!("../../../bigstar-rom/src/lib.rs"),
     include_str!("../../../bigstar-rom/src/binary.rs"),
@@ -28,6 +29,7 @@ pub(crate) struct RomManifestInputs {
     rom_format: String,
     generator_id: String,
     source_rom_sha256: String,
+    source_save_sha256: String,
     symbols_sha256: String,
     options: RomManifestOptions,
 }
@@ -57,6 +59,8 @@ pub(crate) fn prepare_roms(
 ) -> Result<GenerateRomResponse, String> {
     let (host_rom, client_rom) = fixed_generated_rom_paths(app)?;
     let source_rom = absolutize_existing(&request.source_rom)?;
+    let source_save = read_valid_save(&save_path_for_rom(&source_rom))?;
+    let source_save_sha256 = sha256_bytes(&source_save);
     let symbols = find_symbols_file(app)?;
     let bridge_sha256 = sha256_file(&find_bridge_binary(app)?)?;
     let inputs = RomManifestInputs {
@@ -64,14 +68,24 @@ pub(crate) fn prepare_roms(
         rom_format: REUSABLE_ROM_FORMAT.to_owned(),
         generator_id: rom_generator_id(),
         source_rom_sha256: sha256_file(&source_rom)?,
+        source_save_sha256: source_save_sha256.clone(),
         symbols_sha256: sha256_file(&symbols)?,
         options: canonical_rom_options(),
     };
 
+    ensure_parent_dir(&host_rom)?;
+    ensure_parent_dir(&client_rom)?;
+    install_managed_save(&host_rom, &source_save)?;
+    install_managed_save(&client_rom, &source_save)?;
+
     if !force {
-        if let Some(identity) =
-            reusable_rom_identity(&host_rom, &client_rom, &inputs, &bridge_sha256)?
-        {
+        if let Some(identity) = reusable_rom_identity(
+            &host_rom,
+            &client_rom,
+            &inputs,
+            &bridge_sha256,
+            &source_save_sha256,
+        )? {
             write_reusable_rom_manifest(
                 &host_rom,
                 &RomManifest {
@@ -95,8 +109,6 @@ pub(crate) fn prepare_roms(
         }
     }
 
-    ensure_parent_dir(&host_rom)?;
-    ensure_parent_dir(&client_rom)?;
     let options = bigstar_rom::StableRomOptions {
         source_rom,
         host_rom: host_rom.clone(),
@@ -117,6 +129,7 @@ pub(crate) fn prepare_roms(
         &sha256_file(&host_rom)?,
         &sha256_file(&client_rom)?,
         &bridge_sha256,
+        &source_save_sha256,
     );
     write_reusable_rom_manifest(
         &host_rom,
@@ -146,6 +159,7 @@ fn reusable_rom_identity(
     client_rom: &Path,
     inputs: &RomManifestInputs,
     bridge_sha256: &str,
+    save_sha256: &str,
 ) -> Result<Option<RomIdentity>, String> {
     if !host_rom.is_file() || !client_rom.is_file() {
         return Ok(None);
@@ -158,10 +172,16 @@ fn reusable_rom_identity(
     };
     let host_rom_sha256 = sha256_file(host_rom)?;
     let client_rom_sha256 = sha256_file(client_rom)?;
+    let host_save_sha256 = validate_rom_save(host_rom)?;
+    let client_save_sha256 = validate_rom_save(client_rom)?;
     if host_manifest.inputs != *inputs
         || client_manifest.inputs != *inputs
         || host_manifest.identity.host_rom_sha256 != host_rom_sha256
         || host_manifest.identity.client_rom_sha256 != client_rom_sha256
+        || host_manifest.identity.save_sha256 != save_sha256
+        || client_manifest.identity.save_sha256 != save_sha256
+        || host_save_sha256 != save_sha256
+        || client_save_sha256 != save_sha256
     {
         return Ok(None);
     }
@@ -170,6 +190,7 @@ fn reusable_rom_identity(
         &host_rom_sha256,
         &client_rom_sha256,
         bridge_sha256,
+        save_sha256,
     )))
 }
 
@@ -214,6 +235,63 @@ fn sha256_file(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+fn sha256_bytes(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
+
+fn save_path_for_rom(rom: &Path) -> PathBuf {
+    rom.with_extension("sav")
+}
+
+fn read_valid_save(path: &Path) -> Result<Vec<u8>, String> {
+    let bytes = fs::read(path).map_err(|err| {
+        format!(
+            "有効なセーブが必要です。{} を読み込めません: {err}",
+            path.to_string_lossy()
+        )
+    })?;
+    if bytes.len() != EXPECTED_SAVE_SIZE {
+        return Err(format!(
+            "セーブのサイズが不正です: {} ({} bytes、期待値 {} bytes)",
+            path.to_string_lossy(),
+            bytes.len(),
+            EXPECTED_SAVE_SIZE
+        ));
+    }
+    if bytes.iter().all(|byte| *byte == 0) {
+        return Err(format!(
+            "セーブが全0のため使用できません: {}",
+            path.to_string_lossy()
+        ));
+    }
+    if bytes.iter().all(|byte| *byte == 0xFF) {
+        return Err(format!(
+            "セーブが全FFのため使用できません: {}",
+            path.to_string_lossy()
+        ));
+    }
+    Ok(bytes)
+}
+
+fn install_managed_save(rom: &Path, bytes: &[u8]) -> Result<(), String> {
+    let save = save_path_for_rom(rom);
+    if fs::read(&save).is_ok_and(|current| current == bytes) {
+        return Ok(());
+    }
+    fs::write(&save, bytes).map_err(|err| {
+        format!(
+            "管理セーブ {} を保存できません: {err}",
+            save.to_string_lossy()
+        )
+    })
+}
+
+pub(crate) fn validate_rom_save(rom: &Path) -> Result<String, String> {
+    read_valid_save(&save_path_for_rom(rom)).map(|bytes| sha256_bytes(&bytes))
+}
+
 fn sha256_text(parts: &[&str]) -> String {
     let mut hasher = Sha256::new();
     for part in parts {
@@ -234,6 +312,7 @@ fn rom_identity(
     host_rom_sha256: &str,
     client_rom_sha256: &str,
     bridge_sha256: &str,
+    save_sha256: &str,
 ) -> RomIdentity {
     RomIdentity {
         rom_pair_id: rom_pair_id(
@@ -241,11 +320,13 @@ fn rom_identity(
             host_rom_sha256,
             client_rom_sha256,
             bridge_sha256,
+            save_sha256,
         ),
         generator_id: generator_id.to_owned(),
         host_rom_sha256: host_rom_sha256.to_owned(),
         client_rom_sha256: client_rom_sha256.to_owned(),
         bridge_sha256: bridge_sha256.to_owned(),
+        save_sha256: save_sha256.to_owned(),
     }
 }
 
@@ -254,12 +335,14 @@ fn rom_pair_id(
     host_rom_sha256: &str,
     client_rom_sha256: &str,
     bridge_sha256: &str,
+    save_sha256: &str,
 ) -> String {
     sha256_text(&[
         generator_id,
         host_rom_sha256,
         client_rom_sha256,
         bridge_sha256,
+        save_sha256,
     ])
 }
 
@@ -287,6 +370,7 @@ pub(crate) fn write_reusable_rom_marker(rom: &Path) -> Result<(), String> {
             rom_format: REUSABLE_ROM_FORMAT.to_owned(),
             generator_id: rom_generator_id(),
             source_rom_sha256: fake_sha.clone(),
+            source_save_sha256: fake_sha.clone(),
             symbols_sha256: fake_sha.clone(),
             options: RomManifestOptions {
                 stage: 0,
@@ -302,6 +386,7 @@ pub(crate) fn write_reusable_rom_marker(rom: &Path) -> Result<(), String> {
             host_rom_sha256: fake_sha.clone(),
             client_rom_sha256: fake_sha.clone(),
             bridge_sha256: fake_sha,
+            save_sha256: sha256_text(&["save"]),
         },
     };
     write_reusable_rom_manifest(rom, &manifest)

@@ -27,6 +27,7 @@ struct IntegrationContext {
   Runtime &State;
   NsmbNetplayTransport::Transport &Transport;
   std::mutex &Mutex;
+  melonDS::u32 Generation = 0;
 };
 
 struct IntegrationHooks {
@@ -43,8 +44,7 @@ struct IntegrationHooks {
 melonDS::u32 LocalPlayerID(IntegrationContext context, melonDS::NDS *nds);
 void ReceivePacketLocked(IntegrationContext context, const void *data,
                          std::size_t size, melonDS::NDS *nds,
-                         melonDS::u32 localFrame,
-                         melonDS::u32 restartCutoffFrame);
+                         melonDS::u32 localFrame);
 void ApplyPendingPacketsLocked(IntegrationContext context, melonDS::NDS *nds);
 void PumpLocked(IntegrationContext context, const IntegrationHooks &hooks,
                 melonDS::NDS *nds, melonDS::u32 frame);

@@ -27,6 +27,7 @@ void Require(bool condition, const std::string &message) {
 WireNSMLPacket MakePacket(melonDS::u32 frame, melonDS::u32 player,
                           melonDS::u32 tick) {
   WireNSMLPacket packet{};
+  packet.Generation = 1;
   packet.Frame = frame;
   packet.Player = player;
   packet.Tick = tick;
@@ -67,14 +68,15 @@ void TestInputSelectionAndCanonicalTick() {
           "missing remote input falls back to neutral active-low keys");
 
   PacketBridgeConfig config;
-  Require(CanonicalTick(config, 100, 0x1234) == 0x1234,
+  Require(CanonicalTick(config, 0, 100, 0x1234) == 0x1234,
           "disabled forced tick preserves the observed game tick");
   config.ForceTickEnabled = true;
   config.ForceTickStartFrame = 100;
   config.ForceTickBase = 0xFFF0;
-  Require(CanonicalTick(config, 99, 0x1234) == 0x1234 &&
-              CanonicalTick(config, 100, 0x1234) == 0xFFF0 &&
-              CanonicalTick(config, 132, 0x1234) == 0x0010,
+  Require(CanonicalTick(config, 0, 99, 0x1234) == 0x1234 &&
+              CanonicalTick(config, 0, 100, 0x1234) == 0xFFF0 &&
+              CanonicalTick(config, 0, 132, 0x1234) == 0x0010 &&
+              CanonicalTick(config, 200, 200, 0x1234) == 0xFFF0,
           "forced tick starts on its configured frame and wraps to 16 bits");
 }
 
@@ -83,20 +85,20 @@ void TestIncomingPacketPolicy() {
   packet.Magic = NsmbMvlNetplay::WireProtocol::kMagic;
   packet.Version = NsmbMvlNetplay::WireProtocol::kVersion;
   packet.Kind = NsmbMvlNetplay::WireProtocol::kWireKindPacket;
+  packet.Generation = 4;
   packet.Frame = 100;
   packet.Player = 1;
-  Require(IsAcceptedIncomingPacket(packet, 0) &&
-              IsAcceptedIncomingPacket(packet, 99),
-          "valid packet newer than restart cutoff is accepted");
-  Require(!IsAcceptedIncomingPacket(packet, 100) &&
-              !IsAcceptedIncomingPacket(packet, 101),
-          "packet at or before restart cutoff is rejected");
+  Require(IsAcceptedIncomingPacket(packet, 4),
+          "packet from the current generation is accepted");
+  Require(!IsAcceptedIncomingPacket(packet, 3) &&
+              !IsAcceptedIncomingPacket(packet, 5),
+          "packet from another generation is rejected");
   packet.Player = 2;
-  Require(!IsAcceptedIncomingPacket(packet, 0),
+  Require(!IsAcceptedIncomingPacket(packet, 4),
           "out-of-range player packet is rejected");
   packet.Player = 1;
   packet.Version++;
-  Require(!IsAcceptedIncomingPacket(packet, 0),
+  Require(!IsAcceptedIncomingPacket(packet, 4),
           "wire contract mismatch is rejected");
 }
 
@@ -115,16 +117,17 @@ void TestPacketQueuesAndDelay() {
   PacketBridgeConfig config;
   const auto now = Runtime::Clock::time_point{};
   const auto immediate =
-      runtime.PrepareOutgoingPacket(5, 1, 9, bytes, config, now);
+      runtime.PrepareOutgoingPacket(4, 5, 1, 9, bytes, config, now);
   Require(immediate && immediate->Frame == 5 && immediate->Player == 1 &&
-              immediate->Tick == 9 && immediate->Packet[2] == 0xAA,
+              immediate->Tick == 9 && immediate->Generation == 4 &&
+              immediate->Packet[2] == 0xAA,
           "zero-delay packet is encoded for immediate sending");
-  Require(!runtime.PrepareOutgoingPacket(5, 2, 9, bytes, config, now),
+  Require(!runtime.PrepareOutgoingPacket(4, 5, 2, 9, bytes, config, now),
           "invalid player is rejected");
 
   config.SendDelayFrames = 2;
   config.SendJitterFrames = 3;
-  Require(!runtime.PrepareOutgoingPacket(5, 0, 10, bytes, config, now) &&
+  Require(!runtime.PrepareOutgoingPacket(4, 5, 0, 10, bytes, config, now) &&
               runtime.DelayedPacketCount() == 1,
           "configured delay plus deterministic jitter queues the packet");
   Require(runtime.TakeDueOutgoingPackets(7, now + std::chrono::milliseconds(49))
@@ -135,7 +138,7 @@ void TestPacketQueuesAndDelay() {
   Require(dueByTime.size() == 1 && dueByTime[0].Tick == 10,
           "wall-clock deadline releases delayed packet");
 
-  Require(!runtime.PrepareOutgoingPacket(8, 0, 11, bytes, config, now),
+  Require(!runtime.PrepareOutgoingPacket(4, 8, 0, 11, bytes, config, now),
           "second delayed packet is queued");
   const auto dueByFrame = runtime.TakeDueOutgoingPackets(10, now);
   Require(dueByFrame.size() == 1 && dueByFrame[0].Tick == 11,
@@ -213,7 +216,7 @@ void TestRestartQueueReset() {
   PacketBridgeConfig config;
   config.SendDelayFrames = 1;
   melonDS::u8 bytes[52]{};
-  runtime.PrepareOutgoingPacket(1, 0, 1, bytes, config,
+  runtime.PrepareOutgoingPacket(1, 1, 0, 1, bytes, config,
                                 Runtime::Clock::time_point{});
   runtime.RecordReceivedPacket(0, 7, 8);
 

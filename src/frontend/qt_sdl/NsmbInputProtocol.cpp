@@ -10,13 +10,14 @@ namespace
 {
 
 constexpr melonDS::u32 kMagic = 0x4C4D534E; // "NSML", little endian
-constexpr melonDS::u32 kVersion = 1;
+constexpr melonDS::u32 kVersion = 2;
 constexpr melonDS::u32 kInputBundleKind = 0x42504E49; // "INPB", little endian
 
 struct WireInput
 {
     melonDS::u32 Magic;
     melonDS::u32 Version;
+    melonDS::u32 Generation;
     melonDS::u32 Frame;
     melonDS::u32 KeyMask;
     melonDS::u16 TouchX;
@@ -30,6 +31,7 @@ struct WireInputBundleHeader
     melonDS::u32 Magic;
     melonDS::u32 Version;
     melonDS::u32 Kind;
+    melonDS::u32 Generation;
     melonDS::u32 Count;
 };
 
@@ -52,6 +54,7 @@ WireInput ToWireInput(const FramedInput& input)
     WireInput wire {};
     wire.Magic = kMagic;
     wire.Version = kVersion;
+    wire.Generation = input.Generation;
     wire.Frame = input.Frame;
     wire.KeyMask = input.Input.KeyMask;
     wire.TouchX = input.Input.TouchX;
@@ -63,6 +66,7 @@ WireInput ToWireInput(const FramedInput& input)
 FramedInput FromWireInput(const WireInput& wire)
 {
     return {
+        wire.Generation,
         wire.Frame,
         {
             wire.KeyMask,
@@ -92,12 +96,15 @@ std::vector<char> EncodeInputBundle(const std::vector<FramedInput>& inputs)
     header.Magic = kMagic;
     header.Version = kVersion;
     header.Kind = kInputBundleKind;
+    header.Generation = inputs.front().Generation;
     header.Count = static_cast<melonDS::u32>(inputs.size());
 
     std::vector<WireInputBundleEntry> entries;
     entries.reserve(inputs.size());
     for (const FramedInput& input : inputs)
     {
+        if (input.Generation != header.Generation)
+            return {};
         entries.push_back({
             input.Frame,
             input.Input.KeyMask,
@@ -154,6 +161,7 @@ bool DecodeInputBundle(
         WireInputBundleEntry entry;
         std::memcpy(&entry, bytes + sizeof(entry) * index, sizeof(entry));
         inputs.push_back({
+            header.Generation,
             entry.Frame,
             {
                 entry.KeyMask,

@@ -21,6 +21,7 @@ use crate::models::{
     MelonDiagnostics, MvlPlayerResult, MvlStageResult, Role, SessionStatus,
 };
 use crate::process_job::ChildProcessJob;
+use crate::roms::validate_rom_save;
 use crate::settings::selected_stage;
 use crate::state::{AppState, ManagedSession};
 use sha2::{Digest, Sha256};
@@ -47,6 +48,17 @@ pub(crate) fn start_match_resolved(
     request: LaunchRequest,
     paths: LaunchPaths,
 ) -> Result<LaunchResponse, String> {
+    let save_sha256 = validate_rom_save(&paths.rom_path)?;
+    let identity = request
+        .rom_identity
+        .as_ref()
+        .ok_or_else(|| "ROM・セーブ同一性情報がないため対戦を開始できません".to_owned())?;
+    if identity.save_sha256 != save_sha256 {
+        return Err(format!(
+            "対戦用セーブのhashが準備時から変化しています: expected={} actual={}",
+            identity.save_sha256, save_sha256
+        ));
+    }
     stop_existing(state)?;
     append_session_event(&paths.log_dir, "launcher", "session_starting", None);
     write_launch_manifest(&paths, &request)?;

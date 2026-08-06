@@ -375,6 +375,7 @@ export type RomIdentity = {
 	host_rom_sha256: string,
 	client_rom_sha256: string,
 	bridge_sha256?: string,
+	save_sha256: string,
 };
 
 export type RunAiToolRequest = {

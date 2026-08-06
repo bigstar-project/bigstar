@@ -48,7 +48,8 @@ void TestEveryWireWordRoundTrips() {
   CHECK(GameStateModel::DecodeWireGameState(original, decoded));
   const WireProtocol::WireGameState encoded =
       GameStateModel::EncodeWireGameState(decoded.Frame, decoded.Instance,
-                                          decoded.Sample, decoded.Hashes);
+                                          decoded.Generation, decoded.Sample,
+                                          decoded.Hashes);
   CHECK(std::memcmp(&original, &encoded, sizeof(original)) == 0);
 }
 
@@ -56,12 +57,14 @@ void TestMalformedHeadersAreRejected() {
   using namespace NsmbMvlNetplay;
   const GameStateModel::GameStateSample sample;
   const GameStateModel::GameStateSyncHashes hashes;
-  const auto valid = GameStateModel::EncodeWireGameState(7, 2, sample, hashes);
+  const auto valid =
+      GameStateModel::EncodeWireGameState(7, 2, 3, sample, hashes);
   CHECK(valid.Magic == WireProtocol::kMagic);
   CHECK(valid.Version == WireProtocol::kVersion);
   CHECK(valid.Kind == WireProtocol::kWireKindState);
   CHECK(valid.Frame == 7);
   CHECK(valid.Instance == 2);
+  CHECK(valid.Generation == 3);
 
   GameStateModel::DecodedGameState decoded;
   auto invalid = valid;

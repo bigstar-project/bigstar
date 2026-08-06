@@ -1,6 +1,18 @@
 # NSMB Mario vs Luigi Online PoC
 
-## Bigstar Insiders 0.10.2 の同期エラー再発調査 - 2026-08-05
+## 開始状態・再戦epoch・セーブ同一性の防御実装 - 2026-08-06
+
+- 完了: 未コミットだった自動再現ハーネス一式を`stash@{0}`（`wip: 同期ズレ自動再現テストと調査記録を退避`）へ退避し、同期修正をcleanな`f7836da9`から実装した。stashは復元していない。
+- 完了: 各peer固有の`LocalStartupRawFrame`と、Hostが提示してClientが採用する`SharedLogicalEpoch`を分離した。再戦でも共有論理開始値は固定の`StartFrame`へ戻し、各peerのcheckpoint復元位置だけをraw frameとしてrebaseする。入力、PacketBridge、state-syncは論理frameを使用し、JIT内のpacket tickを`NDS::NumFrames`から再計算してraw差を戻す経路も廃止した。
+- 完了: 初戦をgeneration 0、再戦をgeneration 1以降として、入力単体packet、入力bundle、start-ready、NSML packet、game-state packetへgenerationを付加した。再戦resetでqueueとhandshakeを世代ごとに初期化し、異なるgenerationの遅延packetは受信時に拒否する。wire/session/input protocolはversion 2へ更新した。
+- 完了: start-readyを64 bytesへ拡張し、generation、sender raw ready frame、共有epoch、stage ID/group、match seed、packet tick、RNG値/call count/branch、role-local値やaddress/animationを除外したsemantic hashを交換する。全項目が一致した場合だけ入力epochを解放し、不一致時は理由と両値をlogへ出してgameplay開始を拒否する。Host/Clientで本質的に異なる値を含むfull savestate hashの単純比較は採用していない。
+- 完了: state-syncの比較・適用・送信frameを入力と同じlogical座標へ統一し、start-ready検証完了前のstate packetと異世代packetを拒否する。これでraw ready差による同一frame名の誤比較と、前試合stateの混入を防ぐ。
+- 完了: Bigstarは選択元ROMと同basenameの`.sav`を起動前に検査し、8,192 bytes以外、全0、全`FF`、missingを拒否する。元saveは変更せず、同じbytesをBigstar管理下のHost/Client ROM双方の`.sav`へ複製する。save SHA-256をROM manifest、`rom_pair_id`、signaling schema、launcher/feedback identityへ含め、起動直前にも管理saveのhashを再照合する。
+- 現在のblocker: ROMなしの単体・build検証は完了したが、実ROMを使うHost/Client GUI 2-processで新start-readyが正常状態を受理し、意図した不一致だけを拒否するend-to-end確認は未実施である。特にready時packet tick/RNGが本当にrole-invariantかは実機logで確認が必要。protocol version 2とsignaling schemaは旧版と非互換なので、実対戦では両peerのmelonDS/Bigstarとserverを同じ変更へ揃える必要がある。
+- 次のaction: まずlocal 2-processまたはノートPC・テザリングで初戦と複数再戦を行い、`start ready ... accepted`、generation、raw ready差、shared epoch、semantic hashを両peerで確認する。不一致拒否が出た場合はreason別の両値からsemantic fieldを調整し、正常開始を確認後に退避した100回自動再現ハーネスを新protocolへ載せ直す。
+- Verification: melonDS Release build成功、CTest 16/16成功。Bigstar Rust test 56/56、`cargo fmt`、strict Clippy成功。Bigstar GUI full CIはedition 15件、unit 36件、browser 68件、Playwright 2件を含め全成功。signaling server CIは11件成功し、typecheck/Biomeも成功した。
+
+## Bigstar Insiders 0.10.2 の同期エラー再発調査（実装前の根拠） - 2026-08-05
 
 - 優先対象: ユーザーが両peerの実画面でgame stateの相違を確認した3 sessionを、実同期破綻として主対象にする。`bigstar-1785854827100-51400-1`は`playerGlobal=0`が84件、`bigstar-1785858005579-63248-2`は87件、`bigstar-1785858354923-63248-3`は32件。GUIが最後の不一致をclearせず赤表示を残す問題も別に存在するが、これは3件の実同期破綻を否定する材料には使わない。
 - 発生形状: 前2 sessionは第1試合のframe `1380` / `1920`から発生し、いずれも最初の不一致より前にremote waitが一度もない。3件目は第3試合のframe `46020`から発生し、frame `48120..49980`ではほぼ連続して不一致のままresultへ進んだ。第1試合でも第3試合でも起き、stage 3とstage 4の両方で起きるため、再戦境界または特定courseだけに限定した故障ではない。
@@ -21,9 +33,9 @@
 - UI評価: `4f1d243c`は既存の不一致表示を`同期エラー`statusへ変更しただけで、backendの判定条件は変えていない。これは見え方の変更であって、3件の継続的player-global divergenceの原因ではない。
 - 診断情報改善: 今後のfeedbackでは実際に起動したmelonDSのbuild branch/commit/provider、JIT状態、melonDS/ROM/bridge/input script、save、configのSHA-256をpathなしで収集する。Insiders版は、生成済みのdiagnostic event、game-state、phase、watchdog、bridge eventと直近screenshotも容量制限付き・text機密値redact付きでarchiveへ含める。これは既存3 sessionの欠損情報を復元するものではなく、次回発生時の両peer比較を可能にするための変更である。
 - 現在の判断: 最近の版境界で発生率が上がったことは集計で支持される。実divergenceの候補順位は(1)開始checkpoint/stateと再戦epochをpeer間で一致確認しないprotocol欠陥、(2)0.10.2固有の`JumpTo()`高速化が既存のgame/runtime timing依存・raceを露出したtrigger、(3)identityで拒否できないremote側だけのmelonDS/save/runtime差、(4)priority変更単独、(5)通常のpacket loss/missing inputである。rename由来のsave basename変更は事実だがlocal新旧save/ROM/config一致と正常0.10.2 sessionがあり、JIT許可もconfigに依存しないため、名称変更単独説は`JumpTo()`間接triggerより下へ下げる。根本原因と最近のtriggerは分け、開始state/epoch検証を本修正、`4d2e38a7`前後A/Bを回帰triggerの確認とする。
-- Current blocker: 全該当sessionで`diagnostic_events_enabled=false`だったため、既に実装済みの`player_global_mismatch` JSONL（0x60単位sub-hash、actor hash、field diff、前後ring）が保存されていない。stdoutには0xC0全体hashしかなく、最初に異なったbyte/fieldを特定不能である。feedbackにもremote側のAI observationやfull RAM/event logは含まれない。
-- Next action: まず`4d2e38a7`直前/直後を同一toolchainでbuildし、同一60 FPS条件で複数回・複数matchのA/Bを行う。同時にstart-ready packetへsender raw ready、logical start/epoch、開始checkpoint semantic hash、melonDS/save/config identityを追加し、開始前に一致を必須化する。state-sync packetのframeもlogical座標へ揃える。ready時点ですでにhashが違えばboot/runtime identity側、ready一致後に初めて分岐すればrematch/JIT/race側へ切り分ける。旧/new save A/Bはremote save回収またはidentity計測後に行う。
-- Verification status: ログ・feedback・launcher manifest・bridge status・AI observation gzip・実配布binary timestamp/hash/build info・main ancestry差分・旧/current melonDS設定・app-data migration実装・新旧ROM/saveのpath/time/hashを照合済み。現行0.10.2でpriority 3条件、JIT混在、公式/local build混在のA/Bを実行した。`4d2e38a7`直前worktreeの構成はvcpkg依存導入が3回の各5分制限内に完了せず、前後binary A/Bは未完。残留build processは対象command lineで特定して停止し、worktree登録は解除済みだが、削除policyにより未登録一時directory `C:\Users\Sugiyama\melon-ds-pre4d-codex`（約324 MiB）は残っている。診断identity、Insiders feedback同梱、edition別upload上限の変更後に、C++ Release build/CTest 16件、Rust Public/Insiders各55件、Clippy、Bigstar全CI、signaling server全CIを通過した。
+- 当時の情報不足: 全該当sessionで`diagnostic_events_enabled=false`だったため、既に実装済みの`player_global_mismatch` JSONL（0x60単位sub-hash、actor hash、field diff、前後ring）が保存されていない。stdoutには0xC0全体hashしかなく、最初に異なったbyte/fieldを特定不能である。feedbackにもremote側のAI observationやfull RAM/event logは含まれない。この欠損は既存sessionについては解消不能だが、上の防御実装は新しいstart-ready値をstdoutへ残す。
+- 当時の提案と現在: `4d2e38a7`直前/直後A/Bは未完のままだが、start-readyのsender raw ready、logical epoch、semantic hash、state-sync logical frame、save identityは2026-08-06に実装済み。旧/new save A/Bより先に、新protocolの実ROM2-peer検証を行う。
+- 当時のVerification: ログ・feedback・launcher manifest・bridge status・AI observation gzip・実配布binary timestamp/hash/build info・main ancestry差分・旧/current melonDS設定・app-data migration実装・新旧ROM/saveのpath/time/hashを照合済み。現行0.10.2でpriority 3条件、JIT混在、公式/local build混在のA/Bを実行した。`4d2e38a7`直前worktreeの構成はvcpkg依存導入が3回の各5分制限内に完了せず、前後binary A/Bは未完。残留build processは対象command lineで特定して停止し、worktree登録は解除済みだが、削除policyにより未登録一時directory `C:\Users\Sugiyama\melon-ds-pre4d-codex`（約324 MiB）は残っている。
 
 ## ARM9ジャンプ診断の性能修正をmainへ移植 - 2026-08-03
 

@@ -56,11 +56,18 @@ void ResetSyncStateForRestart(Context context, int instanceID,
   context.Session.Delivery.Clear();
   context.Inputs.ResetForRestart(kNoFrame);
   context.DiagnosticsRuntime.ResetNetplaySnapshot(kNoFrame);
-  context.Session.Handshake.ResetStartHandshake();
+  const melonDS::u32 generation = static_cast<melonDS::u32>(
+      std::max(0, context.Runtime.Instances[instanceID].RestartCount));
+  context.Connection.SharedLogicalEpoch =
+      context.Host ? context.Connection.StartFrame : 0;
+  context.Session.Handshake.BeginGeneration(
+      generation, context.Connection.SharedLogicalEpoch, context.Host);
   context.GameStateTrace.ResetForRestart(instanceID);
   std::printf("NSMB MvL auto restart: reset sync caches inst=%d frame=%u "
-              "cutoff=%u\n",
-              instanceID, frame, RestartPacketCutoffFrame(context));
+              "generation=%u localStartupRaw=%u sharedEpoch=%u\n",
+              instanceID, frame, generation,
+              context.Connection.LocalStartupRawFrame,
+              context.Connection.SharedLogicalEpoch);
   std::fflush(stdout);
 }
 
@@ -69,17 +76,9 @@ void RebaseStartupFrames(Context context, int instanceID,
   if (instanceID < 0 || instanceID >= 16)
     return;
   context.Runtime.RebaseStartupFrame(restartFrame,
-                                     context.Connection.StartFrame);
-  context.Runtime.RebaseStartupFrame(restartFrame,
-                                     context.PacketBridge.ForceTickStartFrame);
+                                     context.Connection.LocalStartupRawFrame);
   context.Runtime.RebaseStartupFrame(
       restartFrame, context.PacketBridge.ForceGameLocalPlayerIDStartFrame);
-  context.Runtime.RebaseStartupFrame(restartFrame,
-                                     context.PacketBridge.ThrottleStartFrame);
-  context.Runtime.RebaseStartupFrame(restartFrame,
-                                     context.Input.SendDelayStartFrame);
-  context.Runtime.RebaseStartupFrame(restartFrame,
-                                     context.Input.SendDelayEndFrame);
   context.Runtime.RebaseStartupFrame(
       restartFrame, context.RuntimePatch.PacketBridgeJitHelperPatchFrame);
   context.Runtime.RebaseStartupFrame(restartFrame,
@@ -88,8 +87,9 @@ void RebaseStartupFrames(Context context, int instanceID,
                                      context.Mvl.CameraInitHold.EndFrame);
   context.Runtime.SetStartupFrameBase(restartFrame);
   std::printf("NSMB MvL auto restart: rebased startup frames inst=%d "
-              "restartFrame=%u netplayStart=%u packetJit=%u\n",
-              instanceID, restartFrame, context.Connection.StartFrame,
+              "restartFrame=%u localStartupRaw=%u packetJit=%u\n",
+              instanceID, restartFrame,
+              context.Connection.LocalStartupRawFrame,
               context.RuntimePatch.PacketBridgeJitHelperPatchFrame);
   std::fflush(stdout);
 }
@@ -103,12 +103,8 @@ void RebaseStartupFramesFromCheckpoint(Context context, int instanceID,
     context.Runtime.RebaseStartupFrameFromCheckpoint(restoreFrame,
                                                      checkpointFrame, target);
   };
-  rebase(context.Connection.StartFrame);
-  rebase(context.PacketBridge.ForceTickStartFrame);
+  rebase(context.Connection.LocalStartupRawFrame);
   rebase(context.PacketBridge.ForceGameLocalPlayerIDStartFrame);
-  rebase(context.PacketBridge.ThrottleStartFrame);
-  rebase(context.Input.SendDelayStartFrame);
-  rebase(context.Input.SendDelayEndFrame);
   rebase(context.RuntimePatch.PacketBridgeJitHelperPatchFrame);
   rebase(context.Mvl.CameraInitHold.StartFrame);
   rebase(context.Mvl.CameraInitHold.EndFrame);
@@ -116,10 +112,10 @@ void RebaseStartupFramesFromCheckpoint(Context context, int instanceID,
                                           ? restoreFrame - checkpointFrame
                                           : restoreFrame);
   std::printf("NSMB MvL auto restart: rebased startup frames from checkpoint "
-              "inst=%d restoreFrame=%u checkpointFrame=%u netplayStart=%u "
+              "inst=%d restoreFrame=%u checkpointFrame=%u localStartupRaw=%u "
               "packetJit=%u\n",
               instanceID, restoreFrame, checkpointFrame,
-              context.Connection.StartFrame,
+              context.Connection.LocalStartupRawFrame,
               context.RuntimePatch.PacketBridgeJitHelperPatchFrame);
   std::fflush(stdout);
 }

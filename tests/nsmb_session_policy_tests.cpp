@@ -16,6 +16,25 @@ void Check(bool condition, const char *expression, int line) {
 
 #define CHECK(expression) Check((expression), #expression, __LINE__)
 
+NsmbMvlNetplay::SessionProtocol::Message Ready(melonDS::u32 rawFrame,
+                                                melonDS::u32 generation = 1,
+                                                melonDS::u32 epoch = 840) {
+  NsmbMvlNetplay::SessionProtocol::Message message;
+  message.Kind = NsmbMvlNetplay::SessionProtocol::MessageKind::StartReady;
+  message.Generation = generation;
+  message.RawReadyFrame = rawFrame;
+  message.SharedLogicalEpoch = epoch;
+  message.StageID = 0;
+  message.StageGroup = 9;
+  message.MatchSeed = 0x12345678;
+  message.PacketTick = 0;
+  message.RngValue = 0xABCDEF01;
+  message.RngCallCount = 2;
+  message.RngBranchAddress = 0x02001234;
+  message.SemanticHash = 0x1122334455667788ull;
+  return message;
+}
+
 void TestStartFrameAndReceivePolicy() {
   using namespace NsmbMvlNetplay::SessionPolicy;
   CHECK(FirstGameplayInputFrame(100, -3) == 100);
@@ -24,10 +43,41 @@ void TestStartFrameAndReceivePolicy() {
   CHECK(!HasPostStartRemoteInput(true, 103, 100, 4));
   CHECK(HasPostStartRemoteInput(true, 104, 100, 4));
 
-  CHECK(!IsOldStartReady(false, 100, 99));
-  CHECK(!IsOldStartReady(true, 0, 0));
-  CHECK(IsOldStartReady(true, 100, 99));
-  CHECK(!IsOldStartReady(true, 100, 100));
+  const auto local = Ready(100);
+  auto remote = Ready(106);
+  CHECK(ValidateStartReady(local, remote, 1, 840) ==
+        StartReadyValidation::Match);
+  remote.Generation = 0;
+  CHECK(ValidateStartReady(local, remote, 1, 840) ==
+        StartReadyValidation::GenerationMismatch);
+  remote = Ready(106);
+  remote.SharedLogicalEpoch = 0;
+  CHECK(ValidateStartReady(local, remote, 1, 840) ==
+        StartReadyValidation::EpochMissing);
+  remote = Ready(106);
+  remote.SharedLogicalEpoch = 841;
+  CHECK(ValidateStartReady(local, remote, 1, 840) ==
+        StartReadyValidation::EpochMismatch);
+  remote = Ready(106);
+  remote.StageID = 4;
+  CHECK(ValidateStartReady(local, remote, 1, 840) ==
+        StartReadyValidation::StageMismatch);
+  remote = Ready(106);
+  remote.MatchSeed ^= 1;
+  CHECK(ValidateStartReady(local, remote, 1, 840) ==
+        StartReadyValidation::SeedMismatch);
+  remote = Ready(106);
+  remote.PacketTick = 1;
+  CHECK(ValidateStartReady(local, remote, 1, 840) ==
+        StartReadyValidation::PacketTickMismatch);
+  remote = Ready(106);
+  remote.RngCallCount++;
+  CHECK(ValidateStartReady(local, remote, 1, 840) ==
+        StartReadyValidation::RngMismatch);
+  remote = Ready(106);
+  remote.SemanticHash ^= 1;
+  CHECK(ValidateStartReady(local, remote, 1, 840) ==
+        StartReadyValidation::SemanticStateMismatch);
 
   CHECK(!ShouldAcceptStartReady(false, true, true));
   CHECK(!ShouldAcceptStartReady(true, false, false));
@@ -97,6 +147,7 @@ void TestFrameActivationPolicy() {
 void TestRuntimeReadyOrderingAndSendState() {
   using NsmbMvlNetplay::SessionPolicy::Runtime;
   Runtime runtime;
+  runtime.BeginGeneration(1, 840, true);
   const auto sentAt = Runtime::Clock::time_point(std::chrono::seconds(5));
 
   CHECK(!runtime.MatchSeedSent());
@@ -110,21 +161,21 @@ void TestRuntimeReadyOrderingAndSendState() {
   CHECK(!runtime.CanSendStartReady(false));
   CHECK(runtime.CanSendStartReady(true));
 
-  runtime.ReceiveRemoteReady(90);
+  runtime.ReceiveRemoteReady(Ready(90));
   CHECK(runtime.RemoteReadyFrame() == 90);
   CHECK(!runtime.RemoteReadyAfterLocal());
-  runtime.BeginLocalReady(100);
+  runtime.BeginLocalReady(Ready(100));
   CHECK(runtime.LocalReadyFrame() == 100);
   CHECK(!runtime.RemoteReadyAfterLocal());
-  runtime.ReceiveRemoteReady(101);
+  runtime.ReceiveRemoteReady(Ready(101));
   CHECK(runtime.RemoteReadyFrame() == 101);
   CHECK(runtime.RemoteReadyAfterLocal());
-  runtime.BeginLocalReady(999);
+  runtime.BeginLocalReady(Ready(999));
   CHECK(runtime.LocalReadyFrame() == 100);
 
   Runtime zeroSentinel;
-  zeroSentinel.BeginLocalReady(0);
-  zeroSentinel.ReceiveRemoteReady(0);
+  zeroSentinel.BeginLocalReady(Ready(0));
+  zeroSentinel.ReceiveRemoteReady(Ready(0));
   zeroSentinel.MarkInputEpochPrimed(0);
   CHECK(!zeroSentinel.LocalReadyFrame());
   CHECK(!zeroSentinel.RemoteReadyFrame());
@@ -134,10 +185,11 @@ void TestRuntimeReadyOrderingAndSendState() {
 void TestRuntimeResetContracts() {
   using NsmbMvlNetplay::SessionPolicy::Runtime;
   Runtime runtime;
+  runtime.BeginGeneration(1, 840, true);
   const auto sentAt = Runtime::Clock::time_point(std::chrono::seconds(7));
   runtime.MarkMatchSeedSent();
-  runtime.BeginLocalReady(100);
-  runtime.ReceiveRemoteReady(101);
+  runtime.BeginLocalReady(Ready(100));
+  runtime.ReceiveRemoteReady(Ready(101));
   runtime.MarkStartReadySent(sentAt);
   runtime.MarkWaitedForPeerAtStart();
   runtime.MarkInputEpochPrimed(80);
@@ -153,7 +205,7 @@ void TestRuntimeResetContracts() {
   CHECK(runtime.StartReadySendCount() == 1);
   CHECK(runtime.InputEpochPrimedFor(80));
 
-  runtime.ReceiveRemoteReady(102);
+  runtime.ReceiveRemoteReady(Ready(102));
   runtime.MarkStartReadySent(sentAt);
   runtime.ResetReadyWaitAfterTimeout();
   CHECK(!runtime.LocalReadyFrame());
