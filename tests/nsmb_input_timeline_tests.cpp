@@ -141,6 +141,33 @@ void TestPredictionProbeAndPrune()
     CHECK(SameInput(*firstConfirmation, neutral));
     CHECK(!timeline.TakePredictionProbeConfirmation(5));
 
+    PredictionRuntime overdueTimeline;
+    PredictionRuntime::InputMap overdueConfirmed;
+    PredictionProbe overdueProbe = probe;
+    overdueProbe.Modulo = 1;
+    overdueProbe.Offset = 0;
+    overdueProbe.Limit = 3;
+    overdueProbe.StartFrame = 20;
+    overdueProbe.EndFrame = 22;
+    overdueTimeline.Resolve(20, overdueConfirmed, neutral, overdueProbe);
+    overdueTimeline.Resolve(21, overdueConfirmed, neutral, overdueProbe);
+    overdueTimeline.Resolve(22, overdueConfirmed, neutral, overdueProbe);
+    const auto overdueFirst =
+        overdueTimeline.TakePredictionProbeConfirmationAtOrBefore(22);
+    CHECK(overdueFirst.has_value());
+    CHECK(overdueFirst->first == 20);
+    CHECK(SameInput(overdueFirst->second, neutral));
+    const auto overdueSecond =
+        overdueTimeline.TakePredictionProbeConfirmationAtOrBefore(21);
+    CHECK(overdueSecond.has_value());
+    CHECK(overdueSecond->first == 21);
+    CHECK(!overdueTimeline.TakePredictionProbeConfirmationAtOrBefore(20));
+    const auto overdueThird =
+        overdueTimeline.TakePredictionProbeConfirmationAtOrBefore(30);
+    CHECK(overdueThird.has_value());
+    CHECK(overdueThird->first == 22);
+    CHECK(!overdueTimeline.TakePredictionProbeConfirmationAtOrBefore(30));
+
     const auto secondConfirmation = timeline.Confirm(7, neutral, 8);
     CHECK(!secondConfirmation.Mismatch);
     CHECK(!timeline.TakePredictionProbeConfirmation(7));

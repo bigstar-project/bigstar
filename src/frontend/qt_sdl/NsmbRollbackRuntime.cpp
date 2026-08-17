@@ -68,6 +68,29 @@ void PruneHistoryLocked(Context &context, melonDS::u32 frame) {
                                       context.Inputs.RemoteInputs);
 }
 
+void ConfirmPredictionProbeLocked(Context &context, melonDS::u32 frame) {
+  const melonDS::u32 confirmationDelay = static_cast<melonDS::u32>(
+      context.Config.PredictionProbeConfirmDelayFrames);
+  if (confirmationDelay == 0 || frame < confirmationDelay)
+    return;
+
+  const melonDS::u32 dueFrame = frame - confirmationDelay;
+  while (const auto confirmation =
+             context.Inputs.RollbackInputs
+                 .TakePredictionProbeConfirmationAtOrBefore(dueFrame)) {
+    const melonDS::u32 confirmationFrame = confirmation->first;
+    const auto stored = context.Inputs.StoreRemote(
+        confirmationFrame, confirmation->second, frame, true, kNoFrame);
+    if (context.Input.NetplayTrace && stored.Confirmation.Mismatch) {
+      std::printf(
+          "NSMB Rollback: prediction probe confirmed frame=%u "
+          "current=%u depth=%u\n",
+          confirmationFrame, frame, frame - confirmationFrame);
+      std::fflush(stdout);
+    }
+  }
+}
+
 void PrepareDeltaSaveLocked(Context &context, melonDS::u32 frame,
                             StoredState &checkpoint,
                             std::vector<melonDS::u8> &baseMainRAM) {
@@ -490,8 +513,11 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
     return false;
 
   if (context.Config.Backend == Config::RollbackBackend::RomLoop &&
-      nds->IsNSMLGameRAMRollbackTransactionInFlight())
+      nds->IsNSMLGameRAMRollbackTransactionInFlight()) {
+    std::lock_guard<std::mutex> lock(context.Mutex);
+    ConfirmPredictionProbeLocked(context, frame);
     return false;
+  }
 
   melonDS::u32 mismatchFrame = kNoFrame;
   melonDS::u32 restoreFrame = kNoFrame;
@@ -501,25 +527,7 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
   std::vector<melonDS::u8> latestMainRAM;
   {
     std::lock_guard<std::mutex> lock(context.Mutex);
-    const melonDS::u32 confirmationDelay = static_cast<melonDS::u32>(
-        context.Config.PredictionProbeConfirmDelayFrames);
-    if (confirmationDelay > 0 && frame >= confirmationDelay) {
-      const melonDS::u32 confirmationFrame = frame - confirmationDelay;
-      const auto confirmation = context.Inputs.RollbackInputs
-                                    .TakePredictionProbeConfirmation(
-                                        confirmationFrame);
-      if (confirmation) {
-        const auto stored = context.Inputs.StoreRemote(
-            confirmationFrame, *confirmation, frame, true, kNoFrame);
-        if (context.Input.NetplayTrace && stored.Confirmation.Mismatch) {
-          std::printf(
-              "NSMB Rollback: prediction probe confirmed frame=%u "
-              "current=%u depth=%u\n",
-              confirmationFrame, frame, confirmationDelay);
-          std::fflush(stdout);
-        }
-      }
-    }
+    ConfirmPredictionProbeLocked(context, frame);
     const auto pendingFrame =
         context.Inputs.RollbackInputs.PendingRollbackFrame();
     if (!pendingFrame)

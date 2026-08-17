@@ -11,6 +11,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace NsmbMvlNetplay::InputTimeline
@@ -69,6 +70,8 @@ public:
     void ClearPredictions();
     std::optional<InputState> TakePredictionProbeConfirmation(
         melonDS::u32 frame);
+    std::optional<std::pair<melonDS::u32, InputState>>
+    TakePredictionProbeConfirmationAtOrBefore(melonDS::u32 frame);
 
     const InputMap& Predictions() const;
     std::optional<melonDS::u32> PendingRollbackFrame() const;

@@ -346,6 +346,20 @@ std::optional<InputState> PredictionRuntime::TakePredictionProbeConfirmation(
     return input;
 }
 
+std::optional<std::pair<melonDS::u32, InputState>>
+PredictionRuntime::TakePredictionProbeConfirmationAtOrBefore(
+    melonDS::u32 frame)
+{
+    const auto confirmation = PredictionProbeConfirmations_.begin();
+    if (confirmation == PredictionProbeConfirmations_.end() ||
+        confirmation->first > frame)
+        return std::nullopt;
+
+    const auto result = *confirmation;
+    PredictionProbeConfirmations_.erase(confirmation);
+    return result;
+}
+
 const PredictionRuntime::InputMap& PredictionRuntime::Predictions() const
 {
     return Predictions_;

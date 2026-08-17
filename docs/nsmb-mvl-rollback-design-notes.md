@@ -1,6 +1,18 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
-> 現在の判断は直下の game-memory restore節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
+> 現在の判断は直下の2026-08-18節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
+
+## 2026-08-18 render processを含むROM-loop訂正
+
+完全記録済み手動入力 `logs/nsmb-mvl-manual-local-20260818-002906/recorded-inputs` とseed `0xC6D26F70` により、手動の恒久差を自動再現した。開始barrier無効化とshared epoch未確定時の入力gateという `main` 統合回帰を先に除去した後も、frame 3487の単発depth 4訂正はframe 3517のmoving hazard生成でlockstepから分岐した。
+
+原因は、中間catch-up tickでNSMBのrender process listを省略していたことだった。これはGPUへの描画だけでなくgame object側のrender callbackも丸ごと省き、tested eventでは将来のmoving hazard/object状態へ副作用を残した。中間tickでもgame render processを実行する診断flagを有効にすると、単発3487訂正と近接3訂正の両方でhost/clientの比較対象game-state fieldがlockstepへ完全一致した。手動launcherではこのflagをROM-loopの既定とする。font updateの中間省略は維持している。
+
+5400-frameの完全入力stressはhost 346、client 330 transactionを全件完了し、cannot-armなし。frame limiterなし・software rendererで平均 `4.937/4.945ms`、最大 `26.241/25.595ms`、`33ms`超ゼロだった。normal controlとの画像は訂正直後frame 3494だけ差があり、frame 3500で両roleとも全画素一致した。600-frame間隔の長時間比較ではhostは全採取点一致、clientは投機中の1800/2400だけ差があり3000以降再一致した。従って恒久的な描画破損は検出していないが、訂正直後の短い表示補正と単発26ms spikeは残る。
+
+現時点の製品候補は、Main RAMのSDK runtime除外、checkpoint suffix無効化・中間再構築、12-entry history、開始barrier、そして全中間game render process実行を組み合わせたROM-loop経路である。SDK runtime全復元はgame loopを停止し、部分復元も反復runで恒久差を直さなかったため採用しない。
+
+現在のblockerは、ユーザー実操作での再確認、未通過event（死亡/復帰、土管、item、result/restart）、音声、depth 11超fallbackである。次は既定設定の手動runを行い、差が残れば保存済み完全入力から最初の非収束eventを制御probe化する。correctnessを維持できる場合に限り、中間renderのGPU出力を表示へ残さない方法とframe spikeを最適化する。
 
 ## 2026-08-04 Slippi-style game-memory restore
 

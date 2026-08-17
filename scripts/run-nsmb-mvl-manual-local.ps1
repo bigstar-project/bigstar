@@ -21,6 +21,7 @@ param(
     [switch]$SlippiRollback,
     [switch]$RomLoopStageTrace,
     [switch]$RomLoopNoDeferLCD,
+    [switch]$RomLoopReplayRender = $true,
     [switch]$Rollback,
     [string]$RollbackBackend = "",
     [string]$RollbackTinyCoreFlags = "",
@@ -39,19 +40,23 @@ param(
     [int]$HostStartupDelayMs = 1200,
     [int]$HostReadyTimeoutMs = 30000,
     [switch]$ClientOnly,
-    [switch]$WaitForPeerAtNetplayStart,
+    [switch]$WaitForPeerAtNetplayStart = $true,
     [string]$Exe = "build\release-windows-x86_64\melonDS.exe",
     [string]$GenerateMvlSourceRom = "roms\nsmb-us.nds",
     [string]$HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-true-local0-wificount2-vslockskip-netaid.tmp.nds",
     [string]$ClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-true-local1-wificount2-vslockskip-netaid.tmp.nds",
     [switch]$CopyRomToLog,
     [string]$InputScript = "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs",
+    [string]$HostInputScript = "",
+    [string]$ClientInputScript = "",
     [switch]$RecordInput = $true,
     [string]$InputRecordDir = "",
     [int]$InputRecordStartFrame = 0,
     [int]$InputRecordEndFrame = 0,
     [string]$LogDir = "",
     [int]$ScreenshotInterval = 0,
+    [string]$RamDumpFrames = "",
+    [int]$RamDumpInterval = 0,
     [switch]$GameStateTrace,
     [int]$GameStateTraceInterval = 60,
     [int]$GameStateTraceStartFrame = 0,
@@ -457,6 +462,11 @@ if ($isRomLoopRollback) {
         Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_DIR -ErrorAction SilentlyContinue
     }
+    if ($RomLoopReplayRender) {
+        $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_REPLAY_RENDER = "1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_REPLAY_RENDER -ErrorAction SilentlyContinue
+    }
     $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN = "1"
     $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE = "1"
     $env:MELONDS_NSML_JIT_SELF_LOOP_FAST_PATH = "1"
@@ -465,6 +475,7 @@ if ($isRomLoopRollback) {
     Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_DEFER_LCD -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_REPLAY_RENDER -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_JIT_SELF_LOOP_FAST_PATH -ErrorAction SilentlyContinue
@@ -491,6 +502,12 @@ if ($PerfBreakdown) {
 }
 else {
     Remove-Item Env:\MELONDS_NSML_PERF_BREAKDOWN -ErrorAction SilentlyContinue
+}
+if ($RamDumpFrames -ne "" -or $RamDumpInterval -gt 0) {
+    $common += @(
+        "-RamDumpFrames", $RamDumpFrames,
+        "-RamDumpInterval", "$RamDumpInterval"
+    )
 }
 
 $hostArgs = @(
@@ -541,6 +558,25 @@ function Set-RoleArgumentValue {
 
 Set-RoleArgumentValue $hostArgs "-InputSendDelayFrames" $HostInputSendDelayFrames
 Set-RoleArgumentValue $clientArgs "-InputSendDelayFrames" $ClientInputSendDelayFrames
+
+function Set-RoleInputScript {
+    param(
+        [object[]]$Arguments,
+        [string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return
+    }
+    $index = [Array]::IndexOf($Arguments, "-InputScript")
+    if ($index -lt 0 -or $index + 1 -ge $Arguments.Count) {
+        throw "role argument was not found: -InputScript"
+    }
+    $Arguments[$index + 1] = $Path
+}
+
+Set-RoleInputScript $hostArgs $HostInputScript
+Set-RoleInputScript $clientArgs $ClientInputScript
 
 $hostOut = Join-Path $wrapperLog "host-wrapper.out.txt"
 $hostErr = Join-Path $wrapperLog "host-wrapper.err.txt"
@@ -639,7 +675,7 @@ if (-not $ClientOnly) {
                 throw "host wrapper exited before netplay init. See $hostOut / $hostErr"
             }
             if (Test-Path $hostReadyLog) {
-                if (Select-String -Path $hostReadyLog -Pattern "NSMB MvL Netplay: enabled role=host" -Quiet) {
+                if (Select-String -Path $hostReadyLog -Pattern "NSMB MvL Netplay: enabled .*role=host" -Quiet) {
                     $hostReady = $true
                     break
                 }

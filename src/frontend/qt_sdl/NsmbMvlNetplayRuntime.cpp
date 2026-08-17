@@ -180,6 +180,9 @@ MvlGameHooks::Context MvlHooksContext()
 
 RollbackRuntime::Context RollbackContext()
 {
+    const melonDS::u32 inputEpoch = G.Connection.SharedLogicalEpoch != 0
+        ? G.Connection.SharedLogicalEpoch
+        : G.Connection.LocalStartupRawFrame;
     return {
         G.Rollback,
         G.Input,
@@ -187,7 +190,7 @@ RollbackRuntime::Context RollbackContext()
         G.RollbackStore,
         G.RollbackStats,
         G.Mutex,
-        G.Connection.SharedLogicalEpoch,
+        inputEpoch,
     };
 }
 
@@ -839,10 +842,14 @@ void WritePacketBridgeJitScratchIfNeeded(
         {
             std::unique_lock<std::mutex> lock(G.Mutex);
             auto it = G.InputRuntime.RemoteInputs.find(logicalFrame);
+            const melonDS::u32 rollbackInputEpoch =
+                G.Connection.SharedLogicalEpoch != 0
+                ? G.Connection.SharedLogicalEpoch
+                : G.Connection.LocalStartupRawFrame;
             const bool rollbackInputActive = G.Rollback.Enabled
                 && G.Input.NetplayOnly
-                && (G.Connection.SharedLogicalEpoch == 0
-                    || logicalFrame >= G.Connection.SharedLogicalEpoch);
+                && (rollbackInputEpoch == 0
+                    || logicalFrame >= rollbackInputEpoch);
             if (rollbackInputActive)
             {
                 if (it == G.InputRuntime.RemoteInputs.end())

@@ -4552,6 +4552,12 @@ u32 NDS::ARM9IORead32(u32 addr)
     // Since it's a 64 bit reg. the CPU will access it in two parts:
     case 0x04FFFA20: return (u32)(GetSysClockCycles(0) & 0xFFFFFFFF);
     case 0x04FFFA24: return (u32)(GetSysClockCycles(0) >> 32);
+    case 0x04FFFA2C:
+        {
+            static const bool replayRender =
+                getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_REPLAY_RENDER") != nullptr;
+            return replayRender ? 1 : 0;
+        }
     }
 
     if ((addr >= 0x04000000 && addr < 0x04000060) || (addr == 0x0400006C))

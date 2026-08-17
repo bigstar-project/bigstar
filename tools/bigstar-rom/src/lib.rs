@@ -43,6 +43,7 @@ const GAME_TICK_PROBE_PACKET_TICK_ADDR: u32 = 0x0208_88E0;
 const GAME_TICK_PROBE_JIT_SCRATCH_TICK_ADDR: u32 = 0x023C_1200;
 const GAME_TICK_PROBE_GAME_FRAME_ADDR: u32 = 0x0208_B668;
 const GAME_TICK_PROBE_STAGE_MARKER_ADDR: u32 = 0x04FF_FA28;
+const GAME_TICK_PROBE_REPLAY_RENDER_ADDR: u32 = 0x04FF_FA2C;
 
 #[derive(Debug, Clone)]
 pub struct StableRomOptions {
@@ -803,24 +804,32 @@ fn patch_game_tick_probe(rom: &mut RomImage) -> Result<()> {
         FONT_HOOK_ADDR + 4,
     ];
     let render_gate = [
-        encode_ldr_pc_literal(3, RENDER_GATE_ADDR, RENDER_GATE_ADDR + 0x34, 0xE)?,
+        encode_ldr_pc_literal(3, RENDER_GATE_ADDR, RENDER_GATE_ADDR + 0x44, 0xE)?,
         encode_mov_imm(12, 4)?,
         encode_str_imm(12, 3, 0)?,
-        encode_ldr_pc_literal(12, RENDER_GATE_ADDR + 0x0C, RENDER_GATE_ADDR + 0x38, 0xE)?,
+        encode_ldr_pc_literal(12, RENDER_GATE_ADDR + 0x0C, RENDER_GATE_ADDR + 0x48, 0xE)?,
         encode_ldr_imm(12, 12, 0)?,
         encode_cmp_imm(12, 0)?,
         with_cond(
-            encode_b(RENDER_GATE_ADDR + 0x18, RENDER_GATE_ADDR + 0x20)?,
-            1,
+            encode_b(RENDER_GATE_ADDR + 0x18, RENDER_GATE_ADDR + 0x2C)?,
+            0,
         ),
-        encode_bl(RENDER_GATE_ADDR + 0x1C, PROCESS_LIST_EXECUTE_ADDR)?,
-        encode_ldr_pc_literal(3, RENDER_GATE_ADDR + 0x20, RENDER_GATE_ADDR + 0x34, 0xE)?,
+        encode_ldr_pc_literal(12, RENDER_GATE_ADDR + 0x1C, RENDER_GATE_ADDR + 0x4C, 0xE)?,
+        encode_ldr_imm(12, 12, 0)?,
+        encode_cmp_imm(12, 0)?,
+        with_cond(
+            encode_b(RENDER_GATE_ADDR + 0x28, RENDER_GATE_ADDR + 0x30)?,
+            0,
+        ),
+        encode_bl(RENDER_GATE_ADDR + 0x2C, PROCESS_LIST_EXECUTE_ADDR)?,
+        encode_ldr_pc_literal(3, RENDER_GATE_ADDR + 0x30, RENDER_GATE_ADDR + 0x44, 0xE)?,
         encode_mov_imm(12, 5)?,
         encode_str_imm(12, 3, 0)?,
-        encode_ldr_pc_literal(14, RENDER_GATE_ADDR + 0x2C, RENDER_GATE_ADDR + 0x3C, 0xE)?,
-        encode_b(RENDER_GATE_ADDR + 0x30, RENDER_RETURN_ADDR)?,
+        encode_ldr_pc_literal(14, RENDER_GATE_ADDR + 0x3C, RENDER_GATE_ADDR + 0x50, 0xE)?,
+        encode_b(RENDER_GATE_ADDR + 0x40, RENDER_RETURN_ADDR)?,
         GAME_TICK_PROBE_STAGE_MARKER_ADDR,
         GAME_TICK_PROBE_ACTIVE_ADDR,
+        GAME_TICK_PROBE_REPLAY_RENDER_ADDR,
         RENDER_RETURN_ADDR,
     ];
     let input_gate = build_game_tick_input_gate(INPUT_GATE_ADDR, INPUT_UPDATE_ADDR)?;
