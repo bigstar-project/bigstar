@@ -1,5 +1,13 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Windows input-netplay emulation thread priorityの既定値復元 - 2026-08-17
+
+- 完了: commit `c13ac336`で追加された、`MELONDS_NSML_INPUT_NETPLAY_ONLY=1`時にemulation threadを自動で`THREAD_PRIORITY_HIGHEST`へ上げる処理を削除した。Bigstarを含む通常のinput-netplay起動はWindows/Qtの既定thread priorityで動作する。
+- 保持: `MELONDS_NSML_EMU_THREAD_PRIORITY=abovenormal|highest`を明示した診断実行だけは引き続きpriorityを変更できる。affinity指定、process priority、network pump threadには変更を加えていない。
+- 判断: これはscheduler条件を安定期へ近づけるための限定rollbackであり、同期ズレの原因がthread priorityだったと確定する証拠ではない。再発率の比較は同一binary・同一save identity・同一入力条件で別途評価する。
+- Current blocker: なし。
+- Verification status: melonDS Release buildとCTest 16/16が成功した。明示priorityなしの実input-netplay起動でperformance logの`thread_priority=0`を確認し、既知の安定network設定による実ROM・2-process split smokeも両peer 1,200 framesを完走した。最初の実測runはclientのframe 0 remote-input timeoutで終了したが、そのrunでもpriority値自体は取得済みであり、安定設定での再実行成功によりrollback後の通常入力経路を確認した。
+
 ## 再戦後に入力がゲームへ反映されない回帰 - 2026-08-06
 
 - 結論: 直近のGUI 2-process実ログ2組で再戦後の入力停止を再現し、原因をraw frameとlogical frameの比較混在へ絞り込んだ。通信断や入力取得失敗ではない。`WritePacketBridgeJitScratchIfNeeded()`は再戦後も物理入力を取得・世代1の入力packetとして送受信しているが、JIT scratchへ書く直前の`beforeStart`だけ、840から再開した`logicalFrame`をrebase後のraw `PacketBridgeJitHelperPatchFrame`／`LocalStartupRawFrame`と比較している。このため再戦中の入力packetは流れても、ROM内`Net::getConsoleKeys()`が読むscratchが更新されず、キャラクターが入力を受け付けない。
@@ -1100,7 +1108,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - stage 2のsoftware 3D rasterizerは平均`0.2-0.5ms/frame`、2D合成と3D scanline待ちを含むsoftware GPU全体も約`1.1ms/frame`だった。キラー等の敵ポリゴン描画は、`RunFrame=14-16ms`の主因ではない。大半はARM9/ARM7 JITと周辺機器を実行する単一emulation threadである。
   - process priority変更、process affinity分割、単一threaded renderer、描画転送停止、emulation threadのhard affinityは、改善なしまたはコア個体差で悪化した。固定frame limiterのhybrid sleepも59.97fpsから59.64fpsへ悪化したため不採用。
   - Windows上でinput-netplay emulation threadだけを`THREAD_PRIORITY_HIGHEST`へ上げると、6000-frame比較で平均`RunFrame`はhost `14.59 -> 13.59ms`、client `14.29 -> 13.49ms`へ短縮した。active FPSはhost/client `59.97/59.96fps`、120-frame窓の最低値は`59.35fps`で、通常priorityの最低`58.95fps`より改善した。これはreal-time priorityではなく、通常priority class内の最高値である。
-  - `MELONDS_NSML_INPUT_NETPLAY_ONLY=1` のWindows起動だけ上記thread priorityを自動適用する。通常のmelonDS起動には適用しない。`MELONDS_NSML_EMU_THREAD_PRIORITY=normal|abovenormal|highest` で診断上書きできる。
+  - 2026-08-17更新: 当時は`MELONDS_NSML_INPUT_NETPLAY_ONLY=1`のWindows起動へ上記thread priorityを自動適用したが、scheduler条件を安定期へ戻すため自動適用を撤回した。現在は通常priorityが既定で、`MELONDS_NSML_EMU_THREAD_PRIORITY=abovenormal|highest`を明示した診断時だけ上書きできる。
   - stage 2固有負荷を確認するため、同じROM/seed、normal thread priority、frame `960-1919`完全無操作で`stage 2 -> 0 -> 3 -> 4 -> 1 -> 2`の順に比較した。両peer平均`RunFrame`はstage 0=`14.31ms`、1=`14.32ms`、2初回=`14.08ms`、2再測定=`14.06ms`、3=`13.59ms`、4=`15.30ms`だった。stage 2は再測定でも同値で、固有に最も重いstageではない。software GPU時間もstage 2=`1.10ms`、stage 4=`1.09ms`であり、stage 4の差は描画ではなくemulated CPU/JIT側だった。以前stage 2で見えた57-59fps区間は、その時点のscheduler/外部負荷、またはカメラ位置によりactive actor/game logicが異なる実ゲーム状態との複合と判断する。
   - 現在のblockerはなし。次の実機確認は、GUI配布用melonDSをこの変更込みでbuildし、stage 2無操作を含む数分間を1kHz/8kHzで各1回以上測ること。8kHzだけ低下する場合は、同時収集CSVのDPC/interrupt差からUSB driver側を追加調査する。
 - 2026-05-30 software renderer追加調査:

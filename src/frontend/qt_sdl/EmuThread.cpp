@@ -529,8 +529,6 @@ void EmuThread::run()
 {
 #ifdef _WIN32
     const char* priorityText = getenv("MELONDS_NSML_EMU_THREAD_PRIORITY");
-    if (!priorityText && getenv("MELONDS_NSML_INPUT_NETPLAY_ONLY"))
-        priorityText = "highest";
     if (priorityText && strcmp(priorityText, "normal") != 0)
     {
         const int priority = strcmp(priorityText, "highest") == 0
