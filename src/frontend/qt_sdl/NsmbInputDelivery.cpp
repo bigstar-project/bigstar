@@ -34,6 +34,7 @@ SendDecision DecideSend(melonDS::u32 frame, const SendConfig& config)
 }
 
 std::vector<InputProtocol::FramedInput> SelectBundleInputs(
+    melonDS::u32 generation,
     melonDS::u32 frame,
     const InputState& currentInput,
     int history,
@@ -52,7 +53,7 @@ std::vector<InputProtocol::FramedInput> SelectBundleInputs(
         const auto existing = localInputs.find(entryFrame);
         if (existing != localInputs.end())
             entryInput = existing->second;
-        entries.push_back({ entryFrame, entryInput });
+        entries.push_back({ generation, entryFrame, entryInput });
     }
     return entries;
 }
@@ -67,6 +68,7 @@ bool ShouldReleaseDelayedInput(
 }
 
 PreparedSend Runtime::Prepare(
+    melonDS::u32 generation,
     melonDS::u32 frame,
     const InputState& input,
     const SendConfig& config,
@@ -79,8 +81,8 @@ PreparedSend Runtime::Prepare(
         return prepared;
 
     std::vector<char> payload = prepared.Decision.Bundle
-        ? BuildPayload(frame, input, prepared.Decision.BundleHistory, localInputs)
-        : InputProtocol::EncodeInput({ frame, input });
+        ? BuildPayload(generation, frame, input, prepared.Decision.BundleHistory, localInputs)
+        : InputProtocol::EncodeInput({ generation, frame, input });
     if (prepared.Decision.DelayFrames <= 0)
     {
         prepared.ImmediatePayload = std::move(payload);
@@ -120,15 +122,16 @@ void Runtime::DrainDue(
 }
 
 std::vector<char> Runtime::BuildPayload(
+    melonDS::u32 generation,
     melonDS::u32 frame,
     const InputState& input,
     int bundleHistory,
     const std::map<melonDS::u32, InputState>& localInputs) const
 {
     if (bundleHistory <= 0)
-        return InputProtocol::EncodeInput({ frame, input });
+        return InputProtocol::EncodeInput({ generation, frame, input });
     return InputProtocol::EncodeInputBundle(
-        SelectBundleInputs(frame, input, bundleHistory, localInputs));
+        SelectBundleInputs(generation, frame, input, bundleHistory, localInputs));
 }
 
 void Runtime::Clear()

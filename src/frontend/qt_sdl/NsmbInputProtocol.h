@@ -9,13 +9,14 @@
 namespace NsmbMvlNetplay::InputProtocol
 {
 
-constexpr std::size_t kInputPacketSize = 24;
-constexpr std::size_t kInputBundleHeaderSize = 16;
+constexpr std::size_t kInputPacketSize = 28;
+constexpr std::size_t kInputBundleHeaderSize = 20;
 constexpr std::size_t kInputBundleEntrySize = 16;
 constexpr std::size_t kMaxInputBundleEntries = 32;
 
 struct FramedInput
 {
+    melonDS::u32 Generation = 0;
     melonDS::u32 Frame = 0;
     InputState Input;
 };

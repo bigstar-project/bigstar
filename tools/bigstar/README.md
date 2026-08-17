@@ -73,7 +73,9 @@ capability names instead of edition names or negated build-profile conditions.
 
 - `local` allows signaling-server configuration, developer tools when the
   edition permits them, and notifications for rooms hosted by the local player.
-- `distribution` disables those development-oriented capabilities.
+- `distribution` keeps signaling-server configuration available only in
+  Insiders, while disabling it in Public together with the other
+  development-oriented capabilities.
 
 ## Legacy updater bridge
 

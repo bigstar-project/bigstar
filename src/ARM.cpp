@@ -957,37 +957,10 @@ static u32 NSMLPacketBridgeEnvFrame(const char* name, u32 fallback)
 
 static u32 NSMLPacketBridgeCanonicalTick(NDS& nds)
 {
-    static int enabled = -1;
-    if (enabled < 0)
-        enabled = NSMLEnvFlag("MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK") ? 1 : 0;
-    if (!enabled || !NSMLPacketBridgeEnabled())
-        return nds.ARM9Read16(0x020888E0);
-
-    static u32 startFrame = 0xFFFFFFFF;
-    if (startFrame == 0xFFFFFFFF)
-        startFrame = NSMLPacketBridgeEnvFrame("MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_START_FRAME", 0);
-    if (nds.NumFrames < startFrame)
-        return nds.ARM9Read16(0x020888E0);
-
-    static int baseSet = -1;
-    static u32 base = 0;
-    if (baseSet < 0)
-    {
-        if (const char* value = getenv("MELONDS_NSML_PACKET_BRIDGE_FORCE_TICK_BASE"))
-        {
-            base = static_cast<u32>(strtoul(value, nullptr, 0));
-            baseSet = 1;
-        }
-        else
-        {
-            baseSet = 0;
-        }
-    }
-
-    if (!baseSet)
-        return nds.ARM9Read16(0x020888E0);
-
-    return (base + (nds.NumFrames - startFrame)) & 0xFFFF;
+    // The frontend writes this field from the current match's logical frame.
+    // Recomputing it from NDS::NumFrames here would reintroduce each peer's
+    // local restore-frame offset after a rematch.
+    return nds.ARM9Read16(0x020888E0);
 }
 
 static bool HandleNSMLTransferPacketBypass(ARM* cpu, u32 instrAddr)

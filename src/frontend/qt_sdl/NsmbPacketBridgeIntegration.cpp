@@ -60,7 +60,8 @@ void SendPacketLocked(IntegrationContext context, const IntegrationHooks &hooks,
 
   hooks.SendMatchSeedLocked();
   const std::optional<WireProtocol::WireNSMLPacket> immediate =
-      context.State.PrepareOutgoingPacket(frame, player, tick, packetBytes,
+      context.State.PrepareOutgoingPacket(context.Generation, frame, player,
+                                          tick, packetBytes,
                                           context.Config,
                                           std::chrono::steady_clock::now());
   if (immediate)
@@ -103,13 +104,12 @@ melonDS::u32 LocalPlayerID(IntegrationContext context, melonDS::NDS *nds) {
 
 void ReceivePacketLocked(IntegrationContext context, const void *data,
                          std::size_t size, melonDS::NDS *nds,
-                         melonDS::u32 localFrame,
-                         melonDS::u32 restartCutoffFrame) {
+                         melonDS::u32 localFrame) {
   if (!data || size != sizeof(WireProtocol::WireNSMLPacket))
     return;
   WireProtocol::WireNSMLPacket packet;
   std::memcpy(&packet, data, size);
-  if (!IsAcceptedIncomingPacket(packet, restartCutoffFrame))
+  if (!IsAcceptedIncomingPacket(packet, context.Generation))
     return;
 
   if (context.Config.Enabled && nds)
@@ -174,9 +174,10 @@ void CaptureAndSendPacketLocked(IntegrationContext context,
     packet[3] = static_cast<melonDS::u8>((keys >> 8) & 0xFF);
   }
   if (context.Config.ForceTickEnabled &&
-      frame >= context.Config.ForceTickStartFrame &&
+      frame >= context.Connection.SharedLogicalEpoch &&
       context.Config.ForceTickBase >= 0) {
-    tick = CanonicalTick(context.Config, frame, tick);
+    tick = CanonicalTick(context.Config,
+                         context.Connection.SharedLogicalEpoch, frame, tick);
     packet[0] = static_cast<melonDS::u8>(tick & 0xFF);
     packet[1] = static_cast<melonDS::u8>((tick >> 8) & 0xFF);
   }
@@ -190,11 +191,13 @@ void CaptureAndSendPacketLocked(IntegrationContext context,
 void ForceTickIfNeeded(IntegrationContext context, int instanceID,
                        melonDS::u32 frame, melonDS::NDS *nds) {
   if (!context.Config.ForceTickEnabled || !nds || instanceID < 0 ||
-      instanceID >= 16 || frame < context.Config.ForceTickStartFrame ||
+      instanceID >= 16 ||
+      frame < context.Connection.SharedLogicalEpoch ||
       !context.State.MarkForcedTickFrame(instanceID, frame))
     return;
   const melonDS::u32 tick =
-      CanonicalTick(context.Config, frame, nds->ARM9Read16(kNetPacketTickAddr));
+      CanonicalTick(context.Config, context.Connection.SharedLogicalEpoch,
+                    frame, nds->ARM9Read16(kNetPacketTickAddr));
   nds->ARM9Write16(kNetPacketTickAddr, static_cast<melonDS::u16>(tick));
   if (context.Config.TraceEnabled && (frame % 60) == 0) {
     std::printf("NSMB PacketBridge: force tick=0x%04X frame=%u\n", tick, frame);
@@ -219,9 +222,7 @@ void ThrottleFrameLead(IntegrationContext context,
                        const IntegrationHooks &hooks, melonDS::NDS *nds,
                        melonDS::u32 frame) {
   if (context.Config.MaxFrameLead < 0 || !nds ||
-      frame < context.Config.ThrottleStartFrame ||
-      (context.Config.ForceTickEnabled &&
-       frame < context.Config.ForceTickStartFrame))
+      frame < context.Connection.SharedLogicalEpoch)
     return;
 
   const melonDS::u32 remotePlayer = LocalPlayerID(context, nds) ^ 1;
@@ -237,8 +238,7 @@ void ThrottleFrameLead(IntegrationContext context,
       remoteFrame = progress.Frame;
     }
     if (remoteFrame == kUnsetProgress ||
-        (context.Config.ForceTickEnabled &&
-         remoteFrame < context.Config.ForceTickStartFrame))
+        remoteFrame < context.Connection.SharedLogicalEpoch)
       return;
     const int lead = static_cast<int>(frame) - static_cast<int>(remoteFrame);
     if (lead <= context.Config.MaxFrameLead)
@@ -286,9 +286,10 @@ void WriteJitScratchInputs(IntegrationContext context,
     return;
 
   melonDS::u32 tick = nds->ARM9Read16(kNetPacketTickAddr);
-  if (context.Input.NetplayOnly && context.Connection.StartFrame != 0 &&
-      frame >= context.Connection.StartFrame) {
-    tick = (frame - context.Connection.StartFrame) & 0xFFFF;
+  if (context.Input.NetplayOnly &&
+      context.Connection.SharedLogicalEpoch != 0 &&
+      frame >= context.Connection.SharedLogicalEpoch) {
+    tick = (frame - context.Connection.SharedLogicalEpoch) & 0xFFFF;
     nds->ARM9Write16(kNetPacketTickAddr, static_cast<melonDS::u16>(tick));
   }
   const melonDS::u8 action = nds->ARM9Read8(kNetPacketActionAddr);

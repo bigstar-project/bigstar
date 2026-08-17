@@ -12,6 +12,7 @@ mod preflight;
 mod process_job;
 mod processes;
 mod roms;
+mod save_bootstrap;
 mod settings;
 mod state;
 mod windowing;
@@ -161,6 +162,7 @@ fn main() {
                 );
                 eprintln!("{err}");
             }
+            commands::start_eager_saved_rom_prepare(app.handle().clone());
             if let Some(window) = app.get_webview_window("main") {
                 window.set_title(config::app_display_name())?;
                 let _ = window.restore_state(window_state_flags());

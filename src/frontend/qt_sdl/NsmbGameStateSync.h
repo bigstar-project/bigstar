@@ -30,6 +30,8 @@ struct Context {
   melonDS::u32 StageSceneSettings = 0;
   bool Enabled = false;
   bool Client = false;
+  bool SessionReady = false;
+  melonDS::u32 Generation = 0;
 };
 
 struct Hooks {

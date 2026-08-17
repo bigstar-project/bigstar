@@ -111,8 +111,8 @@ describe('設定ビュー', () => {
     expect(updateField).toHaveBeenCalledWith('port', 9000);
   });
 
-  test('distributionではシグナリングサーバー設定を表示しない', async () => {
-    const { screen } = await renderSettingsView(false);
+  test('Public distributionではシグナリングサーバー設定を表示しない', async () => {
+    const { screen } = await renderSettingsView(false, 'public');
 
     expect(document.body.textContent).not.toContain('シグナリングサーバー');
     expect(document.body.textContent).not.toContain('接続確認');
@@ -120,6 +120,19 @@ describe('設定ビュー', () => {
       'ws://127.0.0.1:8787/session',
     );
     await expect.element(screen.getByLabelText('UDP ポート')).toBeVisible();
+  });
+
+  test('Insiders distributionではシグナリングサーバーを更新できる', async () => {
+    const { screen, updateField } = await renderSettingsView(true, 'insiders');
+
+    await screen
+      .getByLabelText('シグナリングサーバー')
+      .fill('wss://insiders.test/session');
+
+    expect(updateField).toHaveBeenCalledWith(
+      'signalUrl',
+      'wss://insiders.test/session',
+    );
   });
 
   test.each([

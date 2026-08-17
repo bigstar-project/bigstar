@@ -2,6 +2,7 @@
 
 ## Live Slippi-style ROM-loop rollback milestone - 2026-08-04
 
+- **Integration update (2026-08-18):** `main` の `e44a9ab2` までをロールバック検証ブランチへ統合した。開始同期は新しいshared logical epoch／save bootstrapを採用しつつ、frame-lead throttle後にremote inputを確定するロールバック側の順序とROM-loop transaction完了処理を保持した。Release `melonDS` build、CTest 16/16、BigstarのRust `cargo fmt`／strict Clippy、GUI CI（unit 36、browser 68、Playwright 2）、signaling CI 11件がpassした。実ROMの手動ロールバック再検証はこの統合作業には含めていない。
 - **Current conclusion:** 最新の手動run `logs/nsmb-mvl-manual-local-20260804-034019` でも恒久的な画面ずれを確認した。両peerの `checkpoint - gameFrame` は全訂正で `241`、cannot-armとdepth clampはゼロ、全transactionが完了しており、tick欠落・history不足・stale checkpoint再利用の再発ではない。frame 1320/2640/3480のplayer差はいったん再一致するが、3600でplayer/object/hazardが分岐し、最後の訂正が完了した4069以降のneutral区間4080-4320でも両player座標差が残る。したがって現ROM-loop経路はまだcorrectではない。
 - restore gateは「現在tickの実行前」にあるため、history countを `preRestoreGameFrame - historyStartFrame` ではなく両端を含む `+1` とした。さらにlead 8でもcheckpointがmismatchより古い場合に8件を超えるため、入力historyを、注入済みinput gateと重ならない最大の12件へ拡張した。旧手動runのhostには25件の `cannot arm` もあり、この不足も別の訂正欠落要因だった。
 - `scripts/analyze-nsmb-mvl-rollback-log.ps1` はROM-loopの `checkpoint - gameFrame` の変動と `cannot arm` を `rollback-fail` と判定する。旧手動runはhost offset `241..1459` / cannot-arm 25、client `241..1226` / 0として自動的にfailし、同じ不具合を見逃さない。
@@ -83,6 +84,98 @@
 - 却下: 最終catch-up tickでfont更新を省きprocess-list描画だけ戻す案は172 semantic fieldを維持したが、両側depth 4が`37.273/34.389ms`へ悪化し、UI stale riskも増えるためrevertした。retained variantは最終tickでfontとprocess-listを通常描画する。
 - 当時のblocker: guest-owned/JIT loopの意味状態はtested movement routeで一致する一方、回帰に汚染された測定では60 FPSの1 presentation intervalとcorrected image convergenceを満たさなかった。
 - 後続判断: この節の性能停止判断は、2026-08-02のpost-hotfix再測定で撤回した。最新のblockerとnext actionは本書先頭および`docs/nsmb-mvl-rollback-design-notes.md`先頭を正とする。
+## Windows input-netplay emulation thread priorityの既定値復元 - 2026-08-17
+
+- 完了: commit `c13ac336`で追加された、`MELONDS_NSML_INPUT_NETPLAY_ONLY=1`時にemulation threadを自動で`THREAD_PRIORITY_HIGHEST`へ上げる処理を削除した。Bigstarを含む通常のinput-netplay起動はWindows/Qtの既定thread priorityで動作する。
+- 保持: `MELONDS_NSML_EMU_THREAD_PRIORITY=abovenormal|highest`を明示した診断実行だけは引き続きpriorityを変更できる。affinity指定、process priority、network pump threadには変更を加えていない。
+- 判断: これはscheduler条件を安定期へ近づけるための限定rollbackであり、同期ズレの原因がthread priorityだったと確定する証拠ではない。再発率の比較は同一binary・同一save identity・同一入力条件で別途評価する。
+- Current blocker: なし。
+- Verification status: melonDS Release buildとCTest 16/16が成功した。明示priorityなしの実input-netplay起動でperformance logの`thread_priority=0`を確認し、既知の安定network設定による実ROM・2-process split smokeも両peer 1,200 framesを完走した。最初の実測runはclientのframe 0 remote-input timeoutで終了したが、そのrunでもpriority値自体は取得済みであり、安定設定での再実行成功によりrollback後の通常入力経路を確認した。
+
+## 再戦後に入力がゲームへ反映されない回帰 - 2026-08-06
+
+- 結論: 直近のGUI 2-process実ログ2組で再戦後の入力停止を再現し、原因をraw frameとlogical frameの比較混在へ絞り込んだ。通信断や入力取得失敗ではない。`WritePacketBridgeJitScratchIfNeeded()`は再戦後も物理入力を取得・世代1の入力packetとして送受信しているが、JIT scratchへ書く直前の`beforeStart`だけ、840から再開した`logicalFrame`をrebase後のraw `PacketBridgeJitHelperPatchFrame`／`LocalStartupRawFrame`と比較している。このため再戦中の入力packetは流れても、ROM内`Net::getConsoleKeys()`が読むscratchが更新されず、キャラクターが入力を受け付けない。
+- 実ログ根拠: `bigstar-1786026172770-46556-2`／`bigstar-1786026172795-49024-2`ではcheckpoint restore後にraw開始が`2652`、ready rawが`2670`、共有logical epochが`840`になった。世代1では両peerとも非neutral入力を約290 frame送信し、`lastSent`／`lastRecv`も連続して進んだが、判定は`logicalFrame < 2652`の間ずっと開始前となる。このrunはlogical `1290`付近で終了したためscratch書込みは一度も再開しない。同じ症状の`bigstar-1786026020989-49024-1`／`bigstar-1786026021017-46556-1`ではraw開始が`6887`、ready rawが`6905`、logical epochが同じ`840`で、さらに長く入力が抑止される。
+- 回帰境界: 比較元を旧`Connection.StartFrame`から`Connection.LocalStartupRawFrame`へ変更したのはcommit `bbf24e16`。raw/logicalの責務分離、generation、start-ready検証自体は実ログで機能しており、再戦readyは両peerでgeneration 1として受理され、旧generation 0 state packetも拒否されている。問題は分離方針全体ではなく、JIT scratch開始判定にraw座標を渡した一箇所と、rebaseされたJIT patch frameをlogical frameと比較する既存構造の組合せである。
+- 修正: JIT helper patchの適用時刻判定は従来どおりraw frameで行い、scratchへの入力反映可否を独立した`ShouldWriteJitScratchInputs()`へ分離した。input netplayではJIT patch適用済み、start-ready受理済み、当該共有epochの入力初期化済み、`logicalFrame >= SharedLogicalEpoch`をすべて満たした時だけ書き込む。raw `PacketBridgeJitHelperPatchFrame`／`LocalStartupRawFrame`は入力gateから除去した。非input-netplay経路はpatch適用後なら従来どおり書き込む。
+- 回帰test: 実障害値を直接使い、raw patch frame `2652`／`6887`に対して共有logical epoch `840`の直前は拒否、`840`から許可されることを検証した。patch未適用、start-ready/epoch未準備も拒否し、通常経路の互換性も確認する。
+- Current blocker: 実装上のblockerはなし。旧GUIログと同じstart-ready経路を実GUIで再戦して目視確認する作業は追加可能だが、修正の正しさを妨げる未解決事項ではない。
+- Verification status: Release全体buildとCTest 16/16が成功した。さらにrole別の実入力scriptを使うsplit 2-process実ROM smokeを10,000 frames実行し、複数勝利設定の再戦を通過した。再戦ではraw frame `4204`で両peerのJIT patchが再適用され、その後もHostの非neutral入力`0x7DE`が送受信され、`RequireSecondMvlGame`を含め完走した。unit testが問題のGUI実値`2652`／`6887`とlogical `840`を直接担保し、実ROM試験が再戦後の入力経路を補完している。
+
+## Canonical save bootstrap・対戦直前hard gate - 2026-08-06
+
+- 完了: 正しさの中心をオンボーディングや`roms_prepared_once`から切り離し、ベースROM SHA-256ごとのBigstar管理canonical saveを検証・必要時生成する共通ensureへ移した。同一ROMの同時ensureはsingle-flight、ROM生成全体もprocess内mutexで直列化する。起動時とROM path変更時は対戦中でなければeagerに準備し、部屋作成／参加後の全`start_match`直前には同じensureを同期的に再実行する。直前identity、role別ROM path、canonical由来save hashが一致しなければbridge/melonDSを起動しない。
+- 完了: 元ROM横の`.sav`依存を廃止した。known US ROM SHA-256だけを受理し、canonicalがmissing／破損ならBigstar app-dataの隔離directoryへ未改変ROMをcopyして、netplay／bridge／ROM patch／入力なしでmelonDSを起動する。元ROM、元save、元設定は読取対象または非参照のままで、書き換えない。
+- 完了: melonDSに専用save-bootstrap modeを追加した。SaveManagerが8192-byte saveを実ファイルへwriteしてhandleをcloseしたversionをatomicに公開し、その通知後だけROM/save SHA-256、path、size、frame、経過時間、成否、errorをJSONへatomic writeしてQtの通常`quit`へ入る。bootstrap用config directoryも隔離する。timeout／cancelは失敗JSONを書いて通常終了を先に要求し、Bigstarはさらに5秒待った後だけkillする。既存の`std::_Exit` test終了経路は使わない。
+- 完了: Bigstarは正常exit後にresult JSONと生成saveを独立再読込し、報告pathが隔離saveそのものか、ROM hash、8192 bytes、known save hash、4 KiB duplicate、`Mario2d`識別子、未使用`FF`領域を再検証する。成功時だけ同一filesystem内のrenameでcanonicalへatomic promoteする。失敗時はROM/save/config copyを破棄し、stdout/stderr/resultだけを診断directoryに残す。
+- 完了: canonicalはmelonDSへ直接渡さず、ROM準備ごとにHost/Client作業saveへatomic copyして再検証する。ROM manifest versionを3へ上げ、canonical save hashをinputs、`RomIdentity.save_sha256`、`rom_pair_id`、signaling／feedback identityの根拠にした。対戦中または対戦準備中のROM path変更は設定だけ保存して作業saveへ触らず、対戦終了後のeagerまたは次回対戦直前hard gateで処理する。
+- 完了: ローカルdebug Bigstarがinstalled旧sidecarをrepo buildより先に選び、bootstrapを知らない旧melonDSを35秒後にkillする問題を実統合試験で発見した。debug buildではrepoのmelonDS／bridgeを先に探索し、distribution buildでは従来どおりbundled sidecarを優先するよう修正した。
+- UI: canonical未準備時はオンボーディングbuttonと起動時eager処理に「基準セーブを初期化中」を表示し、失敗理由をactivity statusへ出す。失敗時は選択ROM pathを保持し、`romsPrepared=false`のまま再試行できる。first-run flagは表示上の正しさ判定に使わず、起動時defaultsもcanonical、manifest、ROM、両作業saveの実検証結果から算出する。
+- 実統合verification: compile-timeで専用app-data名へ隔離した実Bigstarを、canonicalなし・保存済みbase ROMだけの状態から起動し、実melonDS bootstrap、Host/Client ROM生成、両save copyまで完了した。canonical／Host／Client saveは3個ともSHA-256 `42ffb80e...`で、元ROM hashと元save hash/mtimeは不変だった。2回目はmelonDS processを一度も起動せずcanonicalを再利用し、canonical削除時と全0破損時はmelonDSを再起動して同じhashへ復旧した。不正ROMではmelonDSを起動せず、pathを保持し、既存Host/Client saveも不変だった。
+- 異常系verification: melonDS専用modeを直接起動し、通常成功はframe 286／5,487 msとframe 341／6,485 msで正常exit 0、1,000 ms timeoutとROM hash mismatchはいずれも失敗JSON、saveなし、正常exit 0だった。旧sidecarによるBigstar outer timeoutでもcanonicalは生成・promoteされず、修正後のdebug sidecar探索で解消した。
+- Current blocker: 実装・自動検証上のblockerはなし。実file dialogを含むGUI click-through自動化だけはWindows操作skillの必須documentation APIが実行環境に存在せず未実施だが、同じbackend eager／ensure経路の実Bigstar統合、Playwright onboarding、direct melonDS異常系を通している。
+- Verification status: melonDS Release build成功、CTest 16/16成功。Bigstar Rust 58 tests、`cargo fmt`、strict Clippy成功。Bigstar full CIはtypecheck／Biome、edition 15件、unit 36件、browser 68件、Playwright 2件を含め全成功した。Insiders local package buildもMSI／NSISまで成功し、repo build、staged binary、release targetのmelonDSはすべて35,558,400 bytes・SHA-256 `eab66ced74410f2c04e4e630e0db1de29c91022942d45a5d39af26230bb993c9`で一致した。
+
+## 未改変ROMからの正常save自動生成実測 - 2026-08-06
+
+- 結論: ユーザー所有の未改変US ROMを、saveが存在しない隔離directoryから通常direct bootし、入力を一切送らなくても、NSMB自身が正常な8,192-byte saveを生成した。生成物は既存の正常な`roms/nsmb-us.sav`とbyte-for-byte一致し、3回の計測runと計測なしの通常runを含む4回すべてSHA-256 `42ffb80e234c01d5784bdc291fee41c26e59f66295d7f105c798ba8dde11b2ee`になった。したがって少なくともこのUS ROM・現行melonDS設定では、タイトル画面操作や最小入力の探索は不要である。
+- ROM同一性: 使用元は`roms/nsmb-us.nds`、33,554,432 bytes、SHA-256 `9f67fef1b4c73e966767f6153431ada3751dc1b0da2c70f386c14a5e3017f354`。Downloads側のユーザー所有ROMも同じsize/hashである。各runではROM、`melonDS.exe`、`melonDS.toml`、`rtc.bin`を`logs/save-bootstrap-measurement-20260806/run*`へcopyして起動し、元ROM、元save、元設定をprocessから参照・更新していない。stdoutも各run固有のconfig/save pathだけをopenしたことを示す。
+- 計測なし通常run: `run1-normal-noinput`はsaveなしで起動し、起動後約7,729 msで`probe.sav`が出現した。45秒無入力で継続後、`CloseMainWindow`による通常window closeで終了した。saveは8,192 bytesで既存正常saveと同一hashだった。ファイル出現直後には終了しておらず、stdoutの`SaveManager: Wrote 8192 bytes`を保存している。
+- フレーム計測: saveの現在frameとUnix時刻をlogへ付けるだけの一時計測を`SaveManager`へ追加してRelease buildし、隔離copyで3回実行後に計測コードを完全にrevertした。全runで最初のflush requestはframe 167、50回目かつ最後の初期化requestはframe 216だった。request列は816–817 ms継続した。disk writeはSaveManagerのreal-time debounce後で、run2はframe 330 / 7,823 ms、run3はframe 290 / 7,475 ms、run4はframe 302 / 6,676 ms。書き込みframeの差はdebounceをwall clockで行うためで、生成内容には差がない。意味上のsave内容生成完了は全run共通のframe 216、disk永続化完了は起動後6.7–7.8秒である。
+- 画面・入力: saveなしの`run4-instrumented-noinput`を入力なしで10.5秒まで動かし、`New Super Mario Bros.`の`Select a Game`画面到達をWindows `PrintWindow` captureで確認した。ただしsaveのdisk writeは同runでframe 302 / 6,676 msに完了しており、タイトル画面への到達・操作はsave生成条件ではない。証跡は`run4-instrumented-noinput/noinput-title-after-10s.png`。
+- 再起動: 生成済みsaveを残した`run1-normal-noinput`と`run3-instrumented-noinput`を再起動し、stdoutで`probe.sav`のread openを確認した。10–12秒無入力でタイトル画面へ到達し、flush requestは0件、終了後hashも不変だった。どちらも`CloseMainWindow`で正常終了した。画面証跡は`run3-instrumented-noinput/restart-printwindow-after-10s.png`。
+- 構造比較: 正常saveと全生成saveは完全一致するため構造差は0 bytes。8 KiB全体は同一内容の4 KiB halfを2個持ち、各halfはoffset `0x0002`にASCII `Mario2d\0` + `9000\0`、`0x0102`/`0x0382`/`0x0602`に同じ`Mario2d\0` + `7000\0`を持つ同一0x280-byte block 3個、`0x0882`に`Mario2d\0` + `3000`を持つ。`0x089E..0x0FFF`は全`FF`で、second half `0x1000..0x1FFF`はfirst halfの完全duplicate。byte集計は`00`が3,894、`FF`が4,060、その他238、distinct byte値23種類である。先頭2 bytesなどをchecksumと断定する追加解析は行っていない。
+- 生成物・log: `logs/save-bootstrap-measurement-20260806`に通常run、3計測run、再起動stdout/stderr、各`probe.sav`、画面PNG、隔離ROM/config/binary copyを保持する。一時計測binaryのSHA-256は`4d6f887870594b831d30a2785f1bc983ce9ba36706f264cf7347acb294c28f97`。計測終了後はsourceをHEADと同一へ戻して通常binaryを再buildし、上のcanonical save bootstrap実装へ進んだ。
+- Current blocker: 実測自体のblockerはなし。この結果を採用した本実装と異常系検証は上節へ移した。
+- Next action: 必須作業はなし。実配布installerを別環境へinstallする場合は、完全初回オンボーディングの目視確認を追加できる。
+- Verification: source instrumentationのrevert後に`git hash-object`とHEAD blob hashが3 fileすべて一致することを確認し、通常Release `melonDS.exe`を再buildした。CTestは16/16成功。計測run終了後にmelonDS processは残っておらず、元ROM/save/configの変更もない。
+
+## 開始状態・再戦epoch・セーブ同一性の防御実装 - 2026-08-06
+
+- 完了: 未コミットだった自動再現ハーネス一式を`stash@{0}`（`wip: 同期ズレ自動再現テストと調査記録を退避`）へ退避し、同期修正をcleanな`f7836da9`から実装した。stashは復元していない。
+- 完了: 各peer固有の`LocalStartupRawFrame`と、Hostが提示してClientが採用する`SharedLogicalEpoch`を分離した。再戦でも共有論理開始値は固定の`StartFrame`へ戻し、各peerのcheckpoint復元位置だけをraw frameとしてrebaseする。入力、PacketBridge、state-syncは論理frameを使用し、JIT内のpacket tickを`NDS::NumFrames`から再計算してraw差を戻す経路も廃止した。
+- 完了: 初戦をgeneration 0、再戦をgeneration 1以降として、入力単体packet、入力bundle、start-ready、NSML packet、game-state packetへgenerationを付加した。再戦resetでqueueとhandshakeを世代ごとに初期化し、異なるgenerationの遅延packetは受信時に拒否する。wire/session/input protocolはversion 2へ更新した。
+- 完了: start-readyを64 bytesへ拡張し、generation、sender raw ready frame、共有epoch、stage ID/group、match seed、packet tick、RNG値/call count/branch、role-local値やaddress/animationを除外したsemantic hashを交換する。全項目が一致した場合だけ入力epochを解放し、不一致時は理由と両値をlogへ出してgameplay開始を拒否する。Host/Clientで本質的に異なる値を含むfull savestate hashの単純比較は採用していない。
+- 完了: state-syncの比較・適用・送信frameを入力と同じlogical座標へ統一し、start-ready検証完了前のstate packetと異世代packetを拒否する。これでraw ready差による同一frame名の誤比較と、前試合stateの混入を防ぐ。
+- 完了: 当初は選択元ROM横の`.sav`を検査・複製する実装だったが、後続のcanonical save bootstrapで廃止した。現在はベースROM SHA-256別のBigstar管理canonicalを自動生成・厳格検証し、Host/Client作業saveへ毎回copyする。save SHA-256をROM manifest、`rom_pair_id`、signaling schema、launcher/feedback identityへ含め、起動直前にも共通ensureとidentity hard gateを通す。
+- 実機確認更新: local GUI 2-processの複数runで、新start-readyは初戦generation 0と再戦generation 1を両peerで受理し、共有epoch、stage、seed、packet tick、RNG、semantic hashの検証を通過した。異世代の遅延game-state packetも再戦直後にgeneration mismatchとして拒否されている。これによりstart-ready/generation実装のend-to-end未確認という旧blockerは解消した。
+- 現在のblocker: なし。再戦後のJIT scratch入力反映判定に残っていたraw/logical比較混在は上節の修正で解消した。
+- 次のaction: 必須作業はなし。追加の信頼性確認として、旧GUIログと同じ通常GUI起動経路で複数勝利の再戦を目視できる。退避した100回自動再現ハーネスを再利用する場合は、protocol version 2とcanonical saveへ追従させる。
+- Verification: protocol version 2のstart-ready受理と異世代拒否をGUI 2-process実ログで確認済み。入力gate修正後はRelease build、CTest 16/16、再戦必須の10,000-frame split 2-process実ROM smokeが成功した。
+
+## Bigstar Insiders 0.10.2 の同期エラー再発調査（実装前の根拠） - 2026-08-05
+
+- 優先対象: ユーザーが両peerの実画面でgame stateの相違を確認した3 sessionを、実同期破綻として主対象にする。`bigstar-1785854827100-51400-1`は`playerGlobal=0`が84件、`bigstar-1785858005579-63248-2`は87件、`bigstar-1785858354923-63248-3`は32件。GUIが最後の不一致をclearせず赤表示を残す問題も別に存在するが、これは3件の実同期破綻を否定する材料には使わない。
+- 発生形状: 前2 sessionは第1試合のframe `1380` / `1920`から発生し、いずれも最初の不一致より前にremote waitが一度もない。3件目は第3試合のframe `46020`から発生し、frame `48120..49980`ではほぼ連続して不一致のままresultへ進んだ。第1試合でも第3試合でも起き、stage 3とstage 4の両方で起きるため、再戦境界または特定courseだけに限定した故障ではない。
+- 通信・入力: 3 sessionとも`remote input timeout`、`input frame throttle timeout`、fallback/prediction、bridge impairment drop、`dropped_no_local_target`は0件である。最初の不一致時点でexact-frame入力は存在し、leadも上限内だった。従来確認済みの「missing inputをneutral/staleで進める」故障形状とは一致せず、通常のWAN遅延やpacket lossを直接原因とは判定しない。
+- 比較対象: `bigstar-1785855125665-63248-0`は同じ0.10.2、同じ対戦者、同じstage 3開始でframe `81960`まで`playerGlobal=0`が0件だった。回収feedbackに対応する`bigstar-1785856548198-63248-1`はframe `66780`の1 sampleだけ双方で同じ不一致を記録し、次の検査frameで自然復帰した。この単発例は比較用であり、主原因判定には使わない。
+- 版境界の集計: 保存済みログを完全一致の`game state mismatch ... playerGlobal=0`で再集計すると、0.10.2より前（最後の安定配布SHA `9cf04de7...`、0.10.1 local binary、旧自動/対向試験を含む24 session）は0件だった。0.10.2は起動前中断1件を除く完了5 session中4 sessionで1件以上を記録し、そのうち3 sessionがユーザー確認済みの実画面divergenceである。24件は人同士のWAN対戦数ではないが、「安定期には十数戦でも起きず最近再発した」という申告を偶然の単発として退ける集計ではなく、最近の版境界に強い回帰signalがある。
+- 配布物・名称変更: 0.10.1と0.10.2でhost/client ROM SHA-256は同一で、bridgeの名称変更差分も表示文字列・環境変数prefixが中心である。一方、生成ROM名は`nsmb-mvl-host/client.nds`から`bigstar-host/client.nds`へ変わったため、melonDSがROM basenameから決めるsaveも`bigstar-host/client.sav`として新規作成される。app-data移行は旧directoryを再帰copyするだけでbasenameをrenameしない。実機でも旧saveは7月29日にcopyされたまま残り、新saveは8月4日01:11に作成されていた。したがって「名称変更はファイル参照へ一切影響しない」という以前の評価は撤回する。
+- 名称変更の絞り込み: このPCでは現時点の新旧host/client save 4個がすべて8,192 bytesかつ同じSHA-256 `42ffb80e...`で、最初に新saveを作った8月4日01:11のlocal host/client runでも両側の`playerGlobal`は一致していた。persistent 3 sessionも新saveを正常にopenしている。旧/current `melonDS.toml`はRecentROM履歴以外同一でJITも名称変更前から有効である。よってローカルのROM/save/config参照ミスは支持されないが、identity/feedbackにsave/config hashが含まれずpersistent 3 sessionのremoteファイルも未回収なので、相手側だけ旧save・fresh save・異なるconfigだった可能性は残る。
+- commit境界: 最後にWANで繰り返し`playerGlobal=0`が0件だった配布`melonDS.exe`はSHA-256 `9cf04de7...`、mtime `2026-07-16 02:11:54`で、`nsmb-mvl-gui-v0.9.0` tag直後の成果物と時間的に一致する。そこから0.10.2までのmain ancestryで、入力同期・state sync・ROM生成処理には変更がない。エミュレーション実行へ影響し得る差分は、`c13ac336`/merge `68b2e171`のWindows input-netplay emulation threadを`THREAD_PRIORITY_HIGHEST`へ上げる変更と、`4d2e38a7`のARM9 `JumpTo()`診断無効時hot-path削減である。GPU差分は診断用時計計測だけで、該当環境変数は未設定だった。
+- 0.10.1→0.10.2境界: 0.10.1にはすでに`c13ac336`が含まれる。0.10.2の配布`melonDS.exe`は埋込build infoがcommit `4d2e38a7`、SHA-256 `38050f49...`で、後続のGUI/version commitでは同じsidecar cacheが再利用されていた。この境界のmelonDS差分は、未到達の8 MiB performance-log rotationと`4d2e38a7`が実質的な候補であり、該当ログは最大約0.9 MiBなので前者は発火していない。従って0.10.2固有trigger候補は`4d2e38a7`へ絞られるが、まだ前後binary A/Bを完了できておらず因果確定ではない。
+- 開始状態・frame基準仮説: 最初の2 sessionは第1試合でlocal ready `859`、remote ready `865`と6 raw frameずれている。長時間正常だった現0.10.2 sessionは全試合でreadyが一致し、最後の安定版SHA `9cf04de7...`のWANログも記録済みready pairはすべて一致していた。現行barrierは各peerが「gameplay ready」と判定したことだけを待ち、開始checkpoint/hashを交換・一致確認・loadしない。入力は各peerのlocal readyを共通logical start `840`へrebaseするため、ready時点の内部stateが同一なら同期するが、6 raw frame差の間にtimer/RNG/actor stateが違えば、異なる初期stateへ同じlogical inputを与えて実divergenceを起こし得る。既存ログにはready時state hashがなく、この因果は相関以上には確定できない。
+- state-sync診断の別問題: `GameStateSync::Sync()`へ渡すframeはraw/test counterのままでinputと同じrebaseを行わない。このためready raw frameがずれたsessionでは異なるlogical gameplay時点を同じframe番号として比較し、実同期破綻に加えてfalse-positive sampleも混入し得る。ユーザー確認済みの画面差をこの診断バグだけで説明することはできない。
+- 第3 session: 第3試合のlocal/remote ready表示は双方`32120`であり、raw ready差だけでは説明できない。ただしstart-ready wire packetはremote raw ready frameだけを送り、sender側の`logicalStart`/input epochや開始state hashを送らない。localは`logicalStart=32103`だがremote側も同じ値・同じcheckpointかはlocal logから検証不能である。remote epoch/checkpointが異なれば、packet欠落やtimeoutなしでも入力が別のgameplay時点/stateへ付き実divergenceになる。両peer event/logがないため、未交渉epoch/checkpointとgame/runtime nondeterminismを分離できない。
+- commit評価: 全該当ログで`emulation thread priority=highest`は有効だが、`netPumpThread=0`でENet pumpはemulation thread自身が毎frameおよびremote-input wait中に実行する。最初の不一致時にはexact-frame inputもあるため、「最高優先度がnetwork pumpをstarveさせmissing inputを生んだ」は支持されない。ただしpriority変更がCPU/render/bridgeとの相対scheduleやgameplay-ready到達frameを変え、未検証の開始state差または潜在raceを露出させる間接triggerになる可能性は残る。
+- priority A/B: 現行0.10.2配布binary、同一ROM/seed、JIT on、60 FPS、3,000 framesで(1)両側highest、(2)host highest/client normal、(3)両側normalを実行した。全条件でready `859/859`、exact `playerGlobal=0`は0件、完走した。1 runずつなので確率的raceは棄却できないが、priority差またはhighest設定単独を十分原因とする仮説は再現せず、順位を下げる。
+- JIT評価: `MELONDS_NSML_ALLOW_JIT=1`はconfigの`JIT.Enable`を尊重するだけでなく、コード上JITを強制的に許可する。3 persistent sessionのlocal stdoutも全て`JIT enabled`を記録したため、名称変更でlocal configがfresh化してJIT offになった単純説は否定する。一方、同じ0.10.2 binaryでhost JIT on/client JIT offを混在させるA/Bではready `859/842`と17-frame差が生じ、frame 900/960に双方でexact `playerGlobal=0`を2件再現した。これは開始stateを照合しないprotocol holeが実在する証拠だが、その後hashは復帰しており、persistent 3件の直接再現ではない。また`4d2e38a7`はJIT compiler・生成命令・emulated memoryを書き換えず、`ARMv5::JumpTo()`の診断無効時コストだけを削る。直接のJIT演算誤りより、実行速度/thread interleaving変化が既存のtiming依存を露出したtrigger仮説の方が整合する。大規模JIT高速化commit `61802285`、`479ac5c6`、`51381858`は0.10.2 ancestryに含まれない。
+- binary/identity A/B: 0.10.2公式binary `38050f49...`と、同じ`4d2e38a7` sourceからのlocal binary `8c50cbbc...`をhost/clientで混在させてもready `859/859`、exact `playerGlobal=0` 0件で完走したため、CI toolchain/成果物差単独は再現しない。ただしmatch identityが検査するのはgenerator ID、host/client ROM hash、bridge hashだけで、`melonDS.exe`、save、config/JITのhashは含まれない。同じ0.10.2 GUI同士でもremote sidecar/runtime差を拒否できない。回収feedbackは相手host側で、GUI 0.10.2、bridge SHA-256 `a9ce2dcc...`、generator IDは確認できるが、archiveは軽量6 fileだけで`launcher.json`を含まず、`melonds.stdout.tail.txt`も末尾524,288 bytesに切られている。このため相手のmelonDS artifact hash/build commitと起動時`JIT enabled/disabled`行は記録されていない。またこれは単発不一致後に復帰した比較sessionのfeedbackであり、persistent 3 sessionの相手側情報ではない。
+- UI評価: `4f1d243c`は既存の不一致表示を`同期エラー`statusへ変更しただけで、backendの判定条件は変えていない。これは見え方の変更であって、3件の継続的player-global divergenceの原因ではない。
+- 診断情報改善: 今後のfeedbackでは実際に起動したmelonDSのbuild branch/commit/provider、JIT状態、melonDS/ROM/bridge/input script、save、configのSHA-256をpathなしで収集する。Insiders版は、生成済みのdiagnostic event、game-state、phase、watchdog、bridge eventと直近screenshotも容量制限付き・text機密値redact付きでarchiveへ含める。これは既存3 sessionの欠損情報を復元するものではなく、次回発生時の両peer比較を可能にするための変更である。
+- 現在の判断: 最近の版境界で発生率が上がったことは集計で支持される。実divergenceの候補順位は(1)開始checkpoint/stateと再戦epochをpeer間で一致確認しないprotocol欠陥、(2)0.10.2固有の`JumpTo()`高速化が既存のgame/runtime timing依存・raceを露出したtrigger、(3)identityで拒否できないremote側だけのmelonDS/save/runtime差、(4)priority変更単独、(5)通常のpacket loss/missing inputである。rename由来のsave basename変更は事実だがlocal新旧save/ROM/config一致と正常0.10.2 sessionがあり、JIT許可もconfigに依存しないため、名称変更単独説は`JumpTo()`間接triggerより下へ下げる。根本原因と最近のtriggerは分け、開始state/epoch検証を本修正、`4d2e38a7`前後A/Bを回帰triggerの確認とする。
+- 当時の情報不足: 全該当sessionで`diagnostic_events_enabled=false`だったため、既に実装済みの`player_global_mismatch` JSONL（0x60単位sub-hash、actor hash、field diff、前後ring）が保存されていない。stdoutには0xC0全体hashしかなく、最初に異なったbyte/fieldを特定不能である。feedbackにもremote側のAI observationやfull RAM/event logは含まれない。この欠損は既存sessionについては解消不能だが、上の防御実装は新しいstart-ready値をstdoutへ残す。
+- 当時の提案と現在: `4d2e38a7`直前/直後A/Bは未完のままだが、start-readyのsender raw ready、logical epoch、semantic hash、state-sync logical frame、save identityは2026-08-06に実装済み。旧/new save A/Bより先に、新protocolの実ROM2-peer検証を行う。
+- 当時のVerification: ログ・feedback・launcher manifest・bridge status・AI observation gzip・実配布binary timestamp/hash/build info・main ancestry差分・旧/current melonDS設定・app-data migration実装・新旧ROM/saveのpath/time/hashを照合済み。現行0.10.2でpriority 3条件、JIT混在、公式/local build混在のA/Bを実行した。`4d2e38a7`直前worktreeの構成はvcpkg依存導入が3回の各5分制限内に完了せず、前後binary A/Bは未完。残留build processは対象command lineで特定して停止し、worktree登録は解除済みだが、削除policyにより未登録一時directory `C:\Users\Sugiyama\melon-ds-pre4d-codex`（約324 MiB）は残っている。
+
+## ARM9ジャンプ診断の性能修正をmainへ移植 - 2026-08-03
+
+- 完了: `ARMv5::JumpTo()`が診断無効時にも毎回`getenv()`とPC/LR/SP/CPSR取得を行っていた性能退行を修正した。`MELONDS_NSML_BAD_JUMP_TRACE`はプロセス起動時に一度だけ読み、診断無効時はレジスタ取得と対象アドレス検査も省略する。
+- 移植方法: 元コミット`6b0dcf2f`はmainにないロールバック実験コミットを親に持ち、文書も実験ブランチの状態へ進めるため、単純なcherry-pickは適用不能だった。`src/ARM.cpp`の独立した修正だけをmainのコードへ手動移植した。
+- 既知の測定根拠: 元ブランチの実MvL測定では、修正前のJIT off/on `21.68/91.90fps`に対し、修正後は`264.55/530.04fps`だった。これは今回のmainビルド自体の再測定値ではない。
+- Verification: mainのRelease `melonDS`ビルドに成功し、CTestは`16/16`件成功した。初回の並行ビルド呼び出しは同一Ninjaディレクトリの再生成競合で失敗したが、先に開始済みだったビルド自体は同じ作業ツリーの修正を含んで正常完了しており、生成後の全テストも成功した。
+- Current blocker: なし。今回の目的であるmainへの性能修正移植とコード回帰確認は完了した。
+- Next action: main単独の性能数値が必要になった場合のみ、既存の固定入力・実ROM測定を再実行する。
 
 ## NsmbMvlNetplayRuntime リファクタ調査 - 2026-07-15
 
@@ -625,7 +718,7 @@
 - Fix applied for script runs: `scripts\run-nsmb-mvl-lan-route-smoke.ps1` now treats missing, all-zero, or all-`0xFF` 8192-byte `nsmb.sav` as unusable and falls back to the repo stable `roms\nsmb-us.sav`.
   - Verification: rerunning the no-save ROM source through `logs\codex-hipdrop-nosave-after-fallback-20260617-sw2` pre-seeded the stable save SHA-256 `42ffb80e234c01d5784bdc291fee41c26e59f66295d7f105c798ba8dde11b2ee`, opened `nsmb.sav` at startup, patched Net/Game random at frame 785 with `oldNetCount=0x01`, and no longer showed the solid white square in the frame 1048-1084 contact sheet.
 - Current blocker: none for the script-side white-square reproduction. The remaining underlying emulator/game behavior is that invalid/unformatted NSMB save contents change early boot/MvL timing and can produce corrupted-looking ground-pound smoke.
-- Next action: keep manual/script MvL launch paths from starting with invalid NSMB saves. If GUI ever runs without a valid AppData save, apply the same pre-seed/validation there.
+- Resolved follow-up: GUI/Bigstar側も2026-08-06のcanonical save bootstrapでmissing／不正saveを自動生成・厳格検証し、対戦直前にHost/Client作業saveへ再copyするようになった。manual/script経路の既存fallbackとは別に、GUIが無効saveで起動する残課題は解消した。
 - Verification: `cargo fmt --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, `cargo test --manifest-path tools\nsmb-mvl-rom\Cargo.toml`, and `cargo clippy --manifest-path tools\nsmb-mvl-rom\Cargo.toml --all-targets -- -D warnings` passed. `cargo clippy-all` could not be used because the alias is not installed in this environment.
 
 ## Current low-overhead diagnostic event logging - 2026-06-17
@@ -1099,7 +1192,7 @@ New Super Mario Bros. DS のローカル対戦専用モード `Mario vs Luigi` �
   - stage 2のsoftware 3D rasterizerは平均`0.2-0.5ms/frame`、2D合成と3D scanline待ちを含むsoftware GPU全体も約`1.1ms/frame`だった。キラー等の敵ポリゴン描画は、`RunFrame=14-16ms`の主因ではない。大半はARM9/ARM7 JITと周辺機器を実行する単一emulation threadである。
   - process priority変更、process affinity分割、単一threaded renderer、描画転送停止、emulation threadのhard affinityは、改善なしまたはコア個体差で悪化した。固定frame limiterのhybrid sleepも59.97fpsから59.64fpsへ悪化したため不採用。
   - Windows上でinput-netplay emulation threadだけを`THREAD_PRIORITY_HIGHEST`へ上げると、6000-frame比較で平均`RunFrame`はhost `14.59 -> 13.59ms`、client `14.29 -> 13.49ms`へ短縮した。active FPSはhost/client `59.97/59.96fps`、120-frame窓の最低値は`59.35fps`で、通常priorityの最低`58.95fps`より改善した。これはreal-time priorityではなく、通常priority class内の最高値である。
-  - `MELONDS_NSML_INPUT_NETPLAY_ONLY=1` のWindows起動だけ上記thread priorityを自動適用する。通常のmelonDS起動には適用しない。`MELONDS_NSML_EMU_THREAD_PRIORITY=normal|abovenormal|highest` で診断上書きできる。
+  - 2026-08-17更新: 当時は`MELONDS_NSML_INPUT_NETPLAY_ONLY=1`のWindows起動へ上記thread priorityを自動適用したが、scheduler条件を安定期へ戻すため自動適用を撤回した。現在は通常priorityが既定で、`MELONDS_NSML_EMU_THREAD_PRIORITY=abovenormal|highest`を明示した診断時だけ上書きできる。
   - stage 2固有負荷を確認するため、同じROM/seed、normal thread priority、frame `960-1919`完全無操作で`stage 2 -> 0 -> 3 -> 4 -> 1 -> 2`の順に比較した。両peer平均`RunFrame`はstage 0=`14.31ms`、1=`14.32ms`、2初回=`14.08ms`、2再測定=`14.06ms`、3=`13.59ms`、4=`15.30ms`だった。stage 2は再測定でも同値で、固有に最も重いstageではない。software GPU時間もstage 2=`1.10ms`、stage 4=`1.09ms`であり、stage 4の差は描画ではなくemulated CPU/JIT側だった。以前stage 2で見えた57-59fps区間は、その時点のscheduler/外部負荷、またはカメラ位置によりactive actor/game logicが異なる実ゲーム状態との複合と判断する。
   - 現在のblockerはなし。次の実機確認は、GUI配布用melonDSをこの変更込みでbuildし、stage 2無操作を含む数分間を1kHz/8kHzで各1回以上測ること。8kHzだけ低下する場合は、同時収集CSVのDPC/interrupt差からUSB driver側を追加調査する。
 - 2026-05-30 software renderer追加調査:

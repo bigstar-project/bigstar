@@ -202,6 +202,8 @@ ConnectionConfig LoadConnectionConfig(const Environment &environment,
                                  config.Client ? 1 : 0);
   config.StartFrame = static_cast<std::uint32_t>(
       std::max(0, ReadInt(environment, "MELONDS_NSML_NETPLAY_START_FRAME", 0)));
+  config.LocalStartupRawFrame = config.StartFrame;
+  config.SharedLogicalEpoch = config.StartFrame;
   config.LocalWaitsForRemote =
       !ReadFlag(environment, "MELONDS_NSML_NO_LOCAL_WAIT");
   config.RemoteInputTimeoutFatal =

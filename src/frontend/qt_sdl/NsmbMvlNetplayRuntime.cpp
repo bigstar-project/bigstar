@@ -187,7 +187,7 @@ RollbackRuntime::Context RollbackContext()
         G.RollbackStore,
         G.RollbackStats,
         G.Mutex,
-        G.Connection.StartFrame,
+        G.Connection.SharedLogicalEpoch,
     };
 }
 
@@ -201,6 +201,7 @@ PacketBridge::IntegrationContext PacketBridgeContext()
         G.PacketBridgeRuntime,
         G.Transport,
         G.Mutex,
+        G.NetplaySession.Handshake.Generation(),
     };
 }
 
@@ -244,6 +245,9 @@ GameStateSync::Context GameStateSyncContext()
         G.MvlCurrentStageSceneSettings,
         G.Enabled,
         G.NetRole == Role::Client,
+        G.NetplaySession.Handshake.WaitedForPeerAtStart() &&
+            G.NetplaySession.Handshake.StartReadyValidated(),
+        G.NetplaySession.Handshake.Generation(),
     };
 }
 
@@ -547,8 +551,7 @@ const NetplaySession::Hooks& NetplaySessionHooks()
                 data,
                 size,
                 nds,
-                localFrame,
-                MvlLifecycle::RestartPacketCutoffFrame(MvlLifecycleContext()));
+                localFrame);
         },
         [](const void* data, std::size_t size) {
             GameStateSync::HandleReceivedPacketLocked(
@@ -556,6 +559,22 @@ const NetplaySession::Hooks& NetplaySessionHooks()
         },
         [](melonDS::NDS* nds) {
             return IsInputNetplayGameplayStartReady(nds);
+        },
+        [](int instanceID, melonDS::NDS* nds) {
+            SessionProtocol::Message message;
+            message.Kind = SessionProtocol::MessageKind::StartReady;
+            const GameStateSample sample = ReadGameStateSample(nds);
+            message.StageID = sample.StageID;
+            message.StageGroup = sample.StageGroup;
+            message.MatchSeed = MvlLifecycle::MatchSeedForGame(
+                MvlLifecycleContext(), instanceID);
+            message.PacketTick = sample.NetPacketTick;
+            message.RngValue = sample.NetRandomValue;
+            message.RngCallCount = sample.NetRandomCallCount;
+            message.RngBranchAddress = sample.NetRandomBranchAddress;
+            message.SemanticHash = GameStateModel::ComputeStartReadySemanticHash(
+                sample, G.MvlCurrentStageSceneSettings);
+            return message;
         },
     };
     return hooks;
@@ -738,12 +757,6 @@ void WritePacketBridgeJitScratchIfNeeded(
         return;
     if (!G.Enabled)
         return;
-    melonDS::u32 startFrame = 0;
-    if (G.Input.NetplayOnly)
-    {
-        startFrame = std::max(startFrame, G.RuntimePatch.PacketBridgeJitHelperPatchFrame);
-        startFrame = std::max(startFrame, G.Connection.StartFrame);
-    }
     const bool traceScratch = G.Diagnostics.ActiveFrameSpikeTrace;
     const auto scratchStart = std::chrono::steady_clock::now();
     unsigned long long peerStartWaitUs = 0;
@@ -763,20 +776,22 @@ void WritePacketBridgeJitScratchIfNeeded(
     }
 
     const int localPlayer = CurrentPacketBridgeLocalPlayer();
-    if (G.Input.NetplayOnly && G.Harness.WaitForPeerBeforeStart && G.Connection.StartFrame > 0
+    if (G.Input.NetplayOnly && G.Harness.WaitForPeerBeforeStart
+        && G.Connection.LocalStartupRawFrame > 0
         && !RuleAIProvidesInputForPlayer(localPlayer ^ 1)
         && !AIObservation::ProvidesImitationInput(
             AIObservationContext(), localPlayer ^ 1))
     {
         const melonDS::u32 delay = static_cast<melonDS::u32>(std::max(0, G.Connection.Delay));
-        const melonDS::u32 sendStartFrame = (G.Connection.StartFrame > delay)
-            ? G.Connection.StartFrame - delay
+        const melonDS::u32 sendStartFrame =
+            (G.Connection.LocalStartupRawFrame > delay)
+            ? G.Connection.LocalStartupRawFrame - delay
             : 0;
         if (frame == sendStartFrame)
         {
             std::printf("NSMB InputNetplay: waiting for peer before send start frame=%u applyStart=%u\n",
                 sendStartFrame,
-                G.Connection.StartFrame);
+                G.Connection.LocalStartupRawFrame);
             std::fflush(stdout);
             const auto waitStart = std::chrono::steady_clock::now();
             NetplaySession::WaitForPeer(
@@ -826,8 +841,8 @@ void WritePacketBridgeJitScratchIfNeeded(
             auto it = G.InputRuntime.RemoteInputs.find(logicalFrame);
             const bool rollbackInputActive = G.Rollback.Enabled
                 && G.Input.NetplayOnly
-                && (G.Connection.StartFrame == 0
-                    || logicalFrame >= G.Connection.StartFrame);
+                && (G.Connection.SharedLogicalEpoch == 0
+                    || logicalFrame >= G.Connection.SharedLogicalEpoch);
             if (rollbackInputActive)
             {
                 if (it == G.InputRuntime.RemoteInputs.end())
@@ -859,7 +874,8 @@ void WritePacketBridgeJitScratchIfNeeded(
             && !G.Rollback.Enabled
             && G.Connection.LocalWaitsForRemote
             && !aiProvidesRemoteInput
-            && (!G.Input.NetplayOnly || G.Connection.StartFrame == 0 || logicalFrame >= G.Connection.StartFrame))
+            && (!G.Input.NetplayOnly || G.Connection.SharedLogicalEpoch == 0
+                || logicalFrame >= G.Connection.SharedLogicalEpoch))
         {
             const auto waitStart = std::chrono::steady_clock::now();
             remoteInput = NetplaySession::WaitForRemoteInput(
@@ -869,8 +885,20 @@ void WritePacketBridgeJitScratchIfNeeded(
         }
     }
 
-    const bool beforeStart = logicalFrame < startFrame;
-    if (!beforeStart)
+    const bool inputEpochReady =
+        !G.Input.NetplayOnly
+        || (G.NetplaySession.Handshake.WaitedForPeerAtStart()
+            && G.NetplaySession.Handshake.StartReadyValidated()
+            && G.NetplaySession.Handshake.InputEpochPrimedFor(
+                G.Connection.SharedLogicalEpoch));
+    const bool writeScratch = PacketBridge::ShouldWriteJitScratchInputs(
+        G.PacketBridgeRuntime.IsJitHookApplied(instanceID),
+        G.Input.NetplayOnly,
+        inputEpochReady,
+        G.Connection.SharedLogicalEpoch,
+        logicalFrame);
+    const bool beforeStart = !writeScratch;
+    if (writeScratch)
     {
         const auto writeStart = std::chrono::steady_clock::now();
         PacketBridge::WriteJitScratchInputs(
@@ -1084,6 +1112,10 @@ void InitFromEnvironment()
 
     G.Connection = Config::LoadConnectionConfig(G.TestEnabled);
     G.NetRole = G.Connection.Client ? Role::Client : Role::Host;
+    if (G.NetRole == Role::Client)
+        G.Connection.SharedLogicalEpoch = 0;
+    G.NetplaySession.Handshake.BeginGeneration(
+        0, G.Connection.SharedLogicalEpoch, G.NetRole == Role::Host);
 
     if (!G.Enabled) return;
 
@@ -1308,7 +1340,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     if (G.Enabled && G.Input.NetplayOnly)
         NetplaySession::WaitForRemoteStartReady(
-            NetplaySessionContext(), NetplaySessionHooks(), nds, syncFrame);
+            NetplaySessionContext(), NetplaySessionHooks(), instanceID, nds,
+            syncFrame);
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         RollbackRuntime::SaveCheckpointIfNeeded(
@@ -1347,7 +1380,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if (G.PacketBridge.Enabled && G.PacketBridge.Only)
     {
         const bool bridgeNetworkActive =
-            !G.Harness.DeferNetworkUntilStart || G.Connection.StartFrame == 0 || syncFrame >= G.Connection.StartFrame;
+            !G.Harness.DeferNetworkUntilStart
+            || G.Connection.LocalStartupRawFrame == 0
+            || syncFrame >= G.Connection.LocalStartupRawFrame;
         InputState packetBridgeInput = testInput;
         if (bridgeNetworkActive && G.PacketBridge.LocalInputDelay > 0)
         {
@@ -1394,11 +1429,15 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
 
     const bool isLocal = (instanceID == G.Connection.LocalInstance);
     const melonDS::u32 delay = static_cast<melonDS::u32>(G.Connection.Delay);
-    const melonDS::u32 sendStartFrame = (G.Connection.StartFrame > delay)
-        ? G.Connection.StartFrame - delay
+    const melonDS::u32 sendStartFrame =
+        (G.Connection.LocalStartupRawFrame > delay)
+        ? G.Connection.LocalStartupRawFrame - delay
         : 0;
-    const bool netplaySendActive = (G.Connection.StartFrame == 0 || syncFrame >= sendStartFrame);
-    const bool netplayApplyActive = (G.Connection.StartFrame == 0 || syncFrame >= G.Connection.StartFrame);
+    const bool netplaySendActive =
+        (G.Connection.LocalStartupRawFrame == 0 || syncFrame >= sendStartFrame);
+    const bool netplayApplyActive =
+        (G.Connection.LocalStartupRawFrame == 0
+         || syncFrame >= G.Connection.LocalStartupRawFrame);
     const bool networkPumpActive = NetplaySession::ShouldPumpNetworkAtFrame(
         NetplaySessionContext(), syncFrame, sendStartFrame);
 
@@ -1427,9 +1466,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if (!netplayApplyActive)
         return ConvertStockXToTouch(testInput);
 
-    if (G.Connection.StartFrame != 0
+    if (G.Connection.LocalStartupRawFrame != 0
         && G.Connection.WarmupFrames > 0
-        && syncFrame < G.Connection.StartFrame + static_cast<melonDS::u32>(G.Connection.WarmupFrames))
+        && syncFrame < G.Connection.LocalStartupRawFrame
+            + static_cast<melonDS::u32>(G.Connection.WarmupFrames))
     {
         return ConvertStockXToTouch(testInput);
     }
@@ -1522,31 +1562,38 @@ melonDS::u32 PrepareAfterFrameLogFrame(int instanceID, melonDS::u32 frame)
     return logFrame;
 }
 
-void RunAfterFramePacketBridgePhase(melonDS::u32 logFrame, melonDS::NDS* nds)
+void RunAfterFramePacketBridgePhase(melonDS::u32 rawFrame,
+                                    melonDS::u32 logicalFrame,
+                                    melonDS::NDS* nds)
 {
     const bool bridgeNetworkActive =
-        !G.Harness.DeferNetworkUntilStart || G.Connection.StartFrame == 0 || logFrame >= G.Connection.StartFrame;
+        (!G.Harness.DeferNetworkUntilStart
+         || G.Connection.LocalStartupRawFrame == 0
+         || rawFrame >= G.Connection.LocalStartupRawFrame)
+        && (!G.Input.NetplayOnly
+            || (G.NetplaySession.Handshake.WaitedForPeerAtStart()
+                && G.NetplaySession.Handshake.StartReadyValidated()));
     if (G.Enabled && G.PacketBridge.Enabled && bridgeNetworkActive)
     {
         std::lock_guard<std::mutex> lock(G.Mutex);
         PacketBridge::PumpLocked(
-            PacketBridgeContext(), PacketBridgeHooks(), nds, logFrame);
+            PacketBridgeContext(), PacketBridgeHooks(), nds, logicalFrame);
         PacketBridge::ForceGameLocalPlayerIDIfNeeded(
-            PacketBridgeContext(), logFrame, nds);
+            PacketBridgeContext(), rawFrame, nds);
         PacketBridge::CaptureAndSendPacketLocked(
-            PacketBridgeContext(), PacketBridgeHooks(), logFrame, nds);
+            PacketBridgeContext(), PacketBridgeHooks(), logicalFrame, nds);
     }
     if (G.Enabled && G.PacketBridge.Enabled && bridgeNetworkActive)
     {
         PacketBridge::ForceGameLocalPlayerIDIfNeeded(
-            PacketBridgeContext(), logFrame, nds);
+            PacketBridgeContext(), rawFrame, nds);
         melonDS::NSML_RefreshMarioVsLuigiPacketSlots(nds);
         PacketBridge::ForceGameLocalPlayerIDIfNeeded(
-            PacketBridgeContext(), logFrame, nds);
+            PacketBridgeContext(), rawFrame, nds);
     }
     if (G.Enabled && G.PacketBridge.Enabled && bridgeNetworkActive)
         PacketBridge::ThrottleFrameLead(
-            PacketBridgeContext(), PacketBridgeHooks(), nds, logFrame);
+            PacketBridgeContext(), PacketBridgeHooks(), nds, logicalFrame);
 }
 
 void RunAfterFrameRuntimePatchPhase(int instanceID, melonDS::u32 logFrame, melonDS::NDS* nds)
@@ -1587,6 +1634,10 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     if (instanceID < 0 || instanceID >= 16) return;
 
     const melonDS::u32 logFrame = PrepareAfterFrameLogFrame(instanceID, frame);
+    const melonDS::u32 logicalFrame =
+        G.Enabled && G.Input.NetplayOnly
+        ? NetplaySession::LogicalFrame(NetplaySessionContext(), logFrame)
+        : logFrame;
     if (G.Rollback.Backend == Config::RollbackBackend::RomLoop &&
         nds->FinalizeNSMLGameRAMRollbackTransaction() &&
         G.Input.NetplayTrace)
@@ -1615,10 +1666,11 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     TraceHangPhase("begin", "apply-remote-game-state", instanceID, logFrame, logFrame, logFrame);
     if (G.Enabled)
         GameStateSync::ApplyRemote(
-            GameStateSyncContext(), GameStateSyncHooks(), instanceID, logFrame, nds);
+            GameStateSyncContext(), GameStateSyncHooks(), instanceID,
+            logicalFrame, nds);
 
     TraceHangPhase("begin", "packet-bridge", instanceID, logFrame, logFrame, logFrame);
-    RunAfterFramePacketBridgePhase(logFrame, nds);
+    RunAfterFramePacketBridgePhase(logFrame, logicalFrame, nds);
     const auto afterBridge = std::chrono::steady_clock::now();
 
     TraceHangPhase("begin", "life-trace", instanceID, logFrame, logFrame, logFrame);
@@ -1657,7 +1709,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
     const auto afterTrace = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "sync-game", instanceID, logFrame, logFrame, logFrame);
     GameStateSync::Sync(
-        GameStateSyncContext(), GameStateSyncHooks(), instanceID, logFrame, nds);
+        GameStateSyncContext(), GameStateSyncHooks(), instanceID,
+        logicalFrame, nds);
     const auto afterSyncGame = std::chrono::steady_clock::now();
     TraceHangPhase("end", "after-frame", instanceID, logFrame, logFrame, logFrame);
 

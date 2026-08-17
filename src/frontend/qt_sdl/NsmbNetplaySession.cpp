@@ -69,14 +69,15 @@ void FlushDelayedInputsLocked(Context context, melonDS::u32 frame) {
 void StoreRemoteInputLocked(Context context, melonDS::u32 frame,
                             const InputState &receivedInput,
                             melonDS::u32 localFrame) {
-  if (context.Input.NetplayOnly && context.Connection.StartFrame != 0 &&
-      frame < context.Connection.StartFrame) {
+  if (context.Input.NetplayOnly &&
+      context.Connection.SharedLogicalEpoch != 0 &&
+      frame < context.Connection.SharedLogicalEpoch) {
     if (context.Input.NetplayTrace &&
         context.Inputs.LastTracedReceivedInputFrame != frame) {
       context.Inputs.LastTracedReceivedInputFrame = frame;
       std::printf("NSMB InputNetplay: ignored old input frame=%u "
                   "currentStart=%u\n",
-                  frame, context.Connection.StartFrame);
+                  frame, context.Connection.SharedLogicalEpoch);
     }
     return;
   }
@@ -141,10 +142,22 @@ void StoreRemoteInputLocked(Context context, melonDS::u32 frame,
   }
 }
 
+bool IsCurrentGeneration(Context context, melonDS::u32 generation,
+                         const char *packetKind) {
+  const melonDS::u32 current = context.State.Handshake.Generation();
+  if (generation == current)
+    return true;
+  std::printf("NSMB InputNetplay: ignored %s generation=%u current=%u\n",
+              packetKind, generation, current);
+  std::fflush(stdout);
+  return false;
+}
+
 void HandleReceivedInputLocked(Context context, const void *data,
                                std::size_t size, melonDS::u32 localFrame) {
   InputProtocol::FramedInput packet;
-  if (InputProtocol::DecodeInput(data, size, packet))
+  if (InputProtocol::DecodeInput(data, size, packet) &&
+      IsCurrentGeneration(context, packet.Generation, "input"))
     StoreRemoteInputLocked(context, packet.Frame, packet.Input, localFrame);
 }
 
@@ -153,6 +166,10 @@ void HandleReceivedInputBundleLocked(Context context, const void *data,
                                      melonDS::u32 localFrame) {
   std::vector<InputProtocol::FramedInput> entries;
   if (!InputProtocol::DecodeInputBundle(data, size, entries))
+    return;
+  if (!entries.empty() &&
+      !IsCurrentGeneration(context, entries.front().Generation,
+                           "input-bundle"))
     return;
   for (const InputProtocol::FramedInput &entry : entries)
     StoreRemoteInputLocked(context, entry.Frame, entry.Input, localFrame);
@@ -178,19 +195,52 @@ void HandleReceivedSessionLocked(Context context, const Hooks &hooks,
     return;
   }
 
-  if (SessionPolicy::IsOldStartReady(context.Input.NetplayOnly,
-                                     context.Connection.StartFrame,
-                                     message.Value)) {
-    std::printf("NSMB InputNetplay: ignored old start ready frame=%u "
-                "currentStart=%u\n",
-                message.Value, context.Connection.StartFrame);
+  if (!IsCurrentGeneration(context, message.Generation, "start-ready"))
     return;
+
+  if (!context.Host) {
+    context.State.Handshake.AdoptHostLogicalEpoch(
+        message.SharedLogicalEpoch);
+    context.Connection.SharedLogicalEpoch = message.SharedLogicalEpoch;
   }
-  context.State.Handshake.ReceiveRemoteReady(message.Value);
-  hooks.EmitStartReadyEventLocked("recv", localFrame, message.Value);
+  context.State.Handshake.ReceiveRemoteReady(message);
+  if (const auto local = context.State.Handshake.LocalReady(); local) {
+    SessionProtocol::Message normalizedLocal = *local;
+    normalizedLocal.SharedLogicalEpoch =
+        context.State.Handshake.SharedLogicalEpoch();
+    const auto validation = SessionPolicy::ValidateStartReady(
+        normalizedLocal, message, context.State.Handshake.Generation(),
+        context.State.Handshake.SharedLogicalEpoch());
+    context.State.Handshake.MarkStartReadyValidation(validation);
+    if (validation != SessionPolicy::StartReadyValidation::Match) {
+      std::printf(
+          "NSMB InputNetplay: start ready validation failed reason=%s "
+          "generation=%u localRaw=%u remoteRaw=%u localEpoch=%u "
+          "remoteEpoch=%u stage=%u/%u remoteStage=%u/%u seed=%08X/%08X "
+          "tick=%u/%u rng=%08X/%u/%08X remoteRng=%08X/%u/%08X "
+          "semantic=%016llX/%016llX\n",
+          SessionPolicy::StartReadyValidationName(validation),
+          message.Generation, normalizedLocal.RawReadyFrame,
+          message.RawReadyFrame, normalizedLocal.SharedLogicalEpoch,
+          message.SharedLogicalEpoch, normalizedLocal.StageID,
+          normalizedLocal.StageGroup, message.StageID, message.StageGroup,
+          normalizedLocal.MatchSeed, message.MatchSeed,
+          normalizedLocal.PacketTick, message.PacketTick,
+          normalizedLocal.RngValue, normalizedLocal.RngCallCount,
+          normalizedLocal.RngBranchAddress, message.RngValue,
+          message.RngCallCount, message.RngBranchAddress,
+          static_cast<unsigned long long>(normalizedLocal.SemanticHash),
+          static_cast<unsigned long long>(message.SemanticHash));
+      std::fflush(stdout);
+    }
+  }
+  hooks.EmitStartReadyEventLocked("recv", localFrame,
+                                  message.RawReadyFrame);
   context.State.InputCond.notify_all();
-  std::printf("NSMB InputNetplay: received start ready frame=%u\n",
-              message.Value);
+  std::printf("NSMB InputNetplay: received start ready generation=%u "
+              "rawFrame=%u sharedEpoch=%u\n",
+              message.Generation, message.RawReadyFrame,
+              message.SharedLogicalEpoch);
 }
 
 void TraceRemoteInputWaitSpike(Context context, melonDS::u32 targetFrame,
@@ -307,7 +357,7 @@ void PumpLocked(Context context, const Hooks &hooks, melonDS::NDS *nds,
           context.Inputs.LocalInputs.size(), context.Inputs.RemoteInputs.size(),
           context.State.Delivery.PendingCount(),
           context.Inputs.InputFrameLeadResendCount,
-          context.Connection.StartFrame,
+          context.Connection.SharedLogicalEpoch,
           context.State.Handshake.LocalReadyFrame().value_or(kNoFrame),
           context.State.Handshake.RemoteReadyFrame().value_or(kNoFrame),
           context.State.Handshake.RemoteReadyAfterLocal() ? 1 : 0, event.data);
@@ -373,10 +423,17 @@ void SendMatchSeedLocked(Context context) {
 void SendStartReadyLocked(Context context, const Hooks &hooks,
                           melonDS::u32 frame, bool force) {
   if (!context.Transport.IsConnected() ||
-      !context.State.Handshake.CanSendStartReady(force))
+      !context.State.Handshake.CanSendStartReady(force) ||
+      !context.State.Handshake.LogicalEpochEstablished())
     return;
-  const std::vector<char> payload = SessionProtocol::Encode(
-      {SessionProtocol::MessageKind::StartReady, frame});
+  auto message = context.State.Handshake.LocalReady();
+  if (!message)
+    return;
+  message->Generation = context.State.Handshake.Generation();
+  message->RawReadyFrame = frame;
+  message->SharedLogicalEpoch =
+      context.State.Handshake.SharedLogicalEpoch();
+  const std::vector<char> payload = SessionProtocol::Encode(*message);
   if (context.Transport.Send(payload.data(), payload.size(),
                              ENET_PACKET_FLAG_RELIABLE,
                              true) == NsmbNetplayTransport::SendUnavailable)
@@ -385,8 +442,10 @@ void SendStartReadyLocked(Context context, const Hooks &hooks,
   hooks.EmitStartReadyEventLocked(
       force ? "resend" : "send", frame,
       context.State.Handshake.RemoteReadyFrame().value_or(kNoFrame));
-  std::printf("NSMB InputNetplay: %s start ready frame=%u count=%d\n",
-              force ? "resent" : "sent", frame,
+  std::printf("NSMB InputNetplay: %s start ready generation=%u rawFrame=%u "
+              "sharedEpoch=%u count=%d\n",
+              force ? "resent" : "sent", message->Generation, frame,
+              message->SharedLogicalEpoch,
               context.State.Handshake.StartReadySendCount());
   std::fflush(stdout);
 }
@@ -403,7 +462,8 @@ void MaybeResendStartReadyLocked(Context context, const Hooks &hooks,
            context.State.Handshake.StartReadySent(),
            context.State.Handshake.LocalReadyFrame().has_value(),
            context.Inputs.LastReceivedInputFrame != kNoFrame,
-           context.Inputs.LastReceivedInputFrame, context.Connection.StartFrame,
+           context.Inputs.LastReceivedInputFrame,
+           context.Connection.SharedLogicalEpoch,
            context.Connection.Delay,
            context.State.Handshake.StartReadySendCount(), elapsed}))
     return;
@@ -431,7 +491,7 @@ void SendInputLocked(Context context, const Hooks &hooks, melonDS::u32 frame,
   }
 
   const InputDelivery::PreparedSend prepared = context.State.Delivery.Prepare(
-      frame, input,
+      context.State.Handshake.Generation(), frame, input,
       {context.Input.UseHistoryBundle, context.Input.BundleHistory,
        context.Input.DropModulo, context.Input.DropOffset,
        context.Input.DropStartFrame, context.Input.DropEndFrame,
@@ -485,7 +545,8 @@ void MaybeResendLatestInputForFrameLeadLocked(Context context, const Hooks &) {
     return;
 
   const std::vector<char> payload = context.State.Delivery.BuildPayload(
-      context.Inputs.LastSentInputFrame, input->second,
+      context.State.Handshake.Generation(), context.Inputs.LastSentInputFrame,
+      input->second,
       context.Input.BundleHistory, context.Inputs.LocalInputs);
   const std::size_t payloadBytes = payload.size();
   SendInputPayloadNowLocked(context, payload.data(), payload.size(),
@@ -534,7 +595,8 @@ void PrintInputHealthLocked(Context context, const char *event,
       predictedRemoteInput ? 1 : 0, context.Rollback.Enabled ? 1 : 0,
       context.Transport.IsConnected() ? 1 : 0,
       context.Transport.IsConnecting() ? 1 : 0,
-      context.Inputs.InputFrameLeadResendCount, context.Connection.StartFrame,
+      context.Inputs.InputFrameLeadResendCount,
+      context.Connection.SharedLogicalEpoch,
       context.State.Handshake.LocalReadyFrame().value_or(kNoFrame),
       context.State.Handshake.RemoteReadyFrame().value_or(kNoFrame),
       context.State.Handshake.RemoteReadyAfterLocal() ? 1 : 0);
@@ -546,20 +608,24 @@ int CurrentInputLead(Context context, melonDS::u32 sendFrame) {
 }
 
 void PrimeInputEpochLocked(Context context, melonDS::u32 localFrame) {
-  if (!context.Input.NetplayOnly || context.Connection.StartFrame == 0 ||
+  if (!context.Input.NetplayOnly ||
+      context.Connection.SharedLogicalEpoch == 0 ||
       context.State.Handshake.InputEpochPrimedFor(
-          context.Connection.StartFrame))
+          context.Connection.SharedLogicalEpoch))
     return;
   const melonDS::u32 delay =
       static_cast<melonDS::u32>(std::max(0, context.Connection.Delay));
-  const melonDS::u32 firstInputFrame = context.Connection.StartFrame + delay;
-  context.Inputs.PrimeEpoch(context.Connection.StartFrame, delay,
+  const melonDS::u32 firstInputFrame =
+      context.Connection.SharedLogicalEpoch + delay;
+  context.Inputs.PrimeEpoch(context.Connection.SharedLogicalEpoch, delay,
                             NeutralInput(), kNoFrame);
-  context.State.Handshake.MarkInputEpochPrimed(context.Connection.StartFrame);
+  context.State.Handshake.MarkInputEpochPrimed(
+      context.Connection.SharedLogicalEpoch);
   context.State.InputCond.notify_all();
   std::printf("NSMB InputNetplay: primed epoch start localFrame=%u "
               "logicalStart=%u firstInput=%u delay=%u\n",
-              localFrame, context.Connection.StartFrame, firstInputFrame,
+              localFrame, context.Connection.SharedLogicalEpoch,
+              firstInputFrame,
               delay);
   std::fflush(stdout);
 }
@@ -572,8 +638,8 @@ bool IsPastTestInputRange(Context context, melonDS::u32 targetFrame) {
 InputState WaitForRemoteInput(Context context, const Hooks &hooks,
                               melonDS::u32 targetFrame) {
   if ((context.PacketBridge.Only || context.Input.NetplayOnly) &&
-      context.Connection.StartFrame != 0 &&
-      targetFrame < context.Connection.StartFrame)
+      context.Connection.SharedLogicalEpoch != 0 &&
+      targetFrame < context.Connection.SharedLogicalEpoch)
     return NeutralInput();
 
   const auto start = std::chrono::steady_clock::now();
@@ -684,7 +750,7 @@ InputState WaitForRemoteInput(Context context, const Hooks &hooks,
             context.Inputs.RemoteInputs.size(),
             context.State.Delivery.PendingCount(),
             context.Inputs.InputFrameLeadResendCount,
-            context.Connection.StartFrame,
+            context.Connection.SharedLogicalEpoch,
             context.State.Handshake.LocalReadyFrame().value_or(kNoFrame),
             context.State.Handshake.RemoteReadyFrame().value_or(kNoFrame));
         std::fflush(stdout);
@@ -717,8 +783,8 @@ bool TryWaitForRollbackRemoteInputLocked(Context context, const Hooks &hooks,
   if (context.Rollback.InputWaitUs <= 0 || !lock.owns_lock())
     return false;
   if ((context.PacketBridge.Only || context.Input.NetplayOnly) &&
-      context.Connection.StartFrame != 0 &&
-      targetFrame < context.Connection.StartFrame)
+      context.Connection.SharedLogicalEpoch != 0 &&
+      targetFrame < context.Connection.SharedLogicalEpoch)
     return false;
 
   const auto start = std::chrono::steady_clock::now();
@@ -819,22 +885,23 @@ void WaitForPeer(Context context, const Hooks &hooks, bool force) {
 bool ShouldPumpNetworkAtFrame(Context context, melonDS::u32 syncFrame,
                               melonDS::u32 sendStartFrame) {
   return SessionPolicy::ShouldPumpNetworkAtFrame(
-      context.Harness.DeferNetworkUntilStart, context.Connection.StartFrame,
+      context.Harness.DeferNetworkUntilStart,
+      context.Connection.LocalStartupRawFrame,
       syncFrame, sendStartFrame);
 }
 
 melonDS::u32 LogicalFrame(Context context, melonDS::u32 rawFrame) {
   return SessionPolicy::LogicalInputFrame(
       context.Input.NetplayOnly, context.State.Handshake.LocalReadyFrame(),
-      context.Connection.StartFrame, rawFrame);
+      context.Connection.SharedLogicalEpoch, rawFrame);
 }
 
 void WaitForPeerAtStartBarrier(Context context, const Hooks &hooks,
                                int instanceID, melonDS::u32 syncFrame) {
   if (!context.Enabled || !context.Harness.WaitForPeerAtNetplayStart ||
       !context.Host || context.Input.NetplayOnly ||
-      context.Connection.StartFrame == 0 ||
-      syncFrame != context.Connection.StartFrame || instanceID < 0 ||
+      context.Connection.LocalStartupRawFrame == 0 ||
+      syncFrame != context.Connection.LocalStartupRawFrame || instanceID < 0 ||
       instanceID >= 16 || context.State.Handshake.WaitedForPeerAtStart())
     return;
 
@@ -859,19 +926,35 @@ void WaitForPeerAtStartBarrier(Context context, const Hooks &hooks,
 }
 
 void WaitForRemoteStartReady(Context context, const Hooks &hooks,
-                             melonDS::NDS *nds, melonDS::u32 syncFrame) {
+                             int instanceID, melonDS::NDS *nds,
+                             melonDS::u32 syncFrame) {
   if (!context.Enabled || !context.Input.NetplayOnly ||
       !context.Harness.WaitForPeerAtNetplayStart ||
-      context.Connection.StartFrame == 0 ||
-      syncFrame < context.Connection.StartFrame ||
+      context.Connection.LocalStartupRawFrame == 0 ||
+      syncFrame < context.Connection.LocalStartupRawFrame ||
       context.State.Handshake.WaitedForPeerAtStart() ||
       !hooks.IsGameplayStartReady(nds))
     return;
 
-  context.State.Handshake.BeginLocalReady(syncFrame);
+  SessionProtocol::Message localReady = hooks.BuildStartReady(instanceID, nds);
+  localReady.Kind = SessionProtocol::MessageKind::StartReady;
+  localReady.Generation = context.State.Handshake.Generation();
+  localReady.RawReadyFrame = syncFrame;
+  localReady.SharedLogicalEpoch =
+      context.State.Handshake.SharedLogicalEpoch();
+  context.State.Handshake.BeginLocalReady(localReady);
+  if (const auto remote = context.State.Handshake.RemoteReady(); remote) {
+    SessionProtocol::Message normalizedLocal = localReady;
+    normalizedLocal.SharedLogicalEpoch =
+        context.State.Handshake.SharedLogicalEpoch();
+    context.State.Handshake.MarkStartReadyValidation(
+        SessionPolicy::ValidateStartReady(
+            normalizedLocal, *remote, context.State.Handshake.Generation(),
+            context.State.Handshake.SharedLogicalEpoch()));
+  }
   std::printf("NSMB InputNetplay: waiting for remote gameplay start ready "
               "localFrame=%u logicalStart=%u\n",
-              syncFrame, context.Connection.StartFrame);
+              syncFrame, context.Connection.SharedLogicalEpoch);
   std::fflush(stdout);
   const auto start = std::chrono::steady_clock::now();
   for (;;) {
@@ -881,15 +964,26 @@ void WaitForRemoteStartReady(Context context, const Hooks &hooks,
       SendMatchSeedLocked(context);
       SendStartReadyLocked(context, hooks, syncFrame);
       MaybeResendStartReadyLocked(context, hooks, true);
+      if (context.State.Handshake.RemoteReadyFrame() &&
+          context.State.Handshake.Validation() !=
+              SessionPolicy::StartReadyValidation::Match) {
+        std::printf("NSMB InputNetplay: refusing gameplay start reason=%s\n",
+                    SessionPolicy::StartReadyValidationName(
+                        context.State.Handshake.Validation()));
+        std::fflush(stdout);
+        std::_Exit(72);
+      }
       const bool hasPostStartRemoteInput =
           SessionPolicy::HasPostStartRemoteInput(
               context.Inputs.LastReceivedInputFrame != kNoFrame,
               context.Inputs.LastReceivedInputFrame,
-              context.Connection.StartFrame, context.Connection.Delay);
+              context.Connection.SharedLogicalEpoch,
+              context.Connection.Delay);
       if (SessionPolicy::ShouldAcceptStartReady(
               context.State.Handshake.RemoteReadyFrame().has_value(),
               context.State.Handshake.RemoteReadyAfterLocal(),
-              hasPostStartRemoteInput)) {
+              hasPostStartRemoteInput) &&
+          context.State.Handshake.StartReadyValidated()) {
         context.State.Handshake.MarkWaitedForPeerAtStart();
         PrimeInputEpochLocked(context, syncFrame);
         const melonDS::u32 remoteReadyFrame =
@@ -897,7 +991,8 @@ void WaitForRemoteStartReady(Context context, const Hooks &hooks,
         hooks.EmitStartReadyEventLocked("accept", syncFrame, remoteReadyFrame);
         std::printf("NSMB InputNetplay: remote gameplay start ready accepted "
                     "remoteFrame=%u localFrame=%u logicalStart=%u\n",
-                    remoteReadyFrame, syncFrame, context.Connection.StartFrame);
+                    remoteReadyFrame, syncFrame,
+                    context.Connection.SharedLogicalEpoch);
         std::fflush(stdout);
         return;
       }
@@ -925,8 +1020,8 @@ void ThrottleFrameLead(Context context, const Hooks &hooks, melonDS::NDS *nds,
                        melonDS::u32 frame, melonDS::u32 sendFrame) {
   if (!context.Input.NetplayOnly || context.Input.MaxFrameLead < 0 ||
       !context.Enabled || !context.Ready ||
-      (context.Connection.StartFrame != 0 &&
-       frame < context.Connection.StartFrame) ||
+      (context.Connection.SharedLogicalEpoch != 0 &&
+       frame < context.Connection.SharedLogicalEpoch) ||
       IsPastTestInputRange(context, sendFrame))
     return;
 

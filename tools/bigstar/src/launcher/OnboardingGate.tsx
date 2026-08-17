@@ -283,7 +283,7 @@ export function OnboardingGate({
                   <Button
                     type="button"
                     loading={onboarding.romGenerationBusy}
-                    loadingText="生成中"
+                    loadingText="基準セーブを初期化中"
                     onClick={() => void actions.selectBaseRomAndPrepare()}
                   >
                     <HardDrives size={18} weight="fill" />

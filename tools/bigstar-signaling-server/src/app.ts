@@ -13,7 +13,8 @@ import {
 const ROOM_ID_BYTES = 9;
 const TOKEN_BYTES = 24;
 const ROOM_TTL_MS = 3 * 60 * 60 * 1000;
-const MAX_LOG_ARCHIVE_BYTES = 10 * 1024 * 1024;
+const PUBLIC_MAX_LOG_ARCHIVE_BYTES = 10 * 1024 * 1024;
+const INSIDERS_MAX_LOG_ARCHIVE_BYTES = 50 * 1024 * 1024;
 const MAX_LOG_ARCHIVE_PART_BYTES = 5 * 1024 * 1024;
 const FEEDBACK_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const FEEDBACK_RATE_LIMIT_REQUESTS = 3;
@@ -77,7 +78,7 @@ const createLogArchiveUploadRequestSchema = z.object({
     .min(1)
     .max(160)
     .regex(/\.zip$/i),
-  size: z.number().int().min(1).max(MAX_LOG_ARCHIVE_BYTES),
+  size: z.number().int().min(1).max(INSIDERS_MAX_LOG_ARCHIVE_BYTES),
   category: z.enum([
     'gui',
     'connection',
@@ -104,6 +105,12 @@ const completeLogArchiveUploadRequestSchema = z.object({
     .min(1)
     .max(10_000),
 });
+
+function maxLogArchiveBytes(edition: 'public' | 'insiders'): number {
+  return edition === 'insiders'
+    ? INSIDERS_MAX_LOG_ARCHIVE_BYTES
+    : PUBLIC_MAX_LOG_ARCHIVE_BYTES;
+}
 
 const feedbackReportSchema = z.object({
   report_id: z.string().regex(VALID_SESSION_ID),
@@ -271,6 +278,14 @@ const route = app
         );
       }
       const body = c.req.valid('json');
+      const maxSize = maxLogArchiveBytes(body.edition);
+      if (body.size > maxSize) {
+        const { body: errorBody, status } = error(
+          'feedback archive exceeds edition size limit',
+          400,
+        );
+        return c.json(errorBody, status);
+      }
       const reportId = randomUrlToken(18);
       const uploadToken = randomUrlToken(TOKEN_BYTES);
       const archiveKey = feedbackArchiveKey(reportId, body.file_name);
@@ -311,7 +326,7 @@ const route = app
           report_id: reportId,
           upload_id: upload.uploadId,
           upload_token: uploadToken,
-          max_size: MAX_LOG_ARCHIVE_BYTES,
+          max_size: maxSize,
           max_part_size: MAX_LOG_ARCHIVE_PART_BYTES,
         },
         201,

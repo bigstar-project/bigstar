@@ -4,19 +4,27 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use flate2::read::GzDecoder;
+
 use crate::commands::cleanup_detailed_logs_in_root;
-use crate::crash_report::{create_log_archive, create_user_log_archive, match_result_decided};
+use crate::crash_report::{
+    create_log_archive, create_user_log_archive, create_user_log_archive_with_diagnostics,
+    match_result_decided,
+};
 use crate::models::{
     CourseMode, GameSettings, GameStateMismatch, LaunchRequest, Lives, Role, RomIdentity,
 };
 use crate::paths::{allowed_log_dir, load_match_history_document_content, migrate_legacy_app_data};
 use crate::processes::{
-    build_bridge_command, build_melon_command, finalize_ai_observation_v3_log, melon_env,
-    read_bridge_diagnostics, read_melon_diagnostics, read_mvl_results,
-    remove_inherited_melonds_env_keys, run_bridge_signaling_smoke, session_status_inner,
-    should_show_game_state_mismatch_in_gui, start_match_resolved, stop_existing, LaunchPaths,
+    build_bridge_command, build_melon_command, capture_log_rotation_limit,
+    finalize_ai_observation_v3_log, melon_env, read_bridge_diagnostics, read_melon_diagnostics,
+    read_mvl_results, remove_inherited_melonds_env_keys, run_bridge_signaling_smoke,
+    session_status_inner, should_show_game_state_mismatch_in_gui, start_match_resolved,
+    stop_existing, LaunchPaths,
 };
-use crate::roms::{reusable_rom_is_current, reusable_rom_marker_path, write_reusable_rom_marker};
+use crate::roms::{
+    reusable_rom_is_current, reusable_rom_marker_path, validate_rom_save, write_reusable_rom_marker,
+};
 use crate::settings::{selected_stage, validate_request};
 use crate::state::AppState;
 
@@ -54,11 +62,62 @@ fn request(role: Role) -> LaunchRequest {
     }
 }
 
+fn request_for_launch(role: Role, paths: &LaunchPaths) -> LaunchRequest {
+    let mut request = request(role);
+    request.rom_identity = Some(RomIdentity {
+        rom_pair_id: "pair_hash".to_owned(),
+        generator_id: "generator_hash".to_owned(),
+        host_rom_sha256: "host_hash".to_owned(),
+        client_rom_sha256: "client_hash".to_owned(),
+        bridge_sha256: "bridge_hash".to_owned(),
+        save_sha256: validate_rom_save(&paths.rom_path).expect("hash test save"),
+    });
+    request
+}
+
 fn temp_log_dir(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("bigstar-test-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&path);
     fs::create_dir_all(&path).expect("create temp log dir");
     path
+}
+
+fn canonical_test_save() -> Vec<u8> {
+    const GZIP_HEX: &str = "1f8b0800000000000400edd7410ac2301046e109d4c3b80b75513c848710bad095e009bc4e77b988e08d52699bf598424218dfb77dd012f80b4d385eaecffba31fe5ecbd179197fc9118df5d3affb09e7f71a8f0ee8ff560b46a6216f6572c18ad1af6d748305a3579fbbb4d697fa7effedcf60cb7eb590000e03781fb3fffbf6582d1aac9fbfed85fb160b46ad85f23c168d5e4ed8ffb3f0000f5cdd5f07dd200200000";
+    let compressed = GZIP_HEX
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            u8::from_str_radix(std::str::from_utf8(pair).expect("gzip hex utf8"), 16)
+                .expect("gzip hex byte")
+        })
+        .collect::<Vec<_>>();
+    let mut decoder = GzDecoder::new(compressed.as_slice());
+    let mut save = Vec::new();
+    decoder
+        .read_to_end(&mut save)
+        .expect("decompress canonical save");
+    save
+}
+
+#[test]
+fn rom_save_validation_accepts_only_initialized_8192_byte_save() {
+    let dir = temp_log_dir("save-validation");
+    let rom = dir.join("game.nds");
+    fs::write(&rom, b"rom").expect("write rom");
+
+    assert!(validate_rom_save(&rom).is_err());
+    fs::write(rom.with_extension("sav"), vec![1_u8; 8_191]).expect("write short save");
+    assert!(validate_rom_save(&rom).is_err());
+    fs::write(rom.with_extension("sav"), vec![0_u8; 8_192]).expect("write zero save");
+    assert!(validate_rom_save(&rom).is_err());
+    fs::write(rom.with_extension("sav"), vec![0xFF_u8; 8_192]).expect("write FF save");
+    assert!(validate_rom_save(&rom).is_err());
+
+    fs::write(rom.with_extension("sav"), canonical_test_save()).expect("write valid save");
+    assert_eq!(validate_rom_save(&rom).expect("valid save").len(), 64);
+
+    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -247,6 +306,7 @@ fn launch_paths(dir: &Path, bridge_path: PathBuf, melon_path: PathBuf) -> Launch
     let rom_path = dir.join("host.nds");
     fs::write(&input_script, b"").expect("write input script");
     fs::write(&rom_path, b"fake rom").expect("write fake rom");
+    fs::write(rom_path.with_extension("sav"), canonical_test_save()).expect("write fake save");
     LaunchPaths {
         log_dir: dir.join("logs"),
         bridge_path,
@@ -388,6 +448,7 @@ fn melon_env_carries_game_settings_and_netplay_start() {
     assert_eq!(env["MELONDS_NSML_STATE_SYNC_INTERVAL"], "60");
     assert_eq!(env["MELONDS_NSML_STATE_SYNC_EXTENDED"], "1");
     assert!(env["MELONDS_NSML_DIAGNOSTICS_FILE"].ends_with("melonds-diagnostics.json"));
+    assert!(env["MELONDS_NSML_RUNTIME_IDENTITY_FILE"].ends_with("melonds-runtime-identity.json"));
     assert!(!env.contains_key("MELONDS_NSML_DIAGNOSTIC_EVENTS"));
     assert!(!env.contains_key("MELONDS_NSML_DIAGNOSTIC_EVENTS_FILE"));
     assert!(!env.contains_key("MELONDS_NSML_PERFORMANCE_LOG"));
@@ -502,6 +563,21 @@ fn melon_env_enables_performance_log_when_requested() {
 
     assert!(env["MELONDS_NSML_PERFORMANCE_LOG"].ends_with("melonds-performance.jsonl"));
     assert!(!env.contains_key("MELONDS_NSML_PERF_SPIKE_PHASE_TRACE"));
+    if cfg!(feature = "insiders-edition") {
+        assert_eq!(env["MELONDS_NSML_DISABLE_LOG_ROTATION"], "1");
+    } else {
+        assert!(!env.contains_key("MELONDS_NSML_DISABLE_LOG_ROTATION"));
+    }
+}
+
+#[test]
+fn child_log_rotation_is_disabled_only_for_insiders() {
+    let limit = capture_log_rotation_limit(8 * 1024 * 1024);
+    if cfg!(feature = "insiders-edition") {
+        assert_eq!(limit, None);
+    } else {
+        assert_eq!(limit, Some(8 * 1024 * 1024));
+    }
 }
 
 #[test]
@@ -961,6 +1037,157 @@ fn user_log_archive_uses_safe_allowlist() {
 }
 
 #[test]
+fn insiders_feedback_archive_includes_sanitized_diagnostics_and_png_screenshots() {
+    let dir = temp_log_dir("insiders-feedback-diagnostics");
+    fs::write(
+        dir.join("launcher.json"),
+        r#"{"request":{"room_code":"secret-room"}}"#,
+    )
+    .expect("write launcher");
+    fs::write(dir.join("melonds-events.jsonl"), "event room=secret-room\n")
+        .expect("write melon diagnostics");
+    fs::write(dir.join("bridge-events.jsonl"), "bridge event\n").expect("write bridge diagnostics");
+    fs::write(dir.join("melonds-game-state.csv"), "frame,state\n1,2\n").expect("write game state");
+    fs::write(dir.join("melonds-phase-events.jsonl"), "phase event\n").expect("write phase events");
+    fs::write(dir.join("melonds-watchdog.jsonl"), "watchdog event\n").expect("write watchdog");
+    fs::write(dir.join("melonds-hang.dmp"), "raw process memory").expect("write hang dump");
+    fs::create_dir_all(dir.join("screens")).expect("create screens");
+    fs::write(dir.join("screens").join("inst0_frame000001.png"), b"png")
+        .expect("write png screenshot");
+    fs::write(dir.join("screens").join("notes.txt"), b"not a screenshot")
+        .expect("write non-png file");
+
+    let archive = create_user_log_archive_with_diagnostics(&dir).expect("create insiders archive");
+    let file = fs::File::open(&archive).expect("open archive");
+    let mut zip = zip::ZipArchive::new(file).expect("read archive");
+    let mut diagnostics = String::new();
+    zip.by_name("melonds-events.jsonl")
+        .expect("melon diagnostics included")
+        .read_to_string(&mut diagnostics)
+        .expect("read melon diagnostics");
+    assert!(diagnostics.contains("[redacted]"));
+    assert!(!diagnostics.contains("secret-room"));
+    assert!(zip.by_name("bridge-events.jsonl").is_ok());
+    assert!(zip.by_name("melonds-game-state.csv").is_ok());
+    assert!(zip.by_name("melonds-phase-events.jsonl").is_ok());
+    assert!(zip.by_name("melonds-watchdog.jsonl").is_ok());
+    assert!(zip.by_name("screens/inst0_frame000001.png").is_ok());
+    assert!(zip.by_name("screens/notes.png").is_err());
+    assert!(zip.by_name("melonds-hang.dmp").is_err());
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn feedback_summary_includes_peer_runtime_and_artifact_identities_without_paths() {
+    let dir = temp_log_dir("feedback-runtime-identity");
+    let melonds = dir.join("melonDS.exe");
+    let rom = dir.join("bigstar-host.nds");
+    let save = dir.join("bigstar-host.sav");
+    let config = dir.join("melonDS.toml");
+    fs::write(&melonds, "melon binary").expect("write melon binary");
+    fs::write(&rom, "rom bytes").expect("write rom");
+    fs::write(&save, "save bytes").expect("write save");
+    fs::write(&config, "jit enabled").expect("write config");
+    fs::write(
+        dir.join("launcher.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "request": {
+                "role": "host",
+                "settings": {},
+                "rom_identity": {
+                    "rom_pair_id": "pair_hash",
+                    "generator_id": "generator_hash",
+                    "host_rom_sha256": "host_rom_hash",
+                    "client_rom_sha256": "client_rom_hash",
+                    "bridge_sha256": "bridge_hash",
+                    "save_sha256": "save_hash"
+                }
+            },
+            "paths": {
+                "melonds": melonds,
+                "rom": rom
+            },
+            "artifacts": {
+                "melonds": {
+                    "path": "C:\\Users\\Private\\melonDS.exe",
+                    "bytes": 12,
+                    "modified_unix_ms": 123,
+                    "sha256": "melon_hash"
+                },
+                "bridge": {"sha256": "bridge_hash"},
+                "rom": {"sha256": "local_rom_hash"},
+                "input_script": {"sha256": "input_hash"}
+            }
+        }))
+        .expect("encode launcher"),
+    )
+    .expect("write launcher");
+    fs::write(
+        dir.join("melonds-runtime-identity.json"),
+        br#"{
+          "schema_version": 1,
+          "version": "1.1",
+          "jit": {"enabled": true, "config_enabled": false},
+          "build": {"embedded": true, "branch": "main", "commit": "abc123", "provider": "CI"}
+        }"#,
+    )
+    .expect("write runtime identity");
+
+    let archive = create_user_log_archive(&dir).expect("create feedback archive");
+    let file = fs::File::open(&archive).expect("open archive");
+    let mut zip = zip::ZipArchive::new(file).expect("read archive");
+    let mut summary_entry = zip
+        .by_name("feedback-summary.json")
+        .expect("feedback summary");
+    let summary: serde_json::Value =
+        serde_json::from_reader(&mut summary_entry).expect("parse feedback summary");
+
+    assert_eq!(summary["schema_version"], 2);
+    assert_eq!(summary["session"]["rom"]["rom_pair_id"], "pair_hash");
+    assert_eq!(
+        summary["session"]["rom"]["host_rom_sha256"],
+        "host_rom_hash"
+    );
+    assert_eq!(
+        summary["session"]["rom"]["client_rom_sha256"],
+        "client_rom_hash"
+    );
+    assert_eq!(summary["session"]["rom"]["save_sha256"], "save_hash");
+    assert_eq!(
+        summary["emulator"]["artifacts"]["melonds"]["sha256"],
+        "melon_hash"
+    );
+    assert_eq!(
+        summary["emulator"]["runtime_identity"]["jit"]["enabled"],
+        true
+    );
+    assert_eq!(
+        summary["emulator"]["runtime_identity"]["build"]["commit"],
+        "abc123"
+    );
+    assert_eq!(summary["emulator"]["config"]["present"], true);
+    assert_eq!(summary["emulator"]["save"]["present"], true);
+    assert_eq!(
+        summary["emulator"]["config"]["sha256"]
+            .as_str()
+            .map(str::len),
+        Some(64)
+    );
+    assert_eq!(
+        summary["emulator"]["save"]["sha256"].as_str().map(str::len),
+        Some(64)
+    );
+    let summary_text = summary.to_string();
+    assert!(!summary_text.contains(r"C:\Users\Private"));
+    assert!(!summary_text.contains(&dir.to_string_lossy().to_string()));
+
+    drop(summary_entry);
+    drop(zip);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn feedback_archive_does_not_include_connection_secrets_or_raw_paths() {
     let dir = temp_log_dir("feedback-redaction");
     fs::write(
@@ -1123,6 +1350,7 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
         host_rom_sha256: "host_hash".to_owned(),
         client_rom_sha256: "client_hash".to_owned(),
         bridge_sha256: "bridge_hash".to_owned(),
+        save_sha256: validate_rom_save(&paths.rom_path).expect("hash test save"),
     });
     let response = start_match_resolved(&state, launch_request, paths).expect("start fake match");
     assert!(response.bridge_pid > 0);
@@ -1233,8 +1461,8 @@ fn start_match_resolved_does_not_store_session_when_melon_spawn_fails() {
     fs::create_dir_all(&paths.log_dir).expect("create logs");
 
     let state = AppState::default();
-    let err =
-        start_match_resolved(&state, request(Role::Host), paths).expect_err("melon spawn fails");
+    let launch_request = request_for_launch(Role::Host, &paths);
+    let err = start_match_resolved(&state, launch_request, paths).expect_err("melon spawn fails");
     assert!(err.contains("melonDS の起動に失敗しました"));
 
     let status = session_status_inner(&state).expect("status after failed start");
@@ -1252,7 +1480,8 @@ fn session_status_terminates_bridge_when_melon_exits() {
     fs::create_dir_all(&paths.log_dir).expect("create logs");
 
     let state = AppState::default();
-    start_match_resolved(&state, request(Role::Host), paths).expect("start fake match");
+    let launch_request = request_for_launch(Role::Host, &paths);
+    start_match_resolved(&state, launch_request, paths).expect("start fake match");
     let ai_log = dir.join("logs").join("ai-observations-v3.jsonl");
     fs::write(&ai_log, "{\"frame\":1}\n").expect("write active AI log");
 

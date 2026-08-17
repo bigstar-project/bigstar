@@ -51,7 +51,9 @@ export function resolveRuntimeCapabilities(edition, buildProfile) {
     automaticUnresolvedSessionReport:
       edition.capabilities.automaticUnresolvedSessionReport,
     configurableSignalServer:
-      buildProfile.capabilities.configurableSignalServer,
+      buildProfile.capabilities.configurableSignalServer ||
+      (buildProfile.profile === 'distribution' &&
+        edition.capabilities.configurableSignalServerInDistribution),
     feedbackSubmission: edition.capabilities.feedbackSubmission,
     notifyOwnRooms: buildProfile.capabilities.notifyOwnRooms,
   };

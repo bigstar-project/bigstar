@@ -65,6 +65,7 @@
 #include "Savestate.h"
 
 #include "EmuInstance.h"
+#include "SaveBootstrap.h"
 #include "NsmbMvlNetplayRuntime.h"
 
 using namespace melonDS;
@@ -162,6 +163,7 @@ class NsmlPerformanceLog
 public:
     explicit NsmlPerformanceLog(const char* path)
     {
+        RotationDisabled = getenv("MELONDS_NSML_DISABLE_LOG_ROTATION") != nullptr;
         if (path && *path)
         {
             Path = path;
@@ -440,7 +442,7 @@ private:
     void Write(const std::string& line, bool flush)
     {
         constexpr std::size_t MaxLogBytes = 8 * 1024 * 1024;
-        if (BytesWritten + line.size() > MaxLogBytes && !Path.empty())
+        if (!RotationDisabled && BytesWritten + line.size() > MaxLogBytes && !Path.empty())
         {
             Platform::FileFlush(File);
             Platform::CloseFile(File);
@@ -467,6 +469,7 @@ private:
 
     Platform::FileHandle* File = nullptr;
     std::string Path;
+    bool RotationDisabled = false;
     std::size_t BytesWritten = 0;
     std::vector<NsmlPerformanceSample> Samples;
     unsigned long long LastSpikeUnixMs = 0;
@@ -526,8 +529,6 @@ void EmuThread::run()
 {
 #ifdef _WIN32
     const char* priorityText = getenv("MELONDS_NSML_EMU_THREAD_PRIORITY");
-    if (!priorityText && getenv("MELONDS_NSML_INPUT_NETPLAY_ONLY"))
-        priorityText = "highest";
     if (priorityText && strcmp(priorityText, "normal") != 0)
     {
         const int priority = strcmp(priorityText, "highest") == 0
@@ -870,7 +871,10 @@ void EmuThread::run()
             }
 
             if (emuInstance->ndsSave)
+            {
                 emuInstance->ndsSave->CheckFlush();
+                SaveBootstrap::Observe(emuInstance->ndsSave.get(), emuInstance->nds->NumFrames);
+            }
 
             if (emuInstance->gbaSave)
                 emuInstance->gbaSave->CheckFlush();

@@ -151,6 +151,11 @@ pub(crate) fn find_bridge_binary(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn find_binary(app: &AppHandle, dev_candidates: &[PathBuf], stem: &str) -> Result<PathBuf, String> {
+    #[cfg(debug_assertions)]
+    if let Some(path) = find_dev_binary(dev_candidates)? {
+        return Ok(path);
+    }
+
     let mut bundled = Vec::new();
     if let Ok(resource_dir) = app.path().resource_dir() {
         bundled.push(resource_dir.join("binaries"));
@@ -186,18 +191,27 @@ fn find_binary_in_dirs(
         }
     }
 
-    if let Ok(root) = repo_root() {
-        for candidate in dev_candidates {
-            let path = root.join(candidate);
-            if path.exists() {
-                return path
-                    .canonicalize()
-                    .map_err(|err| format!("binary path を解決できません: {err}"));
-            }
-        }
+    if let Some(path) = find_dev_binary(dev_candidates)? {
+        return Ok(path);
     }
 
     Err(format!("{stem} の実行ファイルが見つかりません"))
+}
+
+fn find_dev_binary(dev_candidates: &[PathBuf]) -> Result<Option<PathBuf>, String> {
+    let Ok(root) = repo_root() else {
+        return Ok(None);
+    };
+    for candidate in dev_candidates {
+        let path = root.join(candidate);
+        if path.exists() {
+            return path
+                .canonicalize()
+                .map(Some)
+                .map_err(|err| format!("binary path を解決できません: {err}"));
+        }
+    }
+    Ok(None)
 }
 
 fn bundled_binary_names(stem: &str) -> Vec<String> {

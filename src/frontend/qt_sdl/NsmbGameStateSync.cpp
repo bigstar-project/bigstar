@@ -231,6 +231,13 @@ void HandleReceivedPacketLocked(Context context, const Hooks &hooks,
   GameStateModel::DecodedGameState decoded;
   if (!GameStateModel::DecodeWireGameState(packet, decoded))
     return;
+  if (!context.SessionReady || decoded.Generation != context.Generation) {
+    std::printf("NSMB MvL Netplay: ignored game state generation=%u "
+                "current=%u ready=%d\n",
+                decoded.Generation, context.Generation,
+                context.SessionReady ? 1 : 0);
+    return;
+  }
   const auto mismatch = context.Runtime.RecordRemoteGameState(decoded);
   if (mismatch)
     hooks.ReportMismatchLocked(*mismatch);
@@ -241,7 +248,8 @@ void ApplyRemote(Context context, const Hooks &hooks, int instanceID,
   if (!context.Enabled || !context.StateSync.GameApplyEnabled ||
       (!context.StateSync.GameApplyRemotePlayerOnly && !context.Client) ||
       instanceID < 0 || instanceID >= 16 || !nds || !nds->MainRAM ||
-      frame < context.Connection.StartFrame)
+      !context.SessionReady ||
+      frame < context.Connection.SharedLogicalEpoch)
     return;
 
   GameStateModel::GameStateSample sample;
@@ -341,9 +349,10 @@ void TraceWorld(Context context, int instanceID, melonDS::u32 frame,
 
 void Sync(Context context, const Hooks &hooks, int instanceID,
           melonDS::u32 frame, melonDS::NDS *nds) {
-  if (!context.Enabled || !context.StateSync.GameEnabled || !nds ||
+  if (!context.Enabled || !context.StateSync.GameEnabled ||
+      !context.SessionReady || !nds ||
       instanceID < 0 || instanceID >= 16 ||
-      frame < context.Connection.StartFrame ||
+      frame < context.Connection.SharedLogicalEpoch ||
       frame % static_cast<melonDS::u32>(context.StateSync.GameInterval) != 0)
     return;
 
@@ -372,7 +381,8 @@ void Sync(Context context, const Hooks &hooks, int instanceID,
 
   const WireProtocol::WireGameState packet =
       GameStateModel::EncodeWireGameState(
-          frame, static_cast<melonDS::u32>(instanceID), sample, hashes);
+          frame, static_cast<melonDS::u32>(instanceID), context.Generation,
+          sample, hashes);
   context.Transport.Send(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE,
                          false);
 }

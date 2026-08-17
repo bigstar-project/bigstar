@@ -58,6 +58,8 @@ struct Hooks {
       ReceivePacketBridgeLocked;
   std::function<void(const void *, std::size_t)> ReceiveGameStateLocked;
   std::function<bool(melonDS::NDS *)> IsGameplayStartReady;
+  std::function<SessionProtocol::Message(int, melonDS::NDS *)>
+      BuildStartReady;
 };
 
 void PumpLocked(Context context, const Hooks &hooks,
@@ -100,7 +102,8 @@ melonDS::u32 LogicalFrame(Context context, melonDS::u32 rawFrame);
 void WaitForPeerAtStartBarrier(Context context, const Hooks &hooks,
                                int instanceID, melonDS::u32 syncFrame);
 void WaitForRemoteStartReady(Context context, const Hooks &hooks,
-                             melonDS::NDS *nds, melonDS::u32 syncFrame);
+                             int instanceID, melonDS::NDS *nds,
+                             melonDS::u32 syncFrame);
 void ThrottleFrameLead(Context context, const Hooks &hooks, melonDS::NDS *nds,
                        melonDS::u32 frame, melonDS::u32 sendFrame);
 

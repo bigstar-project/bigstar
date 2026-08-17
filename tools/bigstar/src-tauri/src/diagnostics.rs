@@ -40,6 +40,14 @@ static SECRET_RE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("valid secret sanitizer")
 });
 
+fn diagnostic_log_retention_limit<T>(public_limit: T) -> Option<T> {
+    if cfg!(feature = "insiders-edition") {
+        None
+    } else {
+        Some(public_limit)
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub(crate) fn record_app_error(
@@ -144,10 +152,10 @@ pub(crate) fn append_session_event(
         "detail": detail.map(|value| sanitize_text(value, MAX_MESSAGE_BYTES)),
     });
     if let Ok(line) = serde_json::to_vec(&value) {
-        let _ = append_capped_line(
+        let _ = append_retained_line(
             &log_dir.join(SESSION_EVENT_FILE),
             &line,
-            SESSION_EVENT_MAX_BYTES,
+            diagnostic_log_retention_limit(SESSION_EVENT_MAX_BYTES),
         );
     }
 }
@@ -213,7 +221,9 @@ fn append_rotating_json_line(path: &Path, value: &serde_json::Value) -> std::io:
     let mut line = serde_json::to_vec(value).map_err(std::io::Error::other)?;
     line.push(b'\n');
     let current_size = path.metadata().map(|metadata| metadata.len()).unwrap_or(0);
-    if current_size.saturating_add(line.len() as u64) > APP_ERROR_MAX_BYTES {
+    if diagnostic_log_retention_limit(APP_ERROR_MAX_BYTES)
+        .is_some_and(|limit| current_size.saturating_add(line.len() as u64) > limit)
+    {
         rotate_files(path)?;
     }
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
@@ -242,10 +252,16 @@ fn rotated_path(path: &Path, generation: usize) -> PathBuf {
     path.with_file_name(format!("{APP_ERROR_FILE}.{generation}"))
 }
 
-fn append_capped_line(path: &Path, line: &[u8], max_bytes: usize) -> std::io::Result<()> {
+fn append_retained_line(path: &Path, line: &[u8], max_bytes: Option<usize>) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
+    let Some(max_bytes) = max_bytes else {
+        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+        file.write_all(line)?;
+        file.write_all(b"\n")?;
+        return file.flush();
+    };
     let mut content = fs::read(path).unwrap_or_default();
     if !content.is_empty() && !content.ends_with(b"\n") {
         content.push(b'\n');
@@ -333,5 +349,35 @@ mod tests {
         assert!(!value.contains("192.0.2.12"));
         assert!(value.contains("<user-profile>"));
         assert!(value.contains("[ip]"));
+    }
+
+    #[test]
+    fn insiders_diagnostic_logs_have_no_retention_limit() {
+        let session_limit = diagnostic_log_retention_limit(SESSION_EVENT_MAX_BYTES);
+        assert_eq!(session_limit.is_none(), cfg!(feature = "insiders-edition"));
+    }
+
+    #[test]
+    fn app_error_rotation_follows_edition_policy() {
+        let dir = std::env::temp_dir().join(format!(
+            "bigstar-app-error-rotation-{}-{}",
+            std::process::id(),
+            unix_ms()
+        ));
+        fs::create_dir_all(&dir).expect("create diagnostic test directory");
+        let path = dir.join(APP_ERROR_FILE);
+        let value = serde_json::json!({ "message": "x".repeat(600 * 1024) });
+
+        append_rotating_json_line(&path, &value).expect("append first app error");
+        append_rotating_json_line(&path, &value).expect("append second app error");
+
+        if cfg!(feature = "insiders-edition") {
+            assert!(path.metadata().expect("current app error log").len() > APP_ERROR_MAX_BYTES);
+            assert!(!rotated_path(&path, 1).exists());
+        } else {
+            assert!(path.metadata().expect("current app error log").len() < APP_ERROR_MAX_BYTES);
+            assert!(rotated_path(&path, 1).is_file());
+        }
+        fs::remove_dir_all(dir).expect("remove diagnostic test directory");
     }
 }

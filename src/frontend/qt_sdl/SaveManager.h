@@ -48,6 +48,8 @@ public:
 
     bool NeedsFlush();
     void FlushSecondaryBuffer(melonDS::u8* dst = nullptr, melonDS::u32 dstLength = 0);
+    melonDS::u32 CompletedFileFlushVersion() const;
+    melonDS::u32 FailedFileFlushVersion() const;
 
 private:
     std::string Path;
@@ -68,6 +70,8 @@ private:
     // a flush cycle is finished.
     melonDS::u32 PreviousFlushVersion;
     melonDS::u32 FlushVersion;
+    std::atomic<melonDS::u32> CompletedFileFlush;
+    std::atomic<melonDS::u32> FailedFileFlush;
 };
 
 #endif // SAVEMANAGER_H

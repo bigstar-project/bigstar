@@ -47,6 +47,14 @@ test('Public版にInsiders限定機能を含めない', () => {
     false,
   );
   assert.equal(publicEdition.capabilities.aiDevToolsInLocalBuilds, false);
+  assert.equal(
+    insiders.capabilities.configurableSignalServerInDistribution,
+    true,
+  );
+  assert.equal(
+    publicEdition.capabilities.configurableSignalServerInDistribution,
+    false,
+  );
 });
 
 test('local版とdistribution版の機能差を能力一覧として定義する', () => {
@@ -71,12 +79,17 @@ test('local版とdistribution版の機能差を能力一覧として定義する
     insiders,
     distributionBuild,
   );
+  const distributionPublic = resolveRuntimeCapabilities(
+    publicEdition,
+    distributionBuild,
+  );
 
   assert.equal(localInsiders.configurableSignalServer, true);
   assert.equal(localInsiders.notifyOwnRooms, true);
   assert.equal(localInsiders.aiDevTools, true);
   assert.equal(localPublic.aiDevTools, false);
-  assert.equal(distributionInsiders.configurableSignalServer, false);
+  assert.equal(distributionInsiders.configurableSignalServer, true);
+  assert.equal(distributionPublic.configurableSignalServer, false);
   assert.equal(distributionInsiders.notifyOwnRooms, false);
   assert.equal(distributionInsiders.aiDevTools, false);
   assert.equal(

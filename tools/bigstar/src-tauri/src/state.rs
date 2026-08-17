@@ -1,14 +1,24 @@
 use std::path::PathBuf;
 use std::process::Child;
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
 #[cfg(feature = "insiders-edition")]
 use crate::models::MatchPlayerNames;
 use crate::process_job::ChildProcessJob;
 
-#[derive(Default)]
 pub(crate) struct AppState {
     pub(crate) session: Mutex<Option<ManagedSession>>,
+    pub(crate) launch_in_progress: AtomicBool,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            session: Mutex::new(None),
+            launch_in_progress: AtomicBool::new(false),
+        }
+    }
 }
 
 pub(crate) struct ManagedSession {

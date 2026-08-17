@@ -12,7 +12,7 @@
 namespace NsmbMvlNetplay::WireProtocol {
 
 constexpr melonDS::u32 kMagic = 0x4C4D534E; // "NSML", little endian
-constexpr melonDS::u32 kVersion = 1;
+constexpr melonDS::u32 kVersion = 2;
 constexpr melonDS::u32 kWireKindState = 0x54415453;  // "STAT", little endian
 constexpr melonDS::u32 kWireKindPacket = 0x4B434150; // "PACK", little endian
 
@@ -20,18 +20,20 @@ struct WireNSMLPacket {
   melonDS::u32 Magic;
   melonDS::u32 Version;
   melonDS::u32 Kind;
+  melonDS::u32 Generation;
   melonDS::u32 Frame;
   melonDS::u32 Player;
   melonDS::u32 Tick;
   melonDS::u8 Packet[52];
 };
 
-static_assert(sizeof(WireNSMLPacket) == 76);
+static_assert(sizeof(WireNSMLPacket) == 80);
 
 struct WireGameState {
   melonDS::u32 Magic;
   melonDS::u32 Version;
   melonDS::u32 Kind;
+  melonDS::u32 Generation;
   melonDS::u32 Frame;
   melonDS::u32 Instance;
   melonDS::u32 StageID;
@@ -126,13 +128,13 @@ struct WireGameState {
   melonDS::u32 RenderCandidateHashHi;
 };
 
-static_assert(sizeof(WireGameState) == 380);
+static_assert(sizeof(WireGameState) == 384);
 
 } // namespace NsmbMvlNetplay::WireProtocol
 
 namespace NsmbMvlNetplay::SessionProtocol {
 
-constexpr std::size_t kSessionPacketSize = 16;
+constexpr std::size_t kSessionPacketSize = 64;
 
 enum class MessageKind {
   MatchSeed,
@@ -142,6 +144,17 @@ enum class MessageKind {
 struct Message {
   MessageKind Kind = MessageKind::MatchSeed;
   melonDS::u32 Value = 0;
+  melonDS::u32 Generation = 0;
+  melonDS::u32 RawReadyFrame = 0;
+  melonDS::u32 SharedLogicalEpoch = 0;
+  melonDS::u32 StageID = 0;
+  melonDS::u32 StageGroup = 0;
+  melonDS::u32 MatchSeed = 0;
+  melonDS::u32 PacketTick = 0;
+  melonDS::u32 RngValue = 0;
+  melonDS::u32 RngCallCount = 0;
+  melonDS::u32 RngBranchAddress = 0;
+  melonDS::u64 SemanticHash = 0;
 };
 
 std::vector<char> Encode(const Message &message);
@@ -173,8 +186,23 @@ melonDS::u32 FirstGameplayInputFrame(melonDS::u32 netplayStartFrame,
 bool HasPostStartRemoteInput(bool hasReceivedInputFrame,
                              melonDS::u32 lastReceivedInputFrame,
                              melonDS::u32 netplayStartFrame, int inputDelay);
-bool IsOldStartReady(bool inputNetplayOnly, melonDS::u32 netplayStartFrame,
-                     melonDS::u32 receivedReadyFrame);
+enum class StartReadyValidation {
+  Match,
+  GenerationMismatch,
+  EpochMissing,
+  EpochMismatch,
+  StageMismatch,
+  SeedMismatch,
+  PacketTickMismatch,
+  RngMismatch,
+  SemanticStateMismatch,
+};
+
+StartReadyValidation ValidateStartReady(const SessionProtocol::Message &local,
+                                        const SessionProtocol::Message &remote,
+                                        melonDS::u32 expectedGeneration,
+                                        melonDS::u32 sharedLogicalEpoch);
+const char *StartReadyValidationName(StartReadyValidation result);
 bool ShouldAcceptStartReady(bool hasRemoteReadyFrame,
                             bool remoteReadyAfterLocal,
                             bool hasPostStartRemoteInput);
@@ -193,6 +221,8 @@ public:
   using Clock = std::chrono::steady_clock;
 
   void ResetStartHandshake();
+  void BeginGeneration(melonDS::u32 generation,
+                       melonDS::u32 sharedLogicalEpoch, bool host);
   void OnPeerConnected();
   void ResetReadyWaitAfterTimeout();
 
@@ -201,8 +231,10 @@ public:
   bool CanSendStartReady(bool force) const;
   void MarkStartReadySent(Clock::time_point sentAt);
 
-  void BeginLocalReady(melonDS::u32 frame);
-  void ReceiveRemoteReady(melonDS::u32 frame);
+  void BeginLocalReady(const SessionProtocol::Message &message);
+  void ReceiveRemoteReady(const SessionProtocol::Message &message);
+  void AdoptHostLogicalEpoch(melonDS::u32 epoch);
+  void MarkStartReadyValidation(StartReadyValidation validation);
   void MarkWaitedForPeerAtStart();
   void MarkInputEpochPrimed(melonDS::u32 startFrame);
 
@@ -212,6 +244,13 @@ public:
   Clock::time_point LastStartReadySentAt() const;
   std::optional<melonDS::u32> LocalReadyFrame() const;
   std::optional<melonDS::u32> RemoteReadyFrame() const;
+  std::optional<SessionProtocol::Message> LocalReady() const;
+  std::optional<SessionProtocol::Message> RemoteReady() const;
+  melonDS::u32 Generation() const;
+  melonDS::u32 SharedLogicalEpoch() const;
+  bool LogicalEpochEstablished() const;
+  StartReadyValidation Validation() const;
+  bool StartReadyValidated() const;
   bool RemoteReadyAfterLocal() const;
   bool InputEpochPrimedFor(melonDS::u32 startFrame) const;
 
@@ -223,6 +262,12 @@ private:
   Clock::time_point LastStartReadySentAt_;
   std::optional<melonDS::u32> LocalReadyFrame_;
   std::optional<melonDS::u32> RemoteReadyFrame_;
+  std::optional<SessionProtocol::Message> LocalReady_;
+  std::optional<SessionProtocol::Message> RemoteReady_;
+  melonDS::u32 Generation_ = 0;
+  melonDS::u32 SharedLogicalEpoch_ = 0;
+  bool LogicalEpochEstablished_ = false;
+  StartReadyValidation Validation_ = StartReadyValidation::GenerationMismatch;
   bool RemoteReadyAfterLocal_ = false;
   std::optional<melonDS::u32> InputEpochPrimedStartFrame_;
 };
