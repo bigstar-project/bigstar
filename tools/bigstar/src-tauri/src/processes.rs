@@ -13,7 +13,8 @@ use flate2::Compression;
 use std::os::windows::process::CommandExt;
 
 use crate::config::{
-    app_version, DEFAULT_FRAMES, NETPLAY_START_FRAME, ROM_LOOP_PREDICTION_HORIZON_FRAMES,
+    app_version, DEFAULT_FRAMES, NETPLAY_START_FRAME, ROM_LOOP_HORIZON_TIMEOUT_MS,
+    ROM_LOOP_PREDICTION_HORIZON_FRAMES,
 };
 #[cfg(feature = "insiders-edition")]
 use crate::crash_report::{match_result_decided, send_crash_report_async};
@@ -753,7 +754,7 @@ pub(crate) fn melon_env(
         );
         env.insert(
             "MELONDS_NSML_ROLLBACK_HORIZON_TIMEOUT_MS".into(),
-            "7000".into(),
+            ROM_LOOP_HORIZON_TIMEOUT_MS.to_string(),
         );
         env.insert(
             "MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL".into(),

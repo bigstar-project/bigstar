@@ -8,7 +8,7 @@
 
 Slippiの制御原則、すなわち「少量の実入力遅延を先に入れる」「訂正可能範囲だけ予測する」「上限を越える前にgame frameを止める」「欠落入力を再送する」を本forkにも採用した。前節の`D=2/P=5/H=12`を先に製品候補とする判断は撤回する。ユーザーの評価順が「Bigstar統合より先に既存scriptでP=7まで実装・試験」へ明確化され、そのgateを通した後にGUI統合を指示されたためである。現在の製品試験候補はlocal input delay `D=2`、最大連続投機tick `P=7`、ROM側history容量`H=12`で、manual scriptとBigstarの試験機能を同じ契約へ揃えた。後述のP=7 transaction境界、再戦generation、人工遅延時刻軸、contiguous ACK/未ACK再送を修正し、周期loss、再順序化、短時間断、複合WAN、死亡・土管復帰・Big Star、stock item、block、8 coin、player接触を実ROMで通した。2D/3D表示は恒久差を作らず3 frame以内に対照画像へ戻るが、音声は訂正側だけ同じsample sourceを重複開始することを確認した。従ってgame-state/network/eventの実現可能性は高まった一方、音声を含む製品完成とは判定しない。
 
-Bigstar統合ではrollback有効時だけ`romloop` backend、`D=2/P=7/H=12`相当、旧`InputMaxFrameLead`無効、7秒horizon timeout、game RAM rollback、LCD defer、最終tick render、中間3D scene破棄、JIT exact chainを有効にした。ROM manifestをversion 4へ上げ、再利用ROMを常にgame-tick probe付きで再生成する。rollback無効時はprobe制御を有効にせず、同じpatch済みROMが1200 frameの通常入力同期を完走した。GUIではrollbackを試験機能と明示し、旧Leadの代わりに固定`P=7`を表示する。`logs/codex-bigstar-romloop-sidecar-default-e2e-pass-20260819`はInsiders signaling、software renderer、stage 4、1200 frameで両roleの`backend=romloop`、start-ready、critical state候補一致、fatalなしを確認し、host/client全区間平均は`59.91/55.64fps`だった。client値は1500msの起動差を含むため、対戦中の持続性能値としては使わない。最新sidecarを含むBigstar MSI/NSIS bundleとpreflightも成功した。
+Bigstar統合ではrollback有効時だけ`romloop` backend、`D=2/P=7/H=12`相当、旧`InputMaxFrameLead`無効、game RAM rollback、LCD defer、最終tick render、中間3D scene破棄、JIT exact chainを有効にした。horizon待機上限は当初Slippiと同じ7秒だったが、ユーザー判断により非rollbackの入力待ちと同じ60秒へ変更した。ROM manifestをversion 4へ上げ、再利用ROMを常にgame-tick probe付きで再生成する。rollback無効時はprobe制御を有効にせず、同じpatch済みROMが1200 frameの通常入力同期を完走した。GUIではrollbackを試験機能と明示し、旧Leadの代わりに固定`P=7`を表示する。`logs/codex-bigstar-romloop-sidecar-default-e2e-pass-20260819`はInsiders signaling、software renderer、stage 4、1200 frameで両roleの`backend=romloop`、start-ready、critical state候補一致、fatalなしを確認し、host/client全区間平均は`59.91/55.64fps`だった。client値は1500msの起動差を含むため、対戦中の持続性能値としては使わない。60秒化後の`logs/codex-bigstar-romloop-timeout60-e2e-20260819`もstage 2を1200 frame完走し、両roleで`rollbackHorizonTimeoutMs=60000`を確認した。最新sidecarを含むBigstar MSI/NSIS bundleとpreflightも成功した。
 
 software renderer・60fps制限ありの通常条件 `logs/codex-slippi-horizon7-practical-20260818` は人工送信遅延2-3 frameで、host/client各38訂正、最大log depth `3/2`、最大replay tick `4/3`、active平均`16.664/16.667ms`、最大`28.129/27.640ms`、33ms超0、horizon待機0、26共有heartbeat差0だった。P=7設定そのものによる通常時の性能低下はこのrunでは検出していない。
 
@@ -68,7 +68,7 @@ bundle wire protocolはversion 3へ更新し、各packetにgeneration内の`high
 
 今回の診断追加後はmelonDS Release build、PowerShell 3 scriptの構文解析、Python 2解析器の構文検査、CTest全16件を通した。SPU/PCM診断を有効にした最終1200-frame候補もhost 9訂正、状態fatal 0、対戦区間underrun`0/0`、実効`59.999/59.999fps`、outer最大`19.188/19.198ms`、25ms超0だった。診断を有効にしてもこの短いrouteで性能gate低下は検出していない。
 
-`logs/codex-slippi-horizon7-timeout-20260818` はtimeoutだけ500msへ短縮し、入力を100 frame遅らせた。両roleとも連続確定frontierから8個目へ進む前に停止し、`500/501ms`でexit 73となった。製品候補の既定値はSlippiと同じ7秒である。
+`logs/codex-slippi-horizon7-timeout-20260818` はtimeoutだけ500msへ短縮し、入力を100 frame遅らせた。両roleとも連続確定frontierから8個目へ進む前に停止し、`500/501ms`でexit 73となった。当時の製品候補はSlippiと同じ7秒だったが、現在のBigstar/manual既定値はユーザー判断により60秒である。
 
 ### 分離する三つの値
 
@@ -85,13 +85,13 @@ rollback有効時の現行`InputMaxFrameLead`は、future labelである`sendFra
 3. 予測値は「packet到着順で最後に確認した入力」ではなく、対象frameより前で最も新しい確定入力から選ぶ。現行`PredictionRuntime::Confirm()`は再順序化した古いpacketでも`LastConfirmedInput_`を上書きするため、real-WAN gateより前にframe順の探索へ直す。
 4. horizon gateが正しければ、後着不一致は必ず保持history内にある。現行のdepth 11超 `ClampResimulationMismatch()`は古い不一致を捨てて最近のframeだけ直すため削除し、範囲外不一致やcheckpoint欠落は同期継続不能の明示的なfatal invariant errorとする。無言でplayを続けない。
 5. script経路は`InputBundleHistory=11`をrollback訂正historyとして維持する一方、wire bundle version 3のcontiguous ACKと最大32 entryの未ACK再送windowを独立に持つ。bundleは`UNSEQUENCED`送信し、stall中も同じ未ACK bundleを50ms間隔で再送する。結果sceneへ入るときは人工遅延queueに残る旧generation payloadを先に全送信し、結果timer中もnetwork pumpを継続してからgeneration resetする。ACK、遅延queue、frontierはgeneration resetで同時に消去する。新しいgame inputを生成してhorizonを押し広げることはしない。
-6. horizonでの連続停止は7秒でexit 73にする。通常の`RollbackInputWaitUs`は0を既定にし、毎frameの短い待ちと安全上限でのhard waitを混同しない。Bigstarも同じtimeoutと`P=7`表示を使う。
+6. horizonでの連続停止は60秒でexit 73にする。通常の`RollbackInputWaitUs`は0を既定にし、毎frameの短い待ちと安全上限でのhard waitを混同しない。Bigstar/manualとも同じtimeoutを使い、Bigstarは`P=7`を表示する。明示切断後の再接続は未実装なので、復旧不能時にも最大60秒静止し得る点は既知のUX制約である。
 7. `D/P`、protocol version、ROM-loop backend/history契約を開始handshakeとruntime identityへ含め、peer間不一致は対戦開始前に拒否する。再戦generation resetではcontiguous frontier、ACK、prediction、pending rollbackを同時に初期化する。
 
 ### 実装と昇格の順序
 
 1. 完了: ROM不要testで、連続frontier、穴あき・逆順packet、generation reset、P=7と8個目の区別を固定した。arrival-order依存のstale predictionをframe順探索へ変更し、P有効時のROM-loop事後clampをfatal invariantへ置き換えた。
-2. 完了: manual `-SlippiRollback`を`D=2/P=7/H=12`、software renderer、旧`InputMaxFrameLead`無効、7秒timeoutへ揃えた。通常2-3 frame条件、深度7を発生させる8-9 frame条件、短縮timeoutを実ROMで試した。初回8-9 frame手動条件で見つかったtransaction競合は次項の早期finalizeで解決済みである。
+2. 完了: manual `-SlippiRollback`を`D=2/P=7/H=12`、software renderer、旧`InputMaxFrameLead`無効へ揃えた。通常2-3 frame条件、深度7を発生させる8-9 frame条件、短縮timeoutを実ROMで試した。初回8-9 frame手動条件で見つかったtransaction競合は次項の早期finalizeで解決済みである。timeout既定値は後にBigstarとともに60秒へ変更した。
 3. 完了: ROM-loop transaction実行中に到着した次の不一致がP=7を越えて老化する競合を、outer-frame末尾の早期finalizeで修正した。古い入力を捨てたりPを名目だけ8へ広げたりせず、unit test、同一入力replay、最大depth 7の5400-frame実ROM stressを通した。
 4. 完了: 結果sceneでnetwork pumpが止まり、人工遅延queueの最終入力をgeneration resetが消すdeadlockを修正した。8-9 frame遅延queueを残した決定的な再戦runで実payload排出、generation 1 handshake、状態差0を確認し、同じ設定の手動再戦も状態差なしで通った。
 5. 完了: 再戦後に人工送信遅延が無効になるraw/logical frame混用を直した。unit testと実ROM再戦でgeneration 1にも8-9 frame遅延、prediction mismatch、ROM-loop訂正が発生し、状態差0で完走した。修正後の手動再戦も状態差なしだった。8-9 frame時の黒枠の遅さは高遅延条件全体によるため、ユーザー指示どおり今回の修正対象から外した。

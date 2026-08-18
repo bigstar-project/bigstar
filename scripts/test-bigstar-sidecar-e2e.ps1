@@ -123,8 +123,9 @@ function Assert-MelonLogPassed {
     if ($ExpectRomLoopRollback -and
         (!$Text.Contains("inputMaxFrameLead=-1") -or
          !$Text.Contains("inputBundleHistory=11") -or
-         !$Text.Contains("rollbackPredictionHorizon=7"))) {
-        throw "$Role melonDS log does not match the ROM-loop D/P/H launch contract"
+         !$Text.Contains("rollbackPredictionHorizon=7") -or
+         !$Text.Contains("rollbackHorizonTimeoutMs=60000"))) {
+        throw "$Role melonDS log does not match the ROM-loop launch contract"
     }
 }
 

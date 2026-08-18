@@ -36,7 +36,7 @@ param(
     [int]$RollbackInputWaitUs = 0,
     [int]$RollbackMaxResimFrames = 0,
     [int]$RollbackPredictionHorizonFrames = 0,
-    [int]$RollbackHorizonTimeoutMs = 7000,
+    [int]$RollbackHorizonTimeoutMs = 60000,
     [switch]$RollbackResimulate,
     [switch]$WorldStateTraceObjectLifecycles,
     [switch]$WorldStateTraceActorInternals,
