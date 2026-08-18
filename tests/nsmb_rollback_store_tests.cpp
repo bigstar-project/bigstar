@@ -1,4 +1,5 @@
 #include "NsmbRollbackStore.h"
+#include "NSMLGameRAMRollback.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -16,6 +17,7 @@ using NsmbMvlNetplay::RollbackStorage::ShouldSaveResimulationCheckpoint;
 using NsmbMvlNetplay::RollbackStorage::Store;
 using NsmbMvlNetplay::RollbackStorage::StoredState;
 using NsmbMvlNetplay::RollbackStorage::Statistics;
+using melonDS::NSMLGameRAMRollback::CanFinalizeTransaction;
 
 void Require(bool condition, const std::string &message) {
   if (condition)
@@ -91,6 +93,25 @@ void TestRollbackPolicies() {
   Require(!ShouldSaveResimulationCheckpoint(100, 100, false) &&
               !ShouldSaveResimulationCheckpoint(101, 100, false),
           "the ordinary before-frame path should own the final checkpoint");
+}
+
+void TestRomLoopTransactionCompletionPolicy() {
+  Require(!CanFinalizeTransaction(true, false, true, 8, 8, 108, 100),
+          "pending RAM restore cannot finalize");
+  Require(!CanFinalizeTransaction(false, false, false, 8, 8, 108, 100),
+          "inactive history cannot finalize from stale counters");
+  Require(!CanFinalizeTransaction(false, false, true, 7, 8, 108, 100),
+          "unfinished history index cannot finalize");
+  Require(!CanFinalizeTransaction(false, false, true, 8, 8, 107, 100),
+          "unfinished game frame cannot finalize");
+  Require(CanFinalizeTransaction(false, false, true, 8, 8, 108, 100),
+          "completed replay finalizes at the outer-frame boundary");
+  Require(CanFinalizeTransaction(false, true, false, 8, 8, 108, 100),
+          "legacy exit-gate completion remains valid");
+  Require(!CanFinalizeTransaction(false, false, true, 1, 0, 100, 100),
+          "empty history cannot finalize");
+  Require(!CanFinalizeTransaction(false, false, true, 8, 8, 2, 0xFFFFFFFE),
+          "wrapped game-frame interval cannot finalize");
 }
 
 void TestRestoreChain() {
@@ -271,6 +292,7 @@ void TestStatistics() {
 int main() {
   TestCheckpointBytes();
   TestRollbackPolicies();
+  TestRomLoopTransactionCompletionPolicy();
   TestRestoreChain();
   TestPrepareSaveModes();
   TestPreimageRestoreAndPrune();

@@ -26,6 +26,7 @@
 #include <inttypes.h>
 #include <string>
 #include "NDS.h"
+#include "NSMLGameRAMRollback.h"
 #include "ARM.h"
 #include "NDSCart.h"
 #include "GBACart.h"
@@ -2508,13 +2509,22 @@ bool NDS::FinalizeNSMLGameRAMRollbackTransaction()
     constexpr u32 historyTargetAddr = 0x02001AD8;
     constexpr u32 historyStartFrameAddr = 0x02001ADC;
     constexpr u32 gameFrameAddr = 0x0208B668;
-    if (NSMLGameRAMRestorePending || !NSMLGameRAMHistoryReachedExitGate)
-        return false;
+    const bool historyEnabled = ARM9Read32(historyEnabledAddr) != 0;
     const u32 historyCount = ARM9Read32(historyCountAddr);
-    if (historyCount == 0 || ARM9Read32(historyIndexAddr) < historyCount ||
-        ARM9Read32(gameFrameAddr) < ARM9Read32(historyStartFrameAddr) + historyCount)
+    if (!NSMLGameRAMRollback::CanFinalizeTransaction(
+            NSMLGameRAMRestorePending,
+            NSMLGameRAMHistoryReachedExitGate,
+            historyEnabled,
+            ARM9Read32(historyIndexAddr),
+            historyCount,
+            ARM9Read32(gameFrameAddr),
+            ARM9Read32(historyStartFrameAddr)))
         return false;
 
+    // A ROM-loop replay can finish all requested game ticks before the guest
+    // reaches the next input gate.  Finalize at this outer-frame boundary so a
+    // newly arrived mismatch can arm a consecutive correction on the next
+    // frame instead of aging past the configured prediction horizon.
     ARM9Write32(historyEnabledAddr, 0);
     ARM9Write32(historyIndexAddr, 0);
     ARM9Write32(historyCountAddr, 0);

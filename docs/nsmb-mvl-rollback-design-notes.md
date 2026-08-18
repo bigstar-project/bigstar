@@ -6,7 +6,7 @@
 
 ### 現時点の独立判断
 
-Slippiの制御原則、すなわち「少量の実入力遅延を先に入れる」「訂正可能範囲だけ予測する」「上限を越える前にgame frameを止める」「欠落入力を再送する」を本forkにも採用した。前節の`D=2/P=5/H=12`を先に製品候補とする判断は撤回する。ユーザーの評価順が「Bigstar統合より先に既存scriptでP=7まで実装・試験」へ明確化されたためである。現在のscript試験候補はlocal input delay `D=2`、最大連続投機tick `P=7`、ROM側history容量`H=12`とし、Bigstar GUI起動経路は変更しない。ただし後述の手動runでP=7境界の競合を確認したため、現実装を「安全停止まで完成」とは判定しない。
+Slippiの制御原則、すなわち「少量の実入力遅延を先に入れる」「訂正可能範囲だけ予測する」「上限を越える前にgame frameを止める」「欠落入力を再送する」を本forkにも採用した。前節の`D=2/P=5/H=12`を先に製品候補とする判断は撤回する。ユーザーの評価順が「Bigstar統合より先に既存scriptでP=7まで実装・試験」へ明確化されたためである。現在のscript試験候補はlocal input delay `D=2`、最大連続投機tick `P=7`、ROM側history容量`H=12`とし、Bigstar GUI起動経路は変更しない。後述の手動runで見つかったP=7境界競合は修正し、5400-frameの実ROM stressまで通した。未検証のloss/再順序化、画像、音声、event、長時間手動playを残すため、製品完成とは判定しない。
 
 software renderer・60fps制限ありの通常条件 `logs/codex-slippi-horizon7-practical-20260818` は人工送信遅延2-3 frameで、host/client各38訂正、最大log depth `3/2`、最大replay tick `4/3`、active平均`16.664/16.667ms`、最大`28.129/27.640ms`、33ms超0、horizon待機0、26共有heartbeat差0だった。P=7設定そのものによる通常時の性能低下はこのrunでは検出していない。
 
@@ -14,7 +14,13 @@ software renderer・60fps制限ありの通常条件 `logs/codex-slippi-horizon7
 
 ユーザー手動run `logs/manual-slippi-depth7-20260818-192446` はclientでexit 74、続いてhostでexit 73となった。clientはmismatch 2689/current 2696を許可範囲7としてcheckpoint 2688から9 tickのROM-loop訂正を開始した。そのtransactionがouter frame 2698で完了するまでにframe 2690のactualが到着して次のpending mismatchになり、`mismatch=2690 current=2698 depth=8 horizon=7`でfatal invariantへ入った。hostはpeer切断後もframe 2708でcontiguous 2700から先を7秒待ち、horizon timeoutした。OS例外やrenderer crashではなく、実装が意図的に`std::_Exit(74/73)`したものである。
 
-保存された完全入力と同一seedを再生した `logs/codex-repro-manual-depth7-exit-20260818` は2800 frameを完走した。host/clientは`107/62`訂正、horizon block/resumeは`631/258`件、fatalは0だった。従って入力列だけで決まる不具合ではなく、packet到着と複数outer frameにまたがるROM-loop transactionが重なったときのtiming-dependent raceである。現行gateは新しいtickの入力解決前には働くが、既に走っているtransaction中に生じたpending mismatchの老化を止めない。
+修正前に保存された完全入力と同一seedを再生した `logs/codex-repro-manual-depth7-exit-20260818` は2800 frameを完走した。host/clientは`107/62`訂正、horizon block/resumeは`631/258`件、fatalは0だった。従って入力列だけで決まる不具合ではなく、packet到着と複数outer frameにまたがるROM-loop transactionが重なったときのtiming-dependent raceであることを確認した。旧gateは新しいtickの入力解決前には働くが、既に走っているtransaction中に生じたpending mismatchの老化を止めなかった。
+
+原因は、ROM-loopが要求された全game tickを最初のouter frame内で完了しても、次のguest input gateへ到達するまでtransactionをin-flightに残したことだった。旧ログはarmした`current + 2`でcompleteしており、この空白frameでは次のpending mismatchをarmできなかった。`CanFinalizeTransaction()`へ完了条件を分離し、RAM restore済み、history index/count完了、game frame完了を満たせば、guest exit gate前でもouter-frame末尾でcontrolをclearするよう変更した。新しいpending mismatchは次のbefore-frameで連続transactionとしてarmできる。未実行history、空history、inactiveなstale counter、frame wrapを拒否するunit testも追加した。
+
+修正後の同入力・同seed再生 `logs/codex-depth7-atomic-finalize-replay-20260818` は3200 frameを完走し、訂正はhost/client `89/97`、cannot-arm、fatal、19共有heartbeat差は0だった。completeは全件`current + 1`になり、問題の空白frameを除去できた。長時間境界stress `logs/codex-depth7-atomic-finalize-stress-5400-20260818` は人工送信遅延8-9 frameでhost/client `102/95`訂正、最大mismatch depth `7/7`、horizon block/resume `1123/1047`件、cannot-arm、fatal、76共有heartbeat差は0だった。active平均`16.737/16.739ms`、最大`57.092/66.242ms`、33ms超`72/71`であり、安全性は通るがこのping 270-300ms相当条件を快適とは判定しない。
+
+通常性能gate `logs/codex-depth7-atomic-finalize-practical-3600-20260818` は人工送信遅延2-3 frameでhost/client各79訂正、最大mismatch depth `2/1`、cannot-arm、fatal、46共有heartbeat差は0だった。active平均は両role `16.667ms`、最大`34.548/30.463ms`、33ms超`1/0`、連続slow frame `1/0`である。hostの単発最大は次の訂正をarmする前のframe 1631で、持続的な60fps低下はない。初回gameplay correction付近のrun-frameは別に`33-36ms`あり、完全無停止とは扱わないが、今回のfinalize変更による持続性能悪化は検出していない。
 
 `logs/codex-slippi-horizon7-timeout-20260818` はtimeoutだけ500msへ短縮し、入力を100 frame遅らせた。両roleとも連続確定frontierから8個目へ進む前に停止し、`500/501ms`でexit 73となった。製品候補の既定値はSlippiと同じ7秒である。
 
@@ -40,9 +46,9 @@ rollback有効時の現行`InputMaxFrameLead`は、future labelである`sendFra
 
 1. 完了: ROM不要testで、連続frontier、穴あき・逆順packet、generation reset、P=7と8個目の区別を固定した。arrival-order依存のstale predictionをframe順探索へ変更し、P有効時のROM-loop事後clampをfatal invariantへ置き換えた。
 2. 完了: manual `-SlippiRollback`を`D=2/P=7/H=12`、software renderer、旧`InputMaxFrameLead`無効、7秒timeoutへ揃えた。通常2-3 frame条件、深度7を発生させる8-9 frame条件、短縮timeoutを実ROMで試した。ただし8-9 frameの長時間手動条件では上記競合により失敗した。
-3. 現在のblocker: ROM-loop transaction実行中に到着した次の不一致がP=7を越えて老化する。transaction active中の外側進行とpending mismatchを一つの安全契約として扱い、古い入力を捨てたりPを名目だけ8へ広げたりせず、次のtransactionを深度7以内で開始できることを固定testと実ROM stressで確認する。
-4. その後、固定12-entry bundleだけでなくcontiguous ACK/未ACK再送をprotocolへ加え、loss・重複・再順序化・短時間断をscriptで試す。`D=0/1/2`も同じnetwork条件でA/Bするが、一つのrun中に動的変更はしない。
-5. P=7の合格条件は、cannot-arm/cap/fatal invariantが0、継続heartbeat差0、通常network条件で対戦中実効`59.5fps`以上、rollback起因の33ms超連続frameが0、訂正区間後のpipe/player/OAM画像差が0、死亡・復帰・土管・item・再戦を通過、停止後の復帰または理由付き終了とする。単発最大値、訂正深度分布、audio underrunも別々に記録する。今回の通常短時間runは状態・性能を通ったが、境界競合、画像・音声・event・長時間手動gateは未完である。
+3. 完了: ROM-loop transaction実行中に到着した次の不一致がP=7を越えて老化する競合を、outer-frame末尾の早期finalizeで修正した。古い入力を捨てたりPを名目だけ8へ広げたりせず、unit test、同一入力replay、最大depth 7の5400-frame実ROM stressを通した。
+4. 次は固定12-entry bundleだけでなくcontiguous ACK/未ACK再送をprotocolへ加え、loss・重複・再順序化・短時間断をscriptで試す。`D=0/1/2`も同じnetwork条件でA/Bするが、一つのrun中に動的変更はしない。
+5. P=7の合格条件は、cannot-arm/cap/fatal invariantが0、継続heartbeat差0、通常network条件で対戦中実効`59.5fps`以上、rollback起因の33ms超連続frameが0、訂正区間後のpipe/player/OAM画像差が0、死亡・復帰・土管・item・再戦を通過、停止後の復帰または理由付き終了とする。単発最大値、訂正深度分布、audio underrunも別々に記録する。今回のscript runは境界安全性と通常条件の状態・平均性能を通ったが、画像・音声・event・長時間手動gateは未完である。
 6. ユーザー指示により、Bigstarの現行`coredelta`起動設定とGUIはこの段階では変更しない。P=7のscript検証を先に続ける。
 
 ## 2026-08-18 Slippi/Tangoの遅延・深度制御再確認
