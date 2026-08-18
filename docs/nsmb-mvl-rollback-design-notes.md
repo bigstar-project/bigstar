@@ -20,6 +20,8 @@ Slippiの「最大7 frame」は7個の投機tickを含めた呼称である。�
 
 現行Tango `259eafbb09ef65ad2431548bb093619e51016bab` も既定値は2 frameで、ユーザーの記憶した数字は確認できた。ただし現在の実装ではSlippi型のinput scheduling delayではなく、netcode frontierより表示coreを2 tick後ろへ置くpure local `present delay`である。範囲は0-10で、RTTから片道frame数+1を提案できる。入力frontier自体は先へ進むため、同じ「2」でもSlippiの `input(frame) -> apply(frame+2)` とは別の設計である。
 
+Bigstarがrollback有効化時に設定する既存の2 frameはSlippi型である。UIの`rollbackInputDelayFrames=2`はTauriから`MELONDS_NSML_DELAY=2`へ渡り、runtimeは現在読んだlocal inputを `logicalFrame + delay` 番へ保存・送信し、現在のlogical frameには履歴中の入力、開始直後はneutralを適用する。表示coreやframebufferだけをsimulation frontierより後ろに置く経路はない。Slippiとの差は、Bigstarでは0-16を選べるroom共有設定であり、playerごとのmixed delayではない点である。またこれは入力遅延の分類であり、Bigstarの現行`rollback_enabled`起動設定自体は`coredelta` backendを選んでいるため、GUI経路全体が現在のROM-loop候補へ切り替わっているという意味ではない。
+
 本forkで採るべき次の順序は、(1) 12-entry historyを「深度11まで常用可能」という意味にせず、実測済みの訂正性能・表示gate内に製品prediction horizonを置く、(2) oldest contiguous confirmed remote frameを基準に、履歴外訂正が起きる前に安全に待機する、(3) local input delay 0/1/2を同一人工RTT・jitterでA/Bし、rollback深度・outer hitch・操作感を別々に評価する、である。Slippiの7は方式の参考値であり、DS二台分相当の再演算コストを持つ本forkが7を快適に処理できる証拠ではない。現状のdepth 11超clampは安全fallbackではないため、実WAN相当試験より先に停止境界を実装・検証する。
 
 ## 2026-08-18 render processを含むROM-loop訂正
