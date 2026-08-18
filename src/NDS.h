@@ -20,6 +20,7 @@
 #define NDS_H
 
 #include <memory>
+#include <array>
 #include <string>
 #include <optional>
 #include <functional>

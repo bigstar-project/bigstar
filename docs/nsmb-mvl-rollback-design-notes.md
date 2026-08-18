@@ -52,7 +52,13 @@ bundle wire protocolはversion 3へ更新し、各packetにgeneration内の`high
 
 同一入力・同一seedのframes 900-1200をlockstep対照とROM-loop候補で比較した `logs/codex-audio-spu-{reference-lockstep,candidate-rollback}-20260819` と、transaction flagを加えた再測定 `logs/codex-audio-spu-transaction-candidate-20260819` では、9回訂正したhostだけ波形gateに失敗した。hostはenvelope correlation `0.926559`、NRMSE `0.289334`、追加transient 8件で、そのうち4件が訂正完了±4 frame内だった。訂正0回のclientはcorrelation `0.975289`、NRMSE `0.165311`でgateを通り、両roleとも対戦区間underrunは0だった。さらにhostのSPU sample startは対照96件に対して104件、対照にあるsourceの欠落0・同一sourceの余分な開始8件（内訳4/2/2件）だった。clientは`97/97`、欠落・余分とも0である。候補hostでは13件のstartがROM-loop transaction中に直接発行されていたため、PCMの揺らぎではなく訂正loopが効果音を再発行していると判定する。
 
-中間replay sampleをSPU出力FIFOへ入れないだけの実験は追加transientを22件から19件へしか減らさず、採用しなかった。ROM-loopはMain RAMだけを戻し、ARM7/SPU hardware timelineを戻さないため、出力を捨ててもchannel再開始後の状態が残る。またtransaction中のchannel start 13件を一律に無視すると、対照との差で余分なのは8件だけなので、少なくとも5件の正しいstartまで消す。安全な修正には、sound command/sample sourceをgame tick単位で識別して投機中はcommitを遅らせ、訂正時に重複だけを置換するledger、または同等の音声専用rollback stateが必要である。これは単純mute/crossfadeでは解決しない現行の最重要blockerとする。
+中間replay sampleをSPU出力FIFOへ入れないだけの実験は追加transientを22件から19件へしか減らさず、採用しなかった。ROM-loopはMain RAMだけを戻し、ARM7/SPU hardware timelineを戻さないため、出力を捨ててもchannel再開始後の状態が残る。またtransaction中のchannel start 13件を一律に無視すると、対照との差で余分なのは8件だけなので、少なくとも5件の正しいstartまで消す。
+
+次にNitroSDKのARM9→ARM7 IPCを実コマンド単位で追跡した。sound tag 7は`0x020948E0`からの24-byte command listで、今回の訂正中に現れたIDはstop/start/prepare/player parameter/track parameterに対応する`1,2,3,6,7`だった。10個のtransaction list中9個は直後の通常listと完全一致した一方、frame 1208の通常listには既に送信済みの10 commandと、誤予測側では送られなかった正しい1 commandが混在した。従ってlist単位の抑止では正しい音を残せず、command単位の照合が必要だと確定した。診断用のIPC9/IPC7/list CSVは`-IpcSendLog`で明示したときだけ有効にし、通常経路ではfileを開かない。
+
+二つの抑止案を実装して長時間A/Bしたが、どちらも採用条件を満たさなかった。中間transactionの全commandをunknown IDへ置換しつつlist completionだけ維持する案は、1200-frame試験ではhostのSPU startを対照`96`件と一致させたが、2000-frame試験では対照`351`件に対し候補`354`件、欠落13・余分16となった。既送commandとtransaction中の実送信を個数付きで照合し、訂正後listの新規commandだけ残すledger案は14 list・90 commandを抑止できたものの、同じ2000-frame gateで候補`355`件、欠落14・余分18、envelope correlation `0.855279`、NRMSE `0.368004`となり、全抑止より改善しなかった。失敗した抑止ロジックと既定有効化はsourceから除去し、観測専用IPC traceだけを残した。
+
+この結果は「ledgerの照合規則をもう少し調整すれば十分」とは支持しない。訂正前にARM7が消費しSPU channelへ反映した誤予測commandは、後から届くcommand listだけでは取り消せない。正確な音声には少なくとも、最大予測幅を覆う出力遅延と、checkpoint時点のARM7 sound driver・SPU・audio生成状態を一貫して復元し、訂正音へ差し替える仕組みが必要になる。ARM7はsound以外のIPC、timer、Wi-Fiも所有するため、ARM7WRAMやCPUを部分的に戻す案は別subsystemを壊す危険があり、「小さな音声専用state」とはまだ証明できない。性能とgameplay correctnessを優先する現方針では、この大幅な状態拡張を未計測のまま製品経路へ入れない。単純mute/crossfadeは知覚上の緩和策にはなり得るが、波形・重複なしの合格根拠にはしない。
 
 表示は `compare-nsmb-mvl-screen-hash.ps1` で訂正単位の安定収束も判定できるようにした。`logs/codex-screen-candidate-practical-20260818` はhost 26訂正の訂正後0-3 frame、計104標本中97一致・7不一致で、全訂正が3 frame以内に同一role対照へ安定収束した。targeted PNGの8不一致は111-441 pixel、bounding boxは幅15-21px・高さ24-43pxでMario/Luigi spriteの位置だけに局在し、背景・地形・土管・HUD差は0だった。従って以前のpipe二重geometryは再発していない。ただし訂正直後のplayer imageが毎回完全一致する契約ではなく、最大3 frameのsprite位相差を許容している。LCD deferを外す対照はgame-state correctness自体を壊したため棄却した。
 
@@ -91,8 +97,9 @@ rollback有効時の現行`InputMaxFrameLead`は、future labelである`sendFra
 7. 完了: 同一の複合WAN profileで`D=0/1/2`を別runとしてA/Bした。`D=0/1/2`でhostのhorizon待機は`12/6/0`となり、D=0だけ対戦中52.130ms spikeと2連続slow frameを生じたため、現時点では`D=2`を維持する。
 8. 完了: 複合WAN条件で死亡・復帰・土管表示、死亡中moving hazard、実Big Star取得、stock item消費を通した。実音声callbackのunderrun計測も追加し、対戦中0回を確認した。既存のpipe 3D geometry gateは上記の中間scene discard修正で通っている。
 9. 完了: 同一role・同一seed対照でplayer/2D OAMを含む訂正直後画像、最終SDL波形、SPU sample start、block、8 coin reward、player接触を検証した。地形・土管は一致しplayer spriteは最大3 frameで収束、低頻度eventは両peer一致したが、訂正側だけ同一sample sourceを8回余分に開始したため音声gateは不合格である。
-10. 次: Bigstarへ進む前に、音声event ledgerまたは音声専用rollback stateを小さな実験で比較する。訂正側のSPU source欠落・余分を0、PCM gateを両role合格、対戦中実効`59.5fps`以上、33ms超連続frame 0にできなければ、ROM-loop方式の製品上の限界として明記する。単純mute、全transaction start抑止、crossfadeだけでは昇格させない。
-11. ユーザー指示により、Bigstarの現行`coredelta`起動設定とGUIはこの段階では変更しない。P=7のscript検証と音声blockerの可否判断を先に続ける。
+10. 完了・不採用: NitroSDK sound command listをIPCで復号し、transaction全抑止と既送command ledgerを実装して1200/2000-frame A/Bした。短時間だけ改善した全抑止は長時間で正しい音を失い、ledgerも欠落14・余分18でPCM gateを通らなかった。失敗した変更は既定経路へ残さず、明示的な観測用`-IpcSendLog`だけを残した。
+11. 現在の限界: Main RAMだけを戻すROM-loopで、既にARM7/SPUへ反映された誤予測音を完全に取り消すことはできない。正確な解にはaudio出力遅延とARM7 sound driver/SPUの整合したrollbackが必要で、部分復元の安全境界と性能は未証明である。映像・game state・主要event・network recoveryの合格を音声完全性へ誤って一般化しない。
+12. 次: Bigstarの現行`coredelta`起動設定とGUIはまだ変更しない。Slippi型ROM-loopを主方針として維持する場合は、(a)音声artifactを製品上の既知制約として受け入れ知覚的緩和だけ行うか、(b)最大7 frame分のaudio遅延とARM7/SPU rollbackを独立した高リスク試作として性能gateからやり直すかを分離する。後者を行うまでは音声込みの完成とは判定しない。
 
 ## 2026-08-18 Slippi/Tangoの遅延・深度制御再確認
 

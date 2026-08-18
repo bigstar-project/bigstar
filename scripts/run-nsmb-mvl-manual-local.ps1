@@ -107,6 +107,7 @@ param(
     [switch]$PerfBreakdown,
     [switch]$PerformanceLog,
     [switch]$AudioPcmLog,
+    [switch]$IpcSendLog,
     [switch]$ForcePlayerPowerups,
     [int]$ForcePlayerPowerupsStartFrame = 0,
     [int]$ForcePlayerPowerupsEndFrame = 0,
@@ -743,7 +744,10 @@ foreach ($name in @(
     "MELONDS_NSML_PERFORMANCE_LOG",
     "MELONDS_NSML_AUDIO_PCM_LOG",
     "MELONDS_NSML_AUDIO_CALLBACK_LOG",
-    "MELONDS_NSML_SPU_EVENT_LOG"
+    "MELONDS_NSML_SPU_EVENT_LOG",
+    "MELONDS_NSML_IPC9_SEND_LOG",
+    "MELONDS_NSML_IPC7_SEND_LOG",
+    "MELONDS_NSML_SND_COMMAND_LOG"
 )) {
     $oldAIEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
 }
@@ -827,12 +831,26 @@ function Set-AudioPcmLogEnv {
     }
 }
 
+function Set-IpcSendLogEnv {
+    param([string]$RoleLogDir)
+    if ($IpcSendLog) {
+        $env:MELONDS_NSML_IPC9_SEND_LOG = Join-Path $RoleLogDir "ipc9-sends.csv"
+        $env:MELONDS_NSML_IPC7_SEND_LOG = Join-Path $RoleLogDir "ipc7-sends.csv"
+        $env:MELONDS_NSML_SND_COMMAND_LOG = Join-Path $RoleLogDir "snd-command-lists.csv"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_IPC9_SEND_LOG -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_IPC7_SEND_LOG -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SND_COMMAND_LOG -ErrorAction SilentlyContinue
+    }
+}
+
 $hostProc = $null
 if (-not $ClientOnly) {
     Set-AIPlayLogEnv -Path $HostAIPlayLog -ObservationV3Path $HostAIObservationV3Log
     Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeHostInput)
     Set-PerformanceLogEnv -RoleLogDir $hostLog
     Set-AudioPcmLogEnv -RoleLogDir $hostLog
+    Set-IpcSendLogEnv -RoleLogDir $hostLog
     $hostProc = Start-Process -FilePath "powershell.exe" `
         -ArgumentList $hostArgs `
         -WorkingDirectory $repoRoot `
@@ -870,6 +888,7 @@ Set-AIPlayLogEnv -Path $ClientAIPlayLog -ObservationV3Path $ClientAIObservationV
 Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeClientInput)
 Set-PerformanceLogEnv -RoleLogDir $clientLog
 Set-AudioPcmLogEnv -RoleLogDir $clientLog
+Set-IpcSendLogEnv -RoleLogDir $clientLog
 $clientProc = Start-Process -FilePath "powershell.exe" `
     -ArgumentList $clientArgs `
     -WorkingDirectory $repoRoot `

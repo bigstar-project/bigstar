@@ -58,6 +58,164 @@ using namespace Platform;
 const s32 kMaxIterationCycles = 64;
 const s32 kIterationCycleMargin = 8;
 
+static void TraceNSMLIPC9Send(NDS& nds, u32 value)
+{
+    struct Config
+    {
+        bool Checked = false;
+        FILE* File = nullptr;
+    };
+    static Config cfg;
+    if (!cfg.Checked)
+    {
+        cfg.Checked = true;
+        if (const char* path = getenv("MELONDS_NSML_IPC9_SEND_LOG"))
+        {
+            cfg.File = fopen(path, "w");
+            if (cfg.File)
+            {
+                fprintf(cfg.File,
+                    "frame,gameFrame,historyEnabled,historyIndex,historyCount,historyTarget,"
+                    "arm9Pc,value,tag,error,payload,"
+                    "word0,word1,word2,word3,word4,word5,word6,word7\n");
+            }
+        }
+    }
+    if (!cfg.File)
+        return;
+
+    constexpr u32 historyEnabledAddr = 0x02001ACC;
+    constexpr u32 historyIndexAddr = 0x02001AD0;
+    constexpr u32 historyCountAddr = 0x02001AD4;
+    constexpr u32 historyTargetAddr = 0x02001AD8;
+    constexpr u32 gameFrameAddr = 0x0208B668;
+    const u32 payload = value >> 6;
+    std::array<u32, 8> words {};
+    if (payload >= 0x02000000 && payload <= 0x023FFFE0)
+    {
+        for (u32 index = 0; index < words.size(); index++)
+            words[index] = nds.ARM9Read32(payload + index * sizeof(u32));
+    }
+    fprintf(cfg.File,
+        "%u,%u,%u,%u,%u,%u,%08X,%08X,%u,%u,%08X,"
+        "%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X\n",
+        nds.NumFrames,
+        nds.ARM9Read32(gameFrameAddr),
+        nds.ARM9Read32(historyEnabledAddr),
+        nds.ARM9Read32(historyIndexAddr),
+        nds.ARM9Read32(historyCountAddr),
+        nds.ARM9Read32(historyTargetAddr),
+        nds.ARM9.R[15], value, value & 0x1F, (value >> 5) & 0x1, payload,
+        words[0], words[1], words[2], words[3], words[4], words[5], words[6], words[7]);
+}
+
+static void TraceNSMLSoundCommandList(NDS& nds, u32 value)
+{
+    if ((value & 0x1F) != 7)
+        return;
+
+    struct Config
+    {
+        bool Checked = false;
+        FILE* File = nullptr;
+    };
+    static Config cfg;
+    if (!cfg.Checked)
+    {
+        cfg.Checked = true;
+        if (const char* path = getenv("MELONDS_NSML_SND_COMMAND_LOG"))
+        {
+            cfg.File = fopen(path, "w");
+            if (cfg.File)
+            {
+                fprintf(cfg.File,
+                    "frame,gameFrame,historyEnabled,historyIndex,historyCount,historyTarget,"
+                    "listAddress,commandIndex,commandAddress,id,arg0,arg1,arg2,arg3,rollbackTransaction\n");
+            }
+        }
+    }
+    if (!cfg.File)
+        return;
+
+    constexpr u32 historyEnabledAddr = 0x02001ACC;
+    constexpr u32 historyIndexAddr = 0x02001AD0;
+    constexpr u32 historyCountAddr = 0x02001AD4;
+    constexpr u32 historyTargetAddr = 0x02001AD8;
+    constexpr u32 gameFrameAddr = 0x0208B668;
+    constexpr u32 commandPoolStart = 0x020948E0;
+    constexpr u32 commandSize = 24;
+    constexpr u32 commandCapacity = 256;
+    constexpr u32 commandPoolEnd = commandPoolStart + commandSize * commandCapacity;
+
+    const u32 listAddress = value >> 6;
+    u32 command = listAddress;
+    u32 index = 0;
+    while (command >= commandPoolStart && command < commandPoolEnd &&
+        (command - commandPoolStart) % commandSize == 0 && index < commandCapacity)
+    {
+        const u32 next = nds.ARM9Read32(command);
+        fprintf(cfg.File,
+            "%u,%u,%u,%u,%u,%u,%08X,%u,%08X,%u,%08X,%08X,%08X,%08X,%u\n",
+            nds.NumFrames,
+            nds.ARM9Read32(gameFrameAddr),
+            nds.ARM9Read32(historyEnabledAddr),
+            nds.ARM9Read32(historyIndexAddr),
+            nds.ARM9Read32(historyCountAddr),
+            nds.ARM9Read32(historyTargetAddr),
+            listAddress, index, command, nds.ARM9Read32(command + 4),
+            nds.ARM9Read32(command + 8), nds.ARM9Read32(command + 12),
+            nds.ARM9Read32(command + 16), nds.ARM9Read32(command + 20),
+            nds.IsNSMLGameRAMRollbackTransactionInFlight() ? 1u : 0u);
+        index++;
+        if (next == 0)
+            break;
+        if (next == command || next < commandPoolStart || next >= commandPoolEnd ||
+            (next - commandPoolStart) % commandSize != 0)
+            break;
+        command = next;
+    }
+}
+
+static void TraceNSMLIPC7Send(NDS& nds, u32 value)
+{
+    struct Config
+    {
+        bool Checked = false;
+        FILE* File = nullptr;
+    };
+    static Config cfg;
+    if (!cfg.Checked)
+    {
+        cfg.Checked = true;
+        if (const char* path = getenv("MELONDS_NSML_IPC7_SEND_LOG"))
+        {
+            cfg.File = fopen(path, "w");
+            if (cfg.File)
+            {
+                fprintf(cfg.File,
+                    "frame,gameFrame,historyEnabled,historyIndex,historyCount,historyTarget,"
+                    "arm7Pc,value,tag,error,payload\n");
+            }
+        }
+    }
+    if (!cfg.File)
+        return;
+
+    constexpr u32 historyEnabledAddr = 0x02001ACC;
+    constexpr u32 historyIndexAddr = 0x02001AD0;
+    constexpr u32 historyCountAddr = 0x02001AD4;
+    constexpr u32 historyTargetAddr = 0x02001AD8;
+    constexpr u32 gameFrameAddr = 0x0208B668;
+    fprintf(cfg.File, "%u,%u,%u,%u,%u,%u,%08X,%08X,%u,%u,%08X\n",
+        nds.NumFrames,
+        nds.ARM9Read32(gameFrameAddr),
+        nds.ARM9Read32(historyEnabledAddr),
+        nds.ARM9Read32(historyIndexAddr),
+        nds.ARM9Read32(historyCountAddr),
+        nds.ARM9Read32(historyTargetAddr),
+        nds.ARM7.R[15], value, value & 0x1F, (value >> 5) & 0x1, value >> 6);
+}
+
 bool TraceNSMLWatchWrite(NDS* nds, const char* cpu, u32 pc, u32 addr, u32 width, u32 val)
 {
     struct WatchConfig
@@ -4979,6 +5137,8 @@ void NDS::ARM9IOWrite32(u32 addr, u32 val)
                 IPCFIFOCnt9 |= 0x4000;
             else
             {
+                TraceNSMLSoundCommandList(*this, val);
+                TraceNSMLIPC9Send(*this, val);
                 bool wasempty = IPCFIFO9.IsEmpty();
                 IPCFIFO9.Write(val);
                 if ((IPCFIFOCnt7 & 0x0400) && wasempty)
@@ -5617,6 +5777,7 @@ void NDS::ARM7IOWrite32(u32 addr, u32 val)
                 IPCFIFOCnt7 |= 0x4000;
             else
             {
+                TraceNSMLIPC7Send(*this, val);
                 bool wasempty = IPCFIFO7.IsEmpty();
                 IPCFIFO7.Write(val);
                 if ((IPCFIFOCnt9 & 0x0400) && wasempty)
