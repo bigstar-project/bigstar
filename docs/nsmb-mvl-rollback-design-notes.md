@@ -14,7 +14,11 @@
 
 開始barrierを既定化した際、ローカル手動launcherのseed自動受信と `DeferNetworkUntilStart` が矛盾した。clientはゲーム起動前にseedを10秒待つが、hostはframe 870までnetworkをpumpしないため受信できず、clientがzero seedのまま開始状態を構築して `seed-mismatch` になった。ローカル2-process起動ではlauncherが共通seedを生成して両roleへ事前設定する。外部hostと組み合わせる `ClientOnly` では受信方式を維持する。`logs/codex-manual-auto-seed-startup-fix` のframe-limitあり・software renderer・seed未指定試験はframe 870で開始同期を承認し、1000 framesを正常終了した。
 
-現在のblockerは、ユーザー実操作での再確認、未通過event（死亡/復帰、土管、item、result/restart）、音声、depth 11超fallbackである。次は既定設定の手動runを行い、差が残れば保存済み完全入力から最初の非収束eventを制御probe化する。correctnessを維持できる場合に限り、中間renderのGPU出力を表示へ残さない方法とframe spikeを最適化する。
+`logs/nsmb-mvl-manual-local-20260818-132459` の初戦は目視上の恒久ずれを再発しなかったが、character・地形、とくにLuigi側で土管のX座標が周期的にぶれた。同一seed・完全入力を毎frame保存した `logs/codex-client-pipe-x-jitter-replay-20260818` でこの形を再現した。Luigi画面の右端pipeは1126=`213..243`（30px）、訂正完了直後1127=`211..249`（38px）、1128=`208..238`（30px）、次の訂正完了直後1129=`206..241`（35px）、1130=`203..233`（30px）だった。左端はcameraに従い毎frame `-2/-3px` で動くのに、訂正直後だけ右端が逆へ伸びるためcamera jitterではない。異なるreplay tickのpipe geometryを同じdisplay frameへ重複submitしている。別のdepth 4 A/Bでも訂正完了3493直後の3494はROM-loop画像だけ緑の土管を先行表示し、lockstep controlには存在せず、3500で全画素一致した。clientはdepth 5/6訂正146件、hostは15件で、Luigi側ほど多tickの重複が強く見えたこととも整合する。通常のrollbackでremote characterが巻き戻ることとは分け、3D FIFO/OAM presentation境界の実装bugとして扱う。
+
+再戦経路はcheckpoint restore、generation 1への更新、start barrierまでは実装済みである。しかしhostの次戦mismatchが旧frame 934等のまま残り、current frame 13051との差をdepth 12117と計算して24回 `cannot arm` になった。再戦ずれは未実装一般ではなく、rollback input timeline/pending mismatchをgeneration境界でreset/rebaseしていない具体的な欠落である。
+
+現在のblockerは、訂正中に必要なgame render callbackを残しながら中間tickの3D FIFO/OAM submissionを表示queueへ蓄積しない境界と、再戦timeline rebaseである。まずframe 1126-1130のpipe幅と3494/3500の画像gateでX重複・先行表示を消し、完全入力stressで恒久stateが戻らないことを同時に確認する。次にgeneration単位のrollback state reset/rebaseと二戦連続gateを実装する。死亡/復帰、土管遷移、item、音声、depth 11超fallbackはその後も未検証として残る。
 
 ## 2026-08-04 Slippi-style game-memory restore
 
