@@ -83,12 +83,35 @@ param(
     [switch]$PacketCaptureAllowPreGame,
     [switch]$TracePlayerLifeChanges,
     [switch]$TracePlayerDefeated,
+    [switch]$RequireStarPickup,
+    [int]$RequireStarPickupPlayer = -1,
+    [switch]$RequirePlayerInventoryUse,
+    [int]$RequirePlayerInventoryUsePlayer = -1,
+    [int]$RequirePlayerInventoryUseStartFrame = 0,
+    [int]$RequirePlayerInventoryUseEndFrame = 0,
+    [switch]$RequirePlayerDeath,
+    [int]$RequirePlayerDeathPlayer = -1,
+    [int]$RequirePlayerDeathStartFrame = 0,
+    [int]$RequirePlayerDeathEndFrame = 0,
+    [switch]$CheckMovingHazardProgressDuringDeath,
+    [int]$CheckMovingHazardProgressStartFrame = 0,
+    [int]$CheckMovingHazardProgressEndFrame = 0,
+    [int]$CheckMovingHazardProgressMinUniqueX = 3,
+    [switch]$CheckVsPipeRespawnVisibility,
+    [int]$CheckVsPipeRespawnVisibilityStartFrame = 0,
+    [int]$CheckVsPipeRespawnVisibilityEndFrame = 0,
     [switch]$PerfBreakdown,
+    [switch]$PerformanceLog,
     [switch]$ForcePlayerPowerups,
     [int]$ForcePlayerPowerupsStartFrame = 0,
     [int]$ForcePlayerPowerupsEndFrame = 0,
     [int]$ForcePlayerPowerup0 = 0,
     [int]$ForcePlayerPowerup1 = 0,
+    [switch]$ForcePlayerInventoryPowerups,
+    [int]$ForcePlayerInventoryPowerupsStartFrame = 0,
+    [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
+    [int]$ForcePlayerInventoryPowerup0 = 0,
+    [int]$ForcePlayerInventoryPowerup1 = 0,
     [switch]$ForcePlayerStarCounters,
     [int]$ForcePlayerStarCountersStartFrame = 900,
     [int]$ForcePlayerStarCountersEndFrame = 1500,
@@ -371,6 +394,43 @@ if ($TracePlayerLifeChanges) {
 if ($TracePlayerDefeated) {
     $common += "-TracePlayerDefeated"
 }
+if ($RequireStarPickup) {
+    $common += @(
+        "-RequireStarPickup",
+        "-RequireStarPickupPlayer", "$RequireStarPickupPlayer"
+    )
+}
+if ($RequirePlayerInventoryUse) {
+    $common += @(
+        "-RequirePlayerInventoryUse",
+        "-RequirePlayerInventoryUsePlayer", "$RequirePlayerInventoryUsePlayer",
+        "-RequirePlayerInventoryUseStartFrame", "$RequirePlayerInventoryUseStartFrame",
+        "-RequirePlayerInventoryUseEndFrame", "$RequirePlayerInventoryUseEndFrame"
+    )
+}
+if ($RequirePlayerDeath) {
+    $common += @(
+        "-RequirePlayerDeath",
+        "-RequirePlayerDeathPlayer", "$RequirePlayerDeathPlayer",
+        "-RequirePlayerDeathStartFrame", "$RequirePlayerDeathStartFrame",
+        "-RequirePlayerDeathEndFrame", "$RequirePlayerDeathEndFrame"
+    )
+}
+if ($CheckMovingHazardProgressDuringDeath) {
+    $common += @(
+        "-CheckMovingHazardProgressDuringDeath",
+        "-CheckMovingHazardProgressStartFrame", "$CheckMovingHazardProgressStartFrame",
+        "-CheckMovingHazardProgressEndFrame", "$CheckMovingHazardProgressEndFrame",
+        "-CheckMovingHazardProgressMinUniqueX", "$CheckMovingHazardProgressMinUniqueX"
+    )
+}
+if ($CheckVsPipeRespawnVisibility) {
+    $common += @(
+        "-CheckVsPipeRespawnVisibility",
+        "-CheckVsPipeRespawnVisibilityStartFrame", "$CheckVsPipeRespawnVisibilityStartFrame",
+        "-CheckVsPipeRespawnVisibilityEndFrame", "$CheckVsPipeRespawnVisibilityEndFrame"
+    )
+}
 if ($ForcePlayerPowerups) {
     $common += @(
         "-ForcePlayerPowerups",
@@ -378,6 +438,15 @@ if ($ForcePlayerPowerups) {
         "-ForcePlayerPowerupsEndFrame", "$ForcePlayerPowerupsEndFrame",
         "-ForcePlayerPowerup0", "$ForcePlayerPowerup0",
         "-ForcePlayerPowerup1", "$ForcePlayerPowerup1"
+    )
+}
+if ($ForcePlayerInventoryPowerups) {
+    $common += @(
+        "-ForcePlayerInventoryPowerups",
+        "-ForcePlayerInventoryPowerupsStartFrame", "$ForcePlayerInventoryPowerupsStartFrame",
+        "-ForcePlayerInventoryPowerupsEndFrame", "$ForcePlayerInventoryPowerupsEndFrame",
+        "-ForcePlayerInventoryPowerup0", "$ForcePlayerInventoryPowerup0",
+        "-ForcePlayerInventoryPowerup1", "$ForcePlayerInventoryPowerup1"
     )
 }
 if ($ForcePlayerStarCounters) {
@@ -644,7 +713,8 @@ foreach ($name in @(
     "MELONDS_NSML_AI_PLAY_LOG_FLUSH_INTERVAL",
     "MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS",
     "MELONDS_NSML_NEUTRALIZE_POLLED_INPUT",
-    "MELONDS_NSML_NEUTRALIZE_POLLED_INPUT_PRESERVE_TOUCH"
+    "MELONDS_NSML_NEUTRALIZE_POLLED_INPUT_PRESERVE_TOUCH",
+    "MELONDS_NSML_PERFORMANCE_LOG"
 )) {
     $oldAIEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
 }
@@ -706,10 +776,20 @@ function Set-PolledInputNeutralizeEnv {
     Remove-Item Env:\MELONDS_NSML_NEUTRALIZE_POLLED_INPUT_PRESERVE_TOUCH -ErrorAction SilentlyContinue
 }
 
+function Set-PerformanceLogEnv {
+    param([string]$RoleLogDir)
+    if ($PerformanceLog) {
+        $env:MELONDS_NSML_PERFORMANCE_LOG = Join-Path $RoleLogDir "melonds-performance.jsonl"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_PERFORMANCE_LOG -ErrorAction SilentlyContinue
+    }
+}
+
 $hostProc = $null
 if (-not $ClientOnly) {
     Set-AIPlayLogEnv -Path $HostAIPlayLog -ObservationV3Path $HostAIObservationV3Log
     Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeHostInput)
+    Set-PerformanceLogEnv -RoleLogDir $hostLog
     $hostProc = Start-Process -FilePath "powershell.exe" `
         -ArgumentList $hostArgs `
         -WorkingDirectory $repoRoot `
@@ -745,6 +825,7 @@ if (-not $ClientOnly) {
 
 Set-AIPlayLogEnv -Path $ClientAIPlayLog -ObservationV3Path $ClientAIObservationV3Log
 Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeClientInput)
+Set-PerformanceLogEnv -RoleLogDir $clientLog
 $clientProc = Start-Process -FilePath "powershell.exe" `
     -ArgumentList $clientArgs `
     -WorkingDirectory $repoRoot `
@@ -774,7 +855,7 @@ if ($ClientOnly) {
     Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
 }
 Write-Host "physical input neutralized host=$([bool]$NeutralizeHostInput) client=$([bool]$NeutralizeClientInput)"
-Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead predictionHorizon=$RollbackPredictionHorizonFrames horizonTimeoutMs=$RollbackHorizonTimeoutMs internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames hostSendDelay=$(if ($HostInputSendDelayFrames -ge 0) { $HostInputSendDelayFrames } else { 'common' }) clientSendDelay=$(if ($ClientInputSendDelayFrames -ge 0) { $ClientInputSendDelayFrames } else { 'common' }) jitter=$InputSendJitterFrames dropModulo=$InputDropModulo dropOffset=$InputDropOffset dropRange=$InputDropStartFrame-$InputDropEndFrame networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame startBarrier=$([bool]$WaitForPeerAtNetplayStart) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
+Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead predictionHorizon=$RollbackPredictionHorizonFrames horizonTimeoutMs=$RollbackHorizonTimeoutMs internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames hostSendDelay=$(if ($HostInputSendDelayFrames -ge 0) { $HostInputSendDelayFrames } else { 'common' }) clientSendDelay=$(if ($ClientInputSendDelayFrames -ge 0) { $ClientInputSendDelayFrames } else { 'common' }) jitter=$InputSendJitterFrames dropModulo=$InputDropModulo dropOffset=$InputDropOffset dropRange=$InputDropStartFrame-$InputDropEndFrame networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame startBarrier=$([bool]$WaitForPeerAtNetplayStart) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown) performanceLog=$([bool]$PerformanceLog)"
 Write-Host "gameplay heartbeat interval=$GameplayHeartbeatInterval"
 if ($HostAIPlayLog -or $ClientAIPlayLog) {
     Write-Host "AI play log host=$(if ($HostAIPlayLog) { $HostAIPlayLog } else { 'off' }) client=$(if ($ClientAIPlayLog) { $ClientAIPlayLog } else { 'off' }) interval=$AIPlayLogInterval flushInterval=$AIPlayLogFlushInterval maxObjects=$AIPlayLogMaxObjects"

@@ -754,7 +754,7 @@ void TestStartupReportFormattingContract() {
   CHECK(!netplayReport.empty() && netplayReport.back() == '\n');
 
   CHECK(Fnv1a64(testReport) == 16774390328572156944ull);
-  CHECK(Fnv1a64(netplayReport) == 4159459785209690147ull);
+  CHECK(Fnv1a64(netplayReport) == 13083541385306128846ull);
 }
 
 void TestAIStartupReportFormattingContract() {

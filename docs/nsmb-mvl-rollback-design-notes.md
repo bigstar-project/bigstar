@@ -6,7 +6,7 @@
 
 ### 現時点の独立判断
 
-Slippiの制御原則、すなわち「少量の実入力遅延を先に入れる」「訂正可能範囲だけ予測する」「上限を越える前にgame frameを止める」「欠落入力を再送する」を本forkにも採用した。前節の`D=2/P=5/H=12`を先に製品候補とする判断は撤回する。ユーザーの評価順が「Bigstar統合より先に既存scriptでP=7まで実装・試験」へ明確化されたためである。現在のscript試験候補はlocal input delay `D=2`、最大連続投機tick `P=7`、ROM側history容量`H=12`とし、Bigstar GUI起動経路は変更しない。後述の手動runで見つかったP=7 transaction境界競合、結果画面で旧generationの遅延入力を失う再戦境界、再戦後の人工送信遅延が生raw frameとgeneration-local logical frameの混用で無効になる試験系の不具合を修正した。さらにcontiguous ACKと未ACK入力再送をbundle protocolへ入れ、周期loss、再順序化、短時間断を実ROMで通した。画像、音声、event、複合WAN条件を残すため、製品完成とは判定しない。
+Slippiの制御原則、すなわち「少量の実入力遅延を先に入れる」「訂正可能範囲だけ予測する」「上限を越える前にgame frameを止める」「欠落入力を再送する」を本forkにも採用した。前節の`D=2/P=5/H=12`を先に製品候補とする判断は撤回する。ユーザーの評価順が「Bigstar統合より先に既存scriptでP=7まで実装・試験」へ明確化されたためである。現在のscript試験候補はlocal input delay `D=2`、最大連続投機tick `P=7`、ROM側history容量`H=12`とし、Bigstar GUI起動経路は変更しない。後述の手動runで見つかったP=7 transaction境界競合、結果画面で旧generationの遅延入力を失う再戦境界、再戦後の人工送信遅延が生raw frameとgeneration-local logical frameの混用で無効になる試験系の不具合を修正した。さらにcontiguous ACKと未ACK入力再送をbundle protocolへ入れ、周期loss、再順序化、短時間断、複合WAN条件、死亡・土管復帰・Big Star取得・stock item消費、音声underrunを実ROMで通した。2D OAMを含む追加画像比較、音声波形・実聴、未網羅eventを残すため、製品完成とは判定しない。
 
 software renderer・60fps制限ありの通常条件 `logs/codex-slippi-horizon7-practical-20260818` は人工送信遅延2-3 frameで、host/client各38訂正、最大log depth `3/2`、最大replay tick `4/3`、active平均`16.664/16.667ms`、最大`28.129/27.640ms`、33ms超0、horizon待機0、26共有heartbeat差0だった。P=7設定そのものによる通常時の性能低下はこのrunでは検出していない。
 
@@ -42,6 +42,14 @@ bundle wire protocolはversion 3へ更新し、各packetにgeneration内の`high
 
 実ROM回帰はすべてsoftware renderer・60fps制限・再戦あり・同一seedで実施した。`logs/codex-slippi-ack-loss20-rematch-20260818` は片道2-3 frame遅延に両role各308 packet（20%）の周期lossを加え、15共有heartbeat差0、active平均`16.736/16.728ms`、最大`109.475/99.882ms`、連続slow最大`1/1`で完走した。`logs/codex-slippi-ack-reorder-rematch-20260818` は1-5 frame jitterで配送順を反転させ、15共有heartbeat差0、active平均`16.730/16.729ms`、連続slow最大`1/1`だった。unit testでもframe 12が11より先に配送されるqueue順を固定した。`logs/codex-slippi-ack-outage5-rematch-20260818` はframe 1100-1104を両方向とも欠落させ、各generationで5連続packet、合計各10 packetを落としても15共有heartbeat差0で復旧した。通常遅延との合算で未確認8 frameへ達したhostはP=7 gateで23msだけ待ってACK履歴を再送し、cannot-arm、failed/capped resimulation、timeoutは0、active平均`16.731/16.727ms`、連続slow最大`1/1`だった。単発最大約95-109msはいずれも既知の再戦bootstrap restore frameであり、ACK再送箇所ではない。
 
+同一複合WAN profile（片道3-5 frame jitter、10%周期loss）で入力遅延だけを変えた再戦runも実施した。全runで両role各154 packetを落とし、15共有heartbeat差、cannot-arm、failed/capped resimulation、timeoutは0だった。`D=0`の`logs/codex-slippi-wan-d0-rematch-20260818`はhostのP=7上限待ち12回、対戦中frame 1208に52.130msのphase spike、clientの連続slow最大2だった。`D=1`の`logs/codex-slippi-wan-d1-rematch-20260818`はhost待ち6回、対戦中25ms超phase spikeなし、連続slow最大1だった。`D=2`の`logs/codex-slippi-wan-d2-rematch-20260818`は両roleとも上限待ち0、対戦中25ms超phase spikeなし、active平均`16.740/16.737ms`、連続slow最大1だった。この条件ではDを減らすほど操作遅延は1 frameずつ改善する一方、horizon待機の余裕を失う。単一seed・単一路線なので普遍値とは断定しないが、製品候補は引き続き`D=2/P=7`とする。
+
+同じD=2複合WAN profileでevent routeを追加した。`logs/codex-slippi-wan-death-pipe-20260818`はLuigi死亡71 trace行、VS pipe transit 15行、死亡中のmoving hazard進行を両roleで検出し、23共有heartbeat差0、active平均は両role`16.666ms`、最大`22.949/21.104ms`、25ms超0だった。`logs/codex-slippi-wan-star-pickup-seed19fe5603-20260818`は既知の決定的seedでframe 1620からLuigiの実Big Star数1を両roleで観測し、19共有heartbeat差0、cannot-arm/failed/capped 0で完走した。先に通常seed `0x9B647D7B`で失敗したrunは両roleとも取得0で対称であり、rollback failureではなくStar初期位置が入力経路外だった。成功runのhostにはhorizon待機8回と単発43.441msがあり、event correctnessは通るが全経路無hitchとは判定しない。
+
+`logs/codex-slippi-wan-stock-item-20260818`はframe 900-2000にLuigiのstock item 2を決定的に用意し、touch後に両roleともframe 2070まで在庫2、2100から0、最終powerup 1を観測した。39/38件のROM-loop訂正、両role各233 packet lossでも19共有heartbeat差0、active平均は両role`16.666ms`、最大`31.649/29.002ms`、33ms超0だった。回帰用に「指定playerの非zero inventoryを観測後、同一区間でzeroへ遷移」の明示gateをmanual/local runnerへ追加した。解析器が入力script終了後の静止を`freeze-suspect`としたのは、heartbeat plateauだけで判定していた偽陽性だった。現在はheartbeat停止に加え、入力保持中のactor座標plateauも同時に閾値を越えた場合だけfreeze疑いとする。
+
+音声についてはSDL callbackが要求したsample数とSPUから読めたsample数を原子的に集計し、性能JSONLへcallback数、underrun回数、不足sample数を120 frame区間で出すようにした。通常起動のemulation hot pathには計測を加えず、性能ログ有効時だけemulation threadから累積値を読む。`logs/codex-slippi-wan-audio-underrun-20260818`の複合WAN・再戦runは、対戦開始後に各role 2250 callbackを観測してunderrun `0/0`、不足sample `0/0`だった。起動前にはhost/client `114/32`回の初期化時underrunがあるため別集計とした。状態差0、active平均`16.727/16.727ms`、連続slow最大1である。これはspeaker供給切れがない証拠だが、既に再生された誤予測音、同じ効果音の重複発行、波形一致、実聴を証明しない。変更後のmelonDS再build、PowerShell 3 scriptの構文解析、CTest全16件は成功した。
+
 `logs/codex-slippi-horizon7-timeout-20260818` はtimeoutだけ500msへ短縮し、入力を100 frame遅らせた。両roleとも連続確定frontierから8個目へ進む前に停止し、`500/501ms`でexit 73となった。製品候補の既定値はSlippiと同じ7秒である。
 
 ### 分離する三つの値
@@ -70,8 +78,10 @@ rollback有効時の現行`InputMaxFrameLead`は、future labelである`sendFra
 4. 完了: 結果sceneでnetwork pumpが止まり、人工遅延queueの最終入力をgeneration resetが消すdeadlockを修正した。8-9 frame遅延queueを残した決定的な再戦runで実payload排出、generation 1 handshake、状態差0を確認し、同じ設定の手動再戦も状態差なしで通った。
 5. 完了: 再戦後に人工送信遅延が無効になるraw/logical frame混用を直した。unit testと実ROM再戦でgeneration 1にも8-9 frame遅延、prediction mismatch、ROM-loop訂正が発生し、状態差0で完走した。修正後の手動再戦も状態差なしだった。8-9 frame時の黒枠の遅さは高遅延条件全体によるため、ユーザー指示どおり今回の修正対象から外した。
 6. 完了: contiguous ACK/未ACK再送をbundle protocolへ加えた。20%周期loss、明示的な逆順配送、5 frame短時間断をscriptと実ROMで試し、再戦後まで状態差0、cannot-arm/cap/fatal/timeout 0、実効約59.8fpsを確認した。重複入力は未ACK再送とhistory bundleで常時発生し、同一frame上書きとして処理される。
-7. 次: 同一の複合WAN profileで`D=0/1/2`を別runとしてA/Bし、操作遅延とhorizon待機・訂正負荷の境界を測る。その後にpipe/player/OAM画像、audio underrun、死亡・復帰・土管・item eventを検証する。P=7の合格条件は、cannot-arm/cap/fatal invariantが0、継続heartbeat差0、通常network条件で対戦中実効`59.5fps`以上、rollback起因の33ms超連続frameが0、訂正区間後の画像差が0、停止後の復帰または理由付き終了とする。
-8. ユーザー指示により、Bigstarの現行`coredelta`起動設定とGUIはこの段階では変更しない。P=7のscript検証を先に続ける。
+7. 完了: 同一の複合WAN profileで`D=0/1/2`を別runとしてA/Bした。`D=0/1/2`でhostのhorizon待機は`12/6/0`となり、D=0だけ対戦中52.130ms spikeと2連続slow frameを生じたため、現時点では`D=2`を維持する。
+8. 完了: 複合WAN条件で死亡・復帰・土管表示、死亡中moving hazard、実Big Star取得、stock item消費を通した。実音声callbackのunderrun計測も追加し、対戦中0回を確認した。既存のpipe 3D geometry gateは上記の中間scene discard修正で通っている。
+9. 次: 同一role・同一seed対照を使ったplayer/2D OAMの訂正直後画像比較、音声波形・重複効果音・実聴、block break・8 coin item・接触など未網羅eventを検証する。P=7の合格条件は、cannot-arm/cap/fatal invariantが0、継続heartbeat差0、通常network条件で対戦中実効`59.5fps`以上、rollback起因の33ms超連続frameが0、訂正区間後の画像差が0、停止後の復帰または理由付き終了とする。
+10. ユーザー指示により、Bigstarの現行`coredelta`起動設定とGUIはこの段階では変更しない。P=7のscript検証を先に続ける。
 
 ## 2026-08-18 Slippi/Tangoの遅延・深度制御再確認
 

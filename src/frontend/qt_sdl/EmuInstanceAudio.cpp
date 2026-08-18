@@ -41,6 +41,9 @@ void EmuInstance::audioInit()
     audioMutedByWindowFocus = false;
     audioSyncCond = SDL_CreateCond();
     audioSyncLock = SDL_CreateMutex();
+    audioCallbackCount.store(0, std::memory_order_relaxed);
+    audioUnderrunCount.store(0, std::memory_order_relaxed);
+    audioUnderrunSamples.store(0, std::memory_order_relaxed);
 
     audioFreq = 48000; // TODO: make both of these configurable?
     audioBufSize = 512;
@@ -174,6 +177,15 @@ void EmuInstance::audioCallback(void* data, Uint8* stream, int len)
     int num_in = inst->nds->SPU.ReadOutput((s16*) stream, len_in);
     SDL_CondSignal(inst->audioSyncCond);
     SDL_UnlockMutex(inst->audioSyncLock);
+
+    inst->audioCallbackCount.fetch_add(1, std::memory_order_relaxed);
+    if (num_in < len_in)
+    {
+        inst->audioUnderrunCount.fetch_add(1, std::memory_order_relaxed);
+        inst->audioUnderrunSamples.fetch_add(
+            static_cast<melonDS::u64>(len_in - num_in),
+            std::memory_order_relaxed);
+    }
 
     if ((num_in < 1) || inst->audioMutedByWindowFocus || inst->audioMutedToggle || inst->audioMutedByFastForward)
     {

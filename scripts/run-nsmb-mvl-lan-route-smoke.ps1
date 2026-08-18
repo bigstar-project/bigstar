@@ -263,6 +263,10 @@ param(
     [int]$CheckVsPipeRespawnVisibilityEndFrame = 0,
     [switch]$RequireStarPickup,
     [int]$RequireStarPickupPlayer = -1,
+    [switch]$RequirePlayerInventoryUse,
+    [int]$RequirePlayerInventoryUsePlayer = -1,
+    [int]$RequirePlayerInventoryUseStartFrame = 0,
+    [int]$RequirePlayerInventoryUseEndFrame = 0,
     [switch]$RequirePlayerDeath,
     [int]$RequirePlayerDeathPlayer = -1,
     [int]$RequirePlayerDeathStartFrame = 0,
@@ -2506,6 +2510,49 @@ if ($CheckVsPipeRespawnVisibility) {
 
         if ($checked -eq 0) {
             throw "VS pipe respawn visibility check found no vsPipeTransitState rows for $($item.Role). See $($item.Path)"
+        }
+    }
+}
+
+if ($RequirePlayerInventoryUse) {
+    if ($RequirePlayerInventoryUsePlayer -lt -1 -or $RequirePlayerInventoryUsePlayer -gt 1) {
+        throw "RequirePlayerInventoryUsePlayer must be -1, 0, or 1"
+    }
+
+    foreach ($item in @($roleInfos | ForEach-Object { @{ Path = $_.GameState; Role = $_.Role } })) {
+        if (-not (Test-Path $item.Path)) {
+            throw "player inventory use check requires game-state trace for $($item.Role): $($item.Path)"
+        }
+        $rows = @(Import-Csv $item.Path)
+        $used = $false
+        $players = if ($RequirePlayerInventoryUsePlayer -ge 0) {
+            @($RequirePlayerInventoryUsePlayer)
+        } else {
+            @(0, 1)
+        }
+        foreach ($player in $players) {
+            $inventoryField = "player${player}InventoryPowerup"
+            $sawInventory = $false
+            foreach ($row in $rows) {
+                $frame = [int]$row.frame
+                if ($frame -lt $RequirePlayerInventoryUseStartFrame -or
+                    ($RequirePlayerInventoryUseEndFrame -gt 0 -and $frame -gt $RequirePlayerInventoryUseEndFrame)) {
+                    continue
+                }
+                $inventory = Convert-TraceHexToInt64 $row.$inventoryField
+                if ($inventory -gt 0) {
+                    $sawInventory = $true
+                } elseif ($sawInventory) {
+                    $used = $true
+                    break
+                }
+            }
+            if ($used) {
+                break
+            }
+        }
+        if (-not $used) {
+            throw "player inventory use check failed for $($item.Role): player=$RequirePlayerInventoryUsePlayer. See $($item.Path)"
         }
     }
 }

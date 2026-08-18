@@ -19,6 +19,8 @@
 #ifndef EMUINSTANCE_H
 #define EMUINSTANCE_H
 
+#include <atomic>
+
 #include <SDL2/SDL.h>
 
 #include "Platform.h"
@@ -322,6 +324,9 @@ private:
     bool audioMutedByWindowFocus;
     SDL_cond* audioSyncCond;
     SDL_mutex* audioSyncLock;
+    std::atomic<melonDS::u64> audioCallbackCount {0};
+    std::atomic<melonDS::u64> audioUnderrunCount {0};
+    std::atomic<melonDS::u64> audioUnderrunSamples {0};
 
     int mpAudioMode;
 

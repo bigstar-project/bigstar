@@ -642,6 +642,7 @@ foreach ($role in @("host", "client")) {
     } elseif ($wrapperFailure) {
         $status = "failed"
     } elseif ($gameplayPlateau.Rows -ge $GameplayFreezeMinRows -and
+              $maxPlateau.Rows -ge $GameplayFreezeMinRows -and
               -not $hasResultScene) {
         $status = "freeze-suspect"
     }

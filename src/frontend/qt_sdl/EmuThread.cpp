@@ -155,6 +155,9 @@ struct NsmlPerformanceSample
     unsigned int LimitSleepCalls = 0;
     melonDS::u32 AudioQueueBefore = 0;
     melonDS::u32 AudioQueueAfter = 0;
+    melonDS::u64 AudioCallbackCount = 0;
+    melonDS::u64 AudioUnderrunCount = 0;
+    melonDS::u64 AudioUnderrunSamples = 0;
     int Processor = -1;
     NsmbMvlNetplay::PerformanceCounters Netplay;
 };
@@ -350,6 +353,12 @@ private:
             - LastSummaryNetplay.FrameLeadThrottleCount;
         const auto throttleUsDelta = last.Netplay.FrameLeadThrottleUs
             - LastSummaryNetplay.FrameLeadThrottleUs;
+        const auto audioCallbackCountDelta = last.AudioCallbackCount
+            - LastSummaryAudioCallbackCount;
+        const auto audioUnderrunCountDelta = last.AudioUnderrunCount
+            - LastSummaryAudioUnderrunCount;
+        const auto audioUnderrunSamplesDelta = last.AudioUnderrunSamples
+            - LastSummaryAudioUnderrunSamples;
 
         std::ostringstream line;
         line << std::fixed << std::setprecision(3)
@@ -392,6 +401,9 @@ private:
              << ",\"migrations\":" << processorMigrations << "}"
              << ",\"audio_queue\":{\"before_last\":" << last.AudioQueueBefore
              << ",\"after_last\":" << last.AudioQueueAfter << "}"
+             << ",\"audio_callback\":{\"count_delta\":" << audioCallbackCountDelta
+             << ",\"underrun_count_delta\":" << audioUnderrunCountDelta
+             << ",\"underrun_samples_delta\":" << audioUnderrunSamplesDelta << "}"
              << ",\"netplay\":{\"input_lead\":" << last.Netplay.InputLead
              << ",\"last_sent\":" << last.Netplay.LastSentInputFrame
              << ",\"last_received\":" << last.Netplay.LastReceivedInputFrame
@@ -405,6 +417,9 @@ private:
              << "}\n";
         Write(line.str(), true);
         LastSummaryNetplay = last.Netplay;
+        LastSummaryAudioCallbackCount = last.AudioCallbackCount;
+        LastSummaryAudioUnderrunCount = last.AudioUnderrunCount;
+        LastSummaryAudioUnderrunSamples = last.AudioUnderrunSamples;
         Samples.clear();
     }
 
@@ -432,6 +447,9 @@ private:
              << ",\"limit_sleep_calls\":" << sample.LimitSleepCalls
              << ",\"audio_queue_before\":" << sample.AudioQueueBefore
              << ",\"audio_queue_after\":" << sample.AudioQueueAfter
+             << ",\"audio_callback_count\":" << sample.AudioCallbackCount
+             << ",\"audio_underrun_count\":" << sample.AudioUnderrunCount
+             << ",\"audio_underrun_samples\":" << sample.AudioUnderrunSamples
              << ",\"processor\":" << sample.Processor
              << ",\"input_lead\":" << sample.Netplay.InputLead
              << ",\"remote_wait_total_ms\":" << static_cast<double>(sample.Netplay.RemoteInputWaitUs) / 1000.0
@@ -476,6 +494,9 @@ private:
     unsigned long long LastSpikeUnixMs = 0;
     double LastWriteMs = 0.0;
     NsmbMvlNetplay::PerformanceCounters LastSummaryNetplay;
+    melonDS::u64 LastSummaryAudioCallbackCount = 0;
+    melonDS::u64 LastSummaryAudioUnderrunCount = 0;
+    melonDS::u64 LastSummaryAudioUnderrunSamples = 0;
 };
 
 }
@@ -1149,6 +1170,12 @@ frame_limit_done:
                 sample.LimitSleepCalls = nsmlLimitSleepCalls;
                 sample.AudioQueueBefore = nsmlAudioQueueBefore;
                 sample.AudioQueueAfter = nsmlAudioQueueAfter;
+                sample.AudioCallbackCount = emuInstance->audioCallbackCount.load(
+                    std::memory_order_relaxed);
+                sample.AudioUnderrunCount = emuInstance->audioUnderrunCount.load(
+                    std::memory_order_relaxed);
+                sample.AudioUnderrunSamples = emuInstance->audioUnderrunSamples.load(
+                    std::memory_order_relaxed);
                 sample.Processor = NsmlCurrentProcessorNumber();
                 sample.Netplay = NsmbMvlNetplay::GetPerformanceCounters();
                 nsmlPerformanceLog.Add(sample);
