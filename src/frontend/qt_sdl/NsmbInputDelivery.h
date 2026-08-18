@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <functional>
 #include <map>
+#include <optional>
 #include <vector>
 
 namespace NsmbMvlNetplay::InputDelivery
@@ -41,6 +42,13 @@ std::vector<InputProtocol::FramedInput> SelectBundleInputs(
     const InputState& currentInput,
     int history,
     const std::map<melonDS::u32, InputState>& localInputs);
+std::vector<InputProtocol::FramedInput> SelectUnackedInputs(
+    melonDS::u32 generation,
+    melonDS::u32 frame,
+    const InputState& currentInput,
+    int maxEntries,
+    const std::map<melonDS::u32, InputState>& localInputs,
+    std::optional<melonDS::u32> remoteAckFrame);
 bool ShouldReleaseDelayedInput(
     melonDS::u32 currentFrame,
     std::chrono::steady_clock::time_point now,
@@ -57,6 +65,13 @@ struct PreparedSend
     std::vector<char> ImmediatePayload;
 };
 
+enum class AckUpdate
+{
+    Advanced,
+    Stale,
+    Future,
+};
+
 class Runtime
 {
 public:
@@ -68,7 +83,8 @@ public:
         const InputState& input,
         const SendConfig& config,
         const std::map<melonDS::u32, InputState>& localInputs,
-        Clock::time_point now);
+        Clock::time_point now,
+        std::optional<melonDS::u32> ackFrameToSend = std::nullopt);
     void DrainDue(
         melonDS::u32 currentFrame,
         Clock::time_point now,
@@ -80,7 +96,13 @@ public:
         melonDS::u32 frame,
         const InputState& input,
         int bundleHistory,
-        const std::map<melonDS::u32, InputState>& localInputs) const;
+        const std::map<melonDS::u32, InputState>& localInputs,
+        std::optional<melonDS::u32> ackFrameToSend = std::nullopt) const;
+    AckUpdate RecordRemoteAck(
+        melonDS::u32 ackFrame,
+        melonDS::u32 lastSentInputFrame,
+        melonDS::u32 noFrame);
+    std::optional<melonDS::u32> RemoteAckFrame() const;
     void Clear();
     std::size_t PendingCount() const;
 
@@ -93,6 +115,7 @@ private:
     };
 
     std::vector<PendingPayload> Pending_;
+    std::optional<melonDS::u32> RemoteAckFrame_;
 };
 
 }

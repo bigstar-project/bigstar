@@ -103,6 +103,59 @@ void TestBundleInputSelection()
     CHECK(entries[2].Input.KeyMask == 0xFDF);
 }
 
+void TestUnackedBundleSelectionAndAckWindow()
+{
+    using NsmbMvlNetplay::InputDelivery::AckUpdate;
+    using NsmbMvlNetplay::InputDelivery::SelectUnackedInputs;
+    std::map<melonDS::u32, NsmbMvlNetplay::InputState> localInputs;
+    for (melonDS::u32 frame = 100; frame <= 110; frame++)
+        localInputs[frame].KeyMask = 0xF00u + frame;
+    NsmbMvlNetplay::InputState current = localInputs[110];
+
+    auto entries = SelectUnackedInputs(
+        3, 110, current, 4, localInputs, 106);
+    CHECK(entries.size() == 4);
+    CHECK(entries[0].Frame == 107);
+    CHECK(entries[3].Frame == 110);
+
+    entries = SelectUnackedInputs(
+        3, 110, current, 4, localInputs, std::nullopt);
+    CHECK(entries.size() == 4);
+    CHECK(entries[0].Frame == 100);
+    CHECK(entries[3].Frame == 103);
+
+    Runtime runtime;
+    CHECK(runtime.RecordRemoteAck(106, 110, 0) == AckUpdate::Advanced);
+    CHECK(runtime.RemoteAckFrame() == 106);
+    CHECK(runtime.RecordRemoteAck(105, 110, 0) == AckUpdate::Stale);
+    CHECK(runtime.RecordRemoteAck(111, 110, 0) == AckUpdate::Future);
+    CHECK(runtime.RemoteAckFrame() == 106);
+
+    const auto payload = runtime.BuildPayload(
+        3, 110, current, 3, localInputs, 205);
+    std::optional<melonDS::u32> ackFrame;
+    std::vector<NsmbMvlNetplay::InputProtocol::FramedInput> decoded;
+    CHECK(NsmbMvlNetplay::InputProtocol::DecodeInputBundle(
+        payload.data(), payload.size(), decoded, &ackFrame));
+    CHECK(ackFrame == 205);
+    CHECK(decoded.size() == 4);
+    CHECK(decoded[0].Frame == 107);
+    CHECK(decoded[3].Frame == 110);
+
+    runtime.Clear();
+    CHECK(runtime.RecordRemoteAck(100, 110, 0) == AckUpdate::Advanced);
+    const auto fullWindowPayload = runtime.BuildPayload(
+        3, 110, current, 3, localInputs, 205);
+    CHECK(NsmbMvlNetplay::InputProtocol::DecodeInputBundle(
+        fullWindowPayload.data(), fullWindowPayload.size(), decoded));
+    CHECK(decoded.size() == 10);
+    CHECK(decoded[0].Frame == 101);
+    CHECK(decoded[9].Frame == 110);
+
+    runtime.Clear();
+    CHECK(!runtime.RemoteAckFrame());
+}
+
 void TestDelayedInputReleaseUsesFrameOrWallClock()
 {
     const auto now = std::chrono::steady_clock::time_point(std::chrono::seconds(10));
@@ -230,6 +283,49 @@ void TestRuntimeOwnsDelayedQueue()
     CHECK(runtime.PendingCount() == 0);
 }
 
+void TestJitterCanDeliverPacketsOutOfOrder()
+{
+    Runtime runtime;
+    std::map<melonDS::u32, NsmbMvlNetplay::InputState> localInputs;
+    NsmbMvlNetplay::InputState input;
+    SendConfig config;
+    config.DelayFrames = 0;
+    config.JitterFrames = 2;
+    const auto now = Runtime::Clock::time_point(std::chrono::seconds(10));
+
+    input.KeyMask = 0xFFE;
+    const auto delayed = runtime.Prepare(
+        7, 11, input, config, localInputs, now);
+    CHECK(delayed.ImmediatePayload.empty());
+    CHECK(delayed.Decision.DelayFrames == 2);
+
+    input.KeyMask = 0xFFD;
+    const auto immediate = runtime.Prepare(
+        7, 12, input, config, localInputs, now);
+    CHECK(!immediate.ImmediatePayload.empty());
+    CHECK(immediate.Decision.DelayFrames == 0);
+
+    std::vector<melonDS::u32> deliveryOrder;
+    NsmbMvlNetplay::InputProtocol::FramedInput decoded;
+    CHECK(NsmbMvlNetplay::InputProtocol::DecodeInput(
+        immediate.ImmediatePayload.data(), immediate.ImmediatePayload.size(),
+        decoded));
+    deliveryOrder.push_back(decoded.Frame);
+    runtime.DrainDue(
+        13, now,
+        [&deliveryOrder](const std::vector<char>& payload) {
+            NsmbMvlNetplay::InputProtocol::FramedInput entry;
+            CHECK(NsmbMvlNetplay::InputProtocol::DecodeInput(
+                payload.data(), payload.size(), entry));
+            deliveryOrder.push_back(entry.Frame);
+        });
+
+    CHECK(deliveryOrder.size() == 2);
+    CHECK(deliveryOrder[0] == 12);
+    CHECK(deliveryOrder[1] == 11);
+    CHECK(runtime.PendingCount() == 0);
+}
+
 void TestRuntimeDrainsAllForGenerationTransition()
 {
     Runtime runtime;
@@ -271,10 +367,12 @@ int main()
     TestDropModuloAndRangeBoundaries();
     TestBundleAndDelayBoundaries();
     TestBundleInputSelection();
+    TestUnackedBundleSelectionAndAckWindow();
     TestDelayedInputReleaseUsesFrameOrWallClock();
     TestDelayProgressUsesGenerationLocalInputFrame();
     TestRuntimePreparesWirePayloads();
     TestRuntimeOwnsDelayedQueue();
+    TestJitterCanDeliverPacketsOutOfOrder();
     TestRuntimeDrainsAllForGenerationTransition();
 
     if (Failures != 0)

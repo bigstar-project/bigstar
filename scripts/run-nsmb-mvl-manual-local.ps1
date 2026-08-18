@@ -9,6 +9,10 @@ param(
     [int]$InternalWaitTimeoutMs = 0,
     [int]$InputSendDelayFrames = 0,
     [int]$InputSendJitterFrames = 0,
+    [int]$InputDropModulo = 0,
+    [int]$InputDropOffset = 0,
+    [int]$InputDropStartFrame = 0,
+    [int]$InputDropEndFrame = 0,
     [int]$HostInputSendDelayFrames = -1,
     [int]$ClientInputSendDelayFrames = -1,
     [switch]$InputUnreliable,
@@ -320,6 +324,10 @@ $common = @(
     "-InputMaxFrameLead", "$InputMaxFrameLead",
     "-InputSendDelayFrames", "$InputSendDelayFrames",
     "-InputSendJitterFrames", "$InputSendJitterFrames",
+    "-InputDropModulo", "$InputDropModulo",
+    "-InputDropOffset", "$InputDropOffset",
+    "-InputDropStartFrame", "$InputDropStartFrame",
+    "-InputDropEndFrame", "$InputDropEndFrame",
     "-PacketBridgeJitHelperPatch",
     "-PacketBridgeJitHelperPatchFrame", "$PacketBridgeStartFrame",
     "-PacketBridgeStartFrame", "$PacketBridgeStartFrame",
@@ -766,7 +774,7 @@ if ($ClientOnly) {
     Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
 }
 Write-Host "physical input neutralized host=$([bool]$NeutralizeHostInput) client=$([bool]$NeutralizeClientInput)"
-Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead predictionHorizon=$RollbackPredictionHorizonFrames horizonTimeoutMs=$RollbackHorizonTimeoutMs internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames hostSendDelay=$(if ($HostInputSendDelayFrames -ge 0) { $HostInputSendDelayFrames } else { 'common' }) clientSendDelay=$(if ($ClientInputSendDelayFrames -ge 0) { $ClientInputSendDelayFrames } else { 'common' }) jitter=$InputSendJitterFrames networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame startBarrier=$([bool]$WaitForPeerAtNetplayStart) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
+Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead predictionHorizon=$RollbackPredictionHorizonFrames horizonTimeoutMs=$RollbackHorizonTimeoutMs internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames hostSendDelay=$(if ($HostInputSendDelayFrames -ge 0) { $HostInputSendDelayFrames } else { 'common' }) clientSendDelay=$(if ($ClientInputSendDelayFrames -ge 0) { $ClientInputSendDelayFrames } else { 'common' }) jitter=$InputSendJitterFrames dropModulo=$InputDropModulo dropOffset=$InputDropOffset dropRange=$InputDropStartFrame-$InputDropEndFrame networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame startBarrier=$([bool]$WaitForPeerAtNetplayStart) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
 Write-Host "gameplay heartbeat interval=$GameplayHeartbeatInterval"
 if ($HostAIPlayLog -or $ClientAIPlayLog) {
     Write-Host "AI play log host=$(if ($HostAIPlayLog) { $HostAIPlayLog } else { 'off' }) client=$(if ($ClientAIPlayLog) { $ClientAIPlayLog } else { 'off' }) interval=$AIPlayLogInterval flushInterval=$AIPlayLogFlushInterval maxObjects=$AIPlayLogMaxObjects"

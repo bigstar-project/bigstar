@@ -74,6 +74,8 @@ param(
     [int]$InputBundleHistory = 0,
     [int]$InputDropModulo = 0,
     [int]$InputDropOffset = 0,
+    [int]$InputDropStartFrame = 0,
+    [int]$InputDropEndFrame = 0,
     [switch]$Rollback,
     [string]$RollbackBackend = "",
     [int]$RollbackWindow = 20,
@@ -1397,6 +1399,13 @@ function Start-MelonLANProcess {
         } else {
             Remove-Item Env:\MELONDS_NSML_INPUT_DROP_MODULO -ErrorAction SilentlyContinue
             Remove-Item Env:\MELONDS_NSML_INPUT_DROP_OFFSET -ErrorAction SilentlyContinue
+        }
+        if ($InputDropStartFrame -gt 0) {
+            $env:MELONDS_NSML_INPUT_DROP_START_FRAME = "$InputDropStartFrame"
+            $env:MELONDS_NSML_INPUT_DROP_END_FRAME = "$InputDropEndFrame"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_INPUT_DROP_START_FRAME -ErrorAction SilentlyContinue
+            Remove-Item Env:\MELONDS_NSML_INPUT_DROP_END_FRAME -ErrorAction SilentlyContinue
         }
         if ($Rollback) {
             $env:MELONDS_NSML_ROLLBACK = "1"

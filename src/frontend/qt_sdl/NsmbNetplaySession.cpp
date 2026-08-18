@@ -55,6 +55,11 @@ void SendInputPayloadNowLocked(Context context, const void *data,
   TraceHangPhase(context, "end", "enet-send-input", -1, frame, frame, frame);
 }
 
+melonDS::u32 InputPacketFlags(Context context) {
+  return context.Input.UseHistoryBundle ? ENET_PACKET_FLAG_UNSEQUENCED
+                                        : ENET_PACKET_FLAG_RELIABLE;
+}
+
 void FlushDelayedInputsLocked(Context context, melonDS::u32 frame) {
   if (!context.Transport.IsConnected() ||
       context.State.Delivery.PendingCount() == 0)
@@ -69,7 +74,7 @@ void FlushDelayedInputsLocked(Context context, melonDS::u32 frame) {
       progressFrame, std::chrono::steady_clock::now(),
       [context](const std::vector<char> &payload) {
         SendInputPayloadNowLocked(context, payload.data(), payload.size(),
-                                  ENET_PACKET_FLAG_RELIABLE);
+                                  InputPacketFlags(context));
       });
 }
 
@@ -171,12 +176,28 @@ void HandleReceivedInputBundleLocked(Context context, const void *data,
                                      std::size_t size,
                                      melonDS::u32 localFrame) {
   std::vector<InputProtocol::FramedInput> entries;
-  if (!InputProtocol::DecodeInputBundle(data, size, entries))
+  std::optional<melonDS::u32> ackFrame;
+  if (!InputProtocol::DecodeInputBundle(data, size, entries, &ackFrame))
     return;
   if (!entries.empty() &&
       !IsCurrentGeneration(context, entries.front().Generation,
                            "input-bundle"))
     return;
+  if (ackFrame) {
+    const auto update = context.State.Delivery.RecordRemoteAck(
+        *ackFrame, context.Inputs.LastSentInputFrame, kNoFrame);
+    if (context.Input.NetplayTrace &&
+        (update == InputDelivery::AckUpdate::Advanced ||
+         update == InputDelivery::AckUpdate::Future)) {
+      TraceOutput::Printf(
+          "NSMB InputNetplay: remote ACK generation=%u frame=%u "
+          "status=%s lastSent=%u\n",
+          context.State.Handshake.Generation(), *ackFrame,
+          update == InputDelivery::AckUpdate::Advanced ? "advanced"
+                                                       : "future-rejected",
+          context.Inputs.LastSentInputFrame);
+    }
+  }
   for (const InputProtocol::FramedInput &entry : entries)
     StoreRemoteInputLocked(context, entry.Frame, entry.Input, localFrame);
 }
@@ -390,7 +411,7 @@ void FlushPendingInputsLocked(Context context) {
   context.State.Delivery.DrainAll(
       [context](const std::vector<char> &payload) {
         SendInputPayloadNowLocked(context, payload.data(), payload.size(),
-                                  ENET_PACKET_FLAG_RELIABLE);
+                                  InputPacketFlags(context));
       });
   context.Transport.Flush();
   TraceOutput::Printf(
@@ -522,7 +543,8 @@ void SendInputLocked(Context context, const Hooks &hooks, melonDS::u32 frame,
        context.Input.DropStartFrame, context.Input.DropEndFrame,
        context.Input.SendDelayFrames, context.Input.SendJitterFrames,
        context.Input.SendDelayStartFrame, context.Input.SendDelayEndFrame},
-      context.Inputs.LocalInputs, std::chrono::steady_clock::now());
+      context.Inputs.LocalInputs, std::chrono::steady_clock::now(),
+      context.Inputs.HighestContiguousRemoteFrame());
   if (prepared.Decision.Drop) {
     if (context.Input.NetplayTrace)
       TraceOutput::Printf(
@@ -535,7 +557,7 @@ void SendInputLocked(Context context, const Hooks &hooks, melonDS::u32 frame,
   if (!prepared.ImmediatePayload.empty())
     SendInputPayloadNowLocked(context, prepared.ImmediatePayload.data(),
                               prepared.ImmediatePayload.size(),
-                              ENET_PACKET_FLAG_RELIABLE);
+                              InputPacketFlags(context));
 
   if ((context.Bootstrap.InputTraceEnabled || context.Input.NetplayTrace) &&
       frame != context.Inputs.LastTracedSentInputFrame &&
@@ -572,10 +594,11 @@ void MaybeResendLatestInputForFrameLeadLocked(Context context, const Hooks &) {
   const std::vector<char> payload = context.State.Delivery.BuildPayload(
       context.State.Handshake.Generation(), context.Inputs.LastSentInputFrame,
       input->second,
-      context.Input.BundleHistory, context.Inputs.LocalInputs);
+      context.Input.BundleHistory, context.Inputs.LocalInputs,
+      context.Inputs.HighestContiguousRemoteFrame());
   const std::size_t payloadBytes = payload.size();
   SendInputPayloadNowLocked(context, payload.data(), payload.size(),
-                            ENET_PACKET_FLAG_RELIABLE);
+                            InputPacketFlags(context));
   context.Inputs.LastInputFrameLeadResendAt = now;
   context.Inputs.InputFrameLeadResendCount++;
   if (context.Input.NetplayTrace) {

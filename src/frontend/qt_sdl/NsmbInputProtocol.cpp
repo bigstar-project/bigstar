@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <limits>
 
 namespace NsmbMvlNetplay::InputProtocol
 {
@@ -10,8 +11,10 @@ namespace
 {
 
 constexpr melonDS::u32 kMagic = 0x4C4D534E; // "NSML", little endian
-constexpr melonDS::u32 kVersion = 2;
+constexpr melonDS::u32 kInputVersion = 2;
+constexpr melonDS::u32 kInputBundleVersion = 3;
 constexpr melonDS::u32 kInputBundleKind = 0x42504E49; // "INPB", little endian
+constexpr melonDS::u32 kNoAckFrame = std::numeric_limits<melonDS::u32>::max();
 
 struct WireInput
 {
@@ -33,6 +36,7 @@ struct WireInputBundleHeader
     melonDS::u32 Kind;
     melonDS::u32 Generation;
     melonDS::u32 Count;
+    melonDS::u32 AckFrame;
 };
 
 struct WireInputBundleEntry
@@ -53,7 +57,7 @@ WireInput ToWireInput(const FramedInput& input)
 {
     WireInput wire {};
     wire.Magic = kMagic;
-    wire.Version = kVersion;
+    wire.Version = kInputVersion;
     wire.Generation = input.Generation;
     wire.Frame = input.Frame;
     wire.KeyMask = input.Input.KeyMask;
@@ -87,17 +91,20 @@ std::vector<char> EncodeInput(const FramedInput& input)
     return payload;
 }
 
-std::vector<char> EncodeInputBundle(const std::vector<FramedInput>& inputs)
+std::vector<char> EncodeInputBundle(
+    const std::vector<FramedInput>& inputs,
+    std::optional<melonDS::u32> ackFrame)
 {
     if (inputs.empty() || inputs.size() > kMaxInputBundleEntries)
         return {};
 
     WireInputBundleHeader header {};
     header.Magic = kMagic;
-    header.Version = kVersion;
+    header.Version = kInputBundleVersion;
     header.Kind = kInputBundleKind;
     header.Generation = inputs.front().Generation;
     header.Count = static_cast<melonDS::u32>(inputs.size());
+    header.AckFrame = ackFrame.value_or(kNoAckFrame);
 
     std::vector<WireInputBundleEntry> entries;
     entries.reserve(inputs.size());
@@ -127,7 +134,7 @@ bool DecodeInput(const void* data, std::size_t size, FramedInput& input)
         return false;
     WireInput wire;
     std::memcpy(&wire, data, sizeof(wire));
-    if (wire.Magic != kMagic || wire.Version != kVersion)
+    if (wire.Magic != kMagic || wire.Version != kInputVersion)
         return false;
     input = FromWireInput(wire);
     return true;
@@ -136,16 +143,19 @@ bool DecodeInput(const void* data, std::size_t size, FramedInput& input)
 bool DecodeInputBundle(
     const void* data,
     std::size_t size,
-    std::vector<FramedInput>& inputs)
+    std::vector<FramedInput>& inputs,
+    std::optional<melonDS::u32>* ackFrame)
 {
     inputs.clear();
+    if (ackFrame)
+        ackFrame->reset();
     if (!data || size < sizeof(WireInputBundleHeader))
         return false;
 
     WireInputBundleHeader header;
     std::memcpy(&header, data, sizeof(header));
     if (header.Magic != kMagic ||
-        header.Version != kVersion ||
+        header.Version != kInputBundleVersion ||
         header.Kind != kInputBundleKind ||
         header.Count == 0 ||
         header.Count > kMaxInputBundleEntries ||
@@ -153,6 +163,9 @@ bool DecodeInputBundle(
     {
         return false;
     }
+
+    if (ackFrame && header.AckFrame != kNoAckFrame)
+        *ackFrame = header.AckFrame;
 
     const auto* bytes = static_cast<const std::uint8_t*>(data) + sizeof(header);
     inputs.reserve(header.Count);

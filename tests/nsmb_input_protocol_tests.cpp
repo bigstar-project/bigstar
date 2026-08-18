@@ -67,11 +67,12 @@ void TestBundleGoldenBytesAndRoundTrip()
     inputs[1].Input.TouchX = 10;
     inputs[1].Input.TouchY = 20;
 
-    const auto payload = NsmbMvlNetplay::InputProtocol::EncodeInputBundle(inputs);
+    const auto payload = NsmbMvlNetplay::InputProtocol::EncodeInputBundle(inputs, 6);
     const std::vector<std::uint8_t> expected {
-        0x4E, 0x53, 0x4D, 0x4C, 0x02, 0x00, 0x00, 0x00,
+        0x4E, 0x53, 0x4D, 0x4C, 0x03, 0x00, 0x00, 0x00,
         0x49, 0x4E, 0x50, 0x42, 0x03, 0x00, 0x00, 0x00,
         0x02, 0x00, 0x00, 0x00,
+        0x06, 0x00, 0x00, 0x00,
         0x07, 0x00, 0x00, 0x00, 0xFE, 0x0F, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x08, 0x00, 0x00, 0x00, 0xDF, 0x0F, 0x00, 0x00,
@@ -80,7 +81,10 @@ void TestBundleGoldenBytesAndRoundTrip()
     CHECK(Bytes(payload) == expected);
 
     std::vector<NsmbMvlNetplay::InputProtocol::FramedInput> decoded;
-    CHECK(NsmbMvlNetplay::InputProtocol::DecodeInputBundle(payload.data(), payload.size(), decoded));
+    std::optional<melonDS::u32> ackFrame;
+    CHECK(NsmbMvlNetplay::InputProtocol::DecodeInputBundle(
+        payload.data(), payload.size(), decoded, &ackFrame));
+    CHECK(ackFrame == 6);
     CHECK(decoded.size() == 2);
     CHECK(decoded[0].Generation == 3);
     CHECK(decoded[0].Frame == 7);
@@ -89,6 +93,13 @@ void TestBundleGoldenBytesAndRoundTrip()
     CHECK(decoded[1].Input.Touching);
     CHECK(decoded[1].Input.TouchX == 10);
     CHECK(decoded[1].Input.TouchY == 20);
+
+    const auto noAckPayload =
+        NsmbMvlNetplay::InputProtocol::EncodeInputBundle(inputs);
+    ackFrame = 99;
+    CHECK(NsmbMvlNetplay::InputProtocol::DecodeInputBundle(
+        noAckPayload.data(), noAckPayload.size(), decoded, &ackFrame));
+    CHECK(!ackFrame);
 }
 
 void TestMalformedPacketsAreRejected()

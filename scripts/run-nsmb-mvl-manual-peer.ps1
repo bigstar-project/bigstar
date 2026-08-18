@@ -8,6 +8,10 @@ param(
     [int]$InputDelayFrames = 4,
     [int]$InputSendDelayFrames = 0,
     [int]$InputSendJitterFrames = 0,
+    [int]$InputDropModulo = 0,
+    [int]$InputDropOffset = 0,
+    [int]$InputDropStartFrame = 0,
+    [int]$InputDropEndFrame = 0,
     [int]$InputMaxFrameLead = 4,
     [int]$InternalWaitTimeoutMs = 0,
     [switch]$InputUnreliable,
@@ -138,6 +142,10 @@ $params = @{
     InputDelayFrames = $InputDelayFrames
     InputSendDelayFrames = $InputSendDelayFrames
     InputSendJitterFrames = $InputSendJitterFrames
+    InputDropModulo = $InputDropModulo
+    InputDropOffset = $InputDropOffset
+    InputDropStartFrame = $InputDropStartFrame
+    InputDropEndFrame = $InputDropEndFrame
     InputMaxFrameLead = $InputMaxFrameLead
     PacketBridgeJitHelperPatch = $true
     PacketBridgeJitHelperPatchFrame = 840

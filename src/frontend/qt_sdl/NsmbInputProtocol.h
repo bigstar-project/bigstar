@@ -4,13 +4,14 @@
 #include "NsmbMvlNetplayRuntime.h"
 
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 namespace NsmbMvlNetplay::InputProtocol
 {
 
 constexpr std::size_t kInputPacketSize = 28;
-constexpr std::size_t kInputBundleHeaderSize = 20;
+constexpr std::size_t kInputBundleHeaderSize = 24;
 constexpr std::size_t kInputBundleEntrySize = 16;
 constexpr std::size_t kMaxInputBundleEntries = 32;
 
@@ -22,12 +23,15 @@ struct FramedInput
 };
 
 std::vector<char> EncodeInput(const FramedInput& input);
-std::vector<char> EncodeInputBundle(const std::vector<FramedInput>& inputs);
+std::vector<char> EncodeInputBundle(
+    const std::vector<FramedInput>& inputs,
+    std::optional<melonDS::u32> ackFrame = std::nullopt);
 bool DecodeInput(const void* data, std::size_t size, FramedInput& input);
 bool DecodeInputBundle(
     const void* data,
     std::size_t size,
-    std::vector<FramedInput>& inputs);
+    std::vector<FramedInput>& inputs,
+    std::optional<melonDS::u32>* ackFrame = nullptr);
 
 }
 
