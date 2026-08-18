@@ -2,13 +2,17 @@
 
 > 現在の判断は直下の2026-08-18節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
 
-## 2026-08-18 Slippi型を実用化するための制御方針
+## 2026-08-18 Slippi型を実用化するための制御方針とP=7初回実測
 
 ### 現時点の独立判断
 
-Slippiの制御原則、すなわち「少量の実入力遅延を先に入れる」「訂正可能範囲だけ予測する」「上限を越える前にgame frameを止める」「欠落入力を再送する」は本forkにも採用する。ただしSlippiの数値`input delay 2 / prediction 7`をそのまま製品既定にはしない。直近の成功した手動run `logs/nsmb-mvl-manual-local-20260818-180655` はlocal input delay 0、両方向の人工送信遅延2-3 frameであり、hostは279訂正・平均log depth `3.65`・最大`4`、clientは1,142訂正・平均`1.49`・最大`4`、最大replay tick数は両roleとも`5`だった。これは「5投機tick、現行logのdepth 4」までの長時間手動gateを支持するが、7投機tickを支持する試験ではない。
+Slippiの制御原則、すなわち「少量の実入力遅延を先に入れる」「訂正可能範囲だけ予測する」「上限を越える前にgame frameを止める」「欠落入力を再送する」を本forkにも採用した。前節の`D=2/P=5/H=12`を先に製品候補とする判断は撤回する。ユーザーの評価順が「Bigstar統合より先に既存scriptでP=7まで実装・試験」へ明確化され、かつ今回P=7の実訂正と安全停止を観測できたためである。現在のscript試験候補はlocal input delay `D=2`、最大連続投機tick `P=7`、ROM側history容量`H=12`とし、Bigstar GUI起動経路は変更しない。
 
-従って最初の製品候補はlocal input delay `D=2`、最大連続投機tick `P=5`、ROM側history容量`H=12`とする。`D=2`はBigstarに既にあるSlippi型input scheduling delayを保つ暫定値であり、NSMBの操作感まで最適だと確認済みではない。`P=5`なら、最初の未確定frameから現在frameまでを含めて最大5 tick予測し、現行の `depth = current - restoreFrame` は通常最大4、再実行tick数は最大5になる。history 12は破損防止の余裕であって、11 frame訂正を常用可能と宣言する値ではない。最終目標はSlippi相当の`P=7`だが、`P=6/7`は性能・描画・音声gateを通ったときだけ既定へ昇格する。通らなければ`P=5`を実用上限とする。
+software renderer・60fps制限ありの通常条件 `logs/codex-slippi-horizon7-practical-20260818` は人工送信遅延2-3 frameで、host/client各38訂正、最大log depth `3/2`、最大replay tick `4/3`、active平均`16.664/16.667ms`、最大`28.129/27.640ms`、33ms超0、horizon待機0、26共有heartbeat差0だった。P=7設定そのものによる通常時の性能低下はこのrunでは検出していない。
+
+境界条件 `logs/codex-slippi-horizon7-depth-trace-20260818` は人工送信遅延8-9 frameで、hostが22訂正・最大depth 7・最大8 replay tick、clientが12訂正・最大depth 6・最大7 tickを完了した。P+1個目の実行前にhost/client `341/87`回停止して全件再開し、cannot-arm、clamp、timeout、fatal invariant、16共有heartbeat差は0だった。一方active最大は`40.373/52.958ms`、33ms超`19/6`であり、常時8-9 frame遅延を快適に処理できたとは判定しない。P=7は訂正可能な安全上限であり、そこまで常用しても滑らかという保証ではない。本forkは現在tickを実行する前に後着不一致を取り込み、そのcurrent tickもROM-loop transactionへ含めるため、7個の既実行predictionに対してlog depth 7・replay 8 tickが現れ得る。
+
+`logs/codex-slippi-horizon7-timeout-20260818` はtimeoutだけ500msへ短縮し、入力を100 frame遅らせた。両roleとも連続確定frontierから8個目へ進む前に停止し、`500/501ms`でexit 73となった。製品候補の既定値はSlippiと同じ7秒である。
 
 ### 分離する三つの値
 
@@ -24,17 +28,17 @@ rollback有効時の現行`InputMaxFrameLead`は、future labelである`sendFra
 2. logical frame `F`を実行する直前に `F - contiguousFrontier <= P` を検査する。範囲内だけstale-repeat予測を許し、`P+1`個目へ入る前はemulation、描画、audio timelineを進めずnetwork pumpと再送だけを行う。入力到着後は同じframeから再開する。
 3. 予測値は「packet到着順で最後に確認した入力」ではなく、対象frameより前で最も新しい確定入力から選ぶ。現行`PredictionRuntime::Confirm()`は再順序化した古いpacketでも`LastConfirmedInput_`を上書きするため、real-WAN gateより前にframe順の探索へ直す。
 4. horizon gateが正しければ、後着不一致は必ず保持history内にある。現行のdepth 11超 `ClampResimulationMismatch()`は古い不一致を捨てて最近のframeだけ直すため削除し、範囲外不一致やcheckpoint欠落は同期継続不能の明示的なfatal invariant errorとする。無言でplayを続けない。
-5. Bigstarのunreliable inputは重複送信を維持する。現行`InputBundleHistory=8`はcurrentを含め9 entryだが、`P=7,D=2`でgateに到達した瞬間には最古の欠落が最新send labelより9 frame前になり得る。最低でもprevious `P+D`件を含め、初期実装は余裕を加えた `P+D+2`件を保持・送信する。さらに各packetへ受信側のcontiguous ACKを載せ、stall中はSlippi同様に未ACK入力列を50ms間隔でreliable resendする。新しいgame inputを生成してhorizonを押し広げることはしない。
-6. horizonでの連続停止は7秒で切断するSlippiの値を最初の候補にする。1秒程度でGUIへ「通信待ち」を出し、7秒で理由付き終了とする。通常の`RollbackInputWaitUs`は0を既定にし、毎frameの短い待ちと安全上限でのhard waitを混同しない。
+5. script経路は`InputBundleHistory=11`、すなわちcurrentを含む最大12 entryへ増やし、stall中は最新bundleを50ms間隔でreliable resendする。これで今回のdelay試験は回復したが、Slippi同様の明示的なcontiguous ACKと未ACK列はまだwire protocolへ入れておらず、packet loss試験より前の残作業である。新しいgame inputを生成してhorizonを押し広げることはしない。
+6. horizonでの連続停止は7秒でexit 73にする。通常の`RollbackInputWaitUs`は0を既定にし、毎frameの短い待ちと安全上限でのhard waitを混同しない。GUI表示はBigstar統合を再開するときの別作業とする。
 7. `D/P`、protocol version、ROM-loop backend/history契約を開始handshakeとruntime identityへ含め、peer間不一致は対戦開始前に拒否する。再戦generation resetではcontiguous frontier、ACK、prediction、pending rollbackを同時に初期化する。
 
 ### 実装と昇格の順序
 
-1. ROM不要testで、連続frontier、穴あき・重複・逆順packet、generation reset、`P`個までは予測し`P+1`個目で停止、停止中の再送、到着後の再開、7秒timeoutを固定する。併せてarrival-order依存のstale predictionとROM-loopの事後clampを除く。
-2. manual launcherを製品候補と同じ`D=2/P=5/H=12`へ揃え、software rendererで固定入力・人工遅延・jitter・loss・再順序化・短時間断を試す。`D=0/1/2`は同じnetwork条件でA/Bするが、一つのrun中に動的変更はしない。
-3. 既定候補の合格条件は、cannot-arm/cap/fatal invariantが0、継続heartbeat差0、対戦中実効`59.5fps`以上、rollback起因の33ms超連続frameが0、訂正区間後のpipe/player/OAM画像差が0、死亡・復帰・土管・item・再戦を通過、停止後の復帰または理由付き切断とする。単発最大値、訂正深度分布、audio underrunも別々に記録する。
-4. `D=2/P=5`合格後に`P=6`、次に`P=7`を同じgateへ掛ける。深い値が状態だけ合っても、60fpsまたは表示・音声を落とせば昇格しない。操作感比較で`D=1`が同じ安全gateを通る場合だけ、低遅延profileまたは新既定を検討する。
-5. 上記が通るまでBigstarの現行`coredelta`を直ちにROM-loopへ差し替えない。通過後にBigstarをROM-loop、暫定`D=2/P=5`、十分なbundle/ACK、7秒stall timeoutへ切り替え、技術的な`InputMaxFrameLead`はrollback設定画面から外す。
+1. 完了: ROM不要testで、連続frontier、穴あき・逆順packet、generation reset、P=7と8個目の区別を固定した。arrival-order依存のstale predictionをframe順探索へ変更し、P有効時のROM-loop事後clampをfatal invariantへ置き換えた。
+2. 完了: manual `-SlippiRollback`を`D=2/P=7/H=12`、software renderer、旧`InputMaxFrameLead`無効、7秒timeoutへ揃えた。通常2-3 frame条件、深度7を発生させる8-9 frame条件、短縮timeoutを実ROMで通した。
+3. 次は固定12-entry bundleだけでなくcontiguous ACK/未ACK再送をprotocolへ加え、loss・重複・再順序化・短時間断をscriptで試す。`D=0/1/2`も同じnetwork条件でA/Bするが、一つのrun中に動的変更はしない。
+4. P=7の合格条件は、cannot-arm/cap/fatal invariantが0、継続heartbeat差0、通常network条件で対戦中実効`59.5fps`以上、rollback起因の33ms超連続frameが0、訂正区間後のpipe/player/OAM画像差が0、死亡・復帰・土管・item・再戦を通過、停止後の復帰または理由付き終了とする。単発最大値、訂正深度分布、audio underrunも別々に記録する。今回の通常短時間runは状態・性能を通ったが、画像・音声・event・長時間手動gateは未完である。
+5. ユーザー指示により、Bigstarの現行`coredelta`起動設定とGUIはこの段階では変更しない。P=7のscript検証を先に続ける。
 
 ## 2026-08-18 Slippi/Tangoの遅延・深度制御再確認
 
