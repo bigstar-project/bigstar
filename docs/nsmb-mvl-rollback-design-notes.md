@@ -2,6 +2,26 @@
 
 > 現在の判断は直下の2026-08-18節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
 
+## 2026-08-18 Slippi/Tangoの遅延・深度制御再確認
+
+### Slippiの現行ソース上の契約
+
+2026-06-12のmainline Slippi Dolphin `2b29463b82f32c41de6c9af94f42481174ba9979`、stable Ishiiruka `e7711b104b339a99385f2bb12b472d46140a7bc7`、2026-05-01のSSBM ASM `fcf47f10dc244152c2ebaa3a9dec142ea42243b7`を照合した。mainlineとstableの双方で`ROLLBACK_MAX_FRAMES`は`7`、ASM側の`ROLLBACK_MAX_FRAME_COUNT`も`7`である。Dolphinは7個のsavestate objectを用意し、remote inputも最大7件をgame側へ返す。ASMのlocal/predicted input ringは稀なindex越境への余裕として14件だが、これは対応rollback深度を14へ増やすものではない。
+
+上限は単なるallocation数ではなく実行時に強制される。各remote playerについて `latestRemoteFrame >= currentFrame - 7` を満たさなければ、Dolphinは `Halting for one frame due to rollback limit` としてgame frameを進めず、未ACK local inputだけを再送する。停止が7秒、すなわち60Hzで420回を超えると該当playerを切断する。したがってSlippiは7を超えて予測してから古い訂正を捨てるのではなく、訂正可能範囲を出る前にlockstep待機へ移る。
+
+予測は最新remote padのstale repeatである。ASMは最初の未着frameからpredictionを記録し、入力到着後にactualと比較し、複数playerなら最も早い不一致frameへsavestate loadする。catch-upはgame engineを再ループし、通常の表示frameを余分に提示しない。prediction中はframeごとのsavestateをcaptureし、Dolphin側は7 slotを古い順に再利用する。packetには最新入力だけでなく未ACK入力列も含め、欠落回復を次packetへ重複させる。
+
+入力遅延は実在し、既定値・公式推奨とも2 frameである。最初にdelay件のneutral padを送り、実際のlocal padを `frame + delay` 番へ割り当てるため、表示上だけの設定ではなくlocal inputの適用を将来へずらす。現行UIは1-9、ASMの防御clampは1-15で、FAQは2 frameを130ms pingまで推奨し、playerごとに異なる値でも接続可能としている。これはSlippiがMelee固有の表示遅延を約1.5 frame削減したうえで2 frameを戻す設計理由を含むため、NSMBへ同じ既定値を無条件に移す根拠にはならない。
+
+Slippiの「最大7 frame」は7個の投機tickを含めた呼称である。例えばremote確定が93、currentが100なら投機対象は94..100の7 tickだが、最初と最後のframe番号差は6になる。本forkのログが使う `depth = current - restoreFrame` と数値を比較するときは、このinclusive/exclusive差を明記する。
+
+### Tangoとの比較と本forkへの含意
+
+現行Tango `259eafbb09ef65ad2431548bb093619e51016bab` も既定値は2 frameで、ユーザーの記憶した数字は確認できた。ただし現在の実装ではSlippi型のinput scheduling delayではなく、netcode frontierより表示coreを2 tick後ろへ置くpure local `present delay`である。範囲は0-10で、RTTから片道frame数+1を提案できる。入力frontier自体は先へ進むため、同じ「2」でもSlippiの `input(frame) -> apply(frame+2)` とは別の設計である。
+
+本forkで採るべき次の順序は、(1) 12-entry historyを「深度11まで常用可能」という意味にせず、実測済みの訂正性能・表示gate内に製品prediction horizonを置く、(2) oldest contiguous confirmed remote frameを基準に、履歴外訂正が起きる前に安全に待機する、(3) local input delay 0/1/2を同一人工RTT・jitterでA/Bし、rollback深度・outer hitch・操作感を別々に評価する、である。Slippiの7は方式の参考値であり、DS二台分相当の再演算コストを持つ本forkが7を快適に処理できる証拠ではない。現状のdepth 11超clampは安全fallbackではないため、実WAN相当試験より先に停止境界を実装・検証する。
+
 ## 2026-08-18 render processを含むROM-loop訂正
 
 ### 再戦generation timelineの修正
