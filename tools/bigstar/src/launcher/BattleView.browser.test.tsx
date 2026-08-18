@@ -151,6 +151,7 @@ async function renderBattleView(
   props: {
     actionOverrides?: Partial<LauncherActions>;
     currentMatch?: BattleMatchRecord | null;
+    formOverride?: Partial<typeof initialForm>;
     matchmakingRooms?: MatchmakingRoomsState;
     summaryOverride?: Partial<LauncherSummary>;
   } = {},
@@ -169,6 +170,7 @@ async function renderBattleView(
           matchSeed: '123',
           roomCode: 'test-room',
           signalUrl: 'ws://127.0.0.1:8787/session',
+          ...props.formOverride,
         }}
         matchmakingRooms={props.matchmakingRooms ?? rooms}
         currentMatch={props.currentMatch ?? null}
@@ -295,6 +297,27 @@ describe('対戦ビュー', () => {
     await screen.getByRole('button', { name: '作成して待機' }).click();
 
     expect(launcherActions.createRoom).toHaveBeenCalledTimes(1);
+  });
+
+  test('ロールバック時は旧Leadではなく予測上限7を表示する', async () => {
+    const { screen } = await renderBattleView({
+      formOverride: {
+        inputDelayFrames: 2,
+        inputMaxFrameLead: 0,
+        rollbackEnabled: true,
+      },
+    });
+
+    await screen.getByRole('button', { name: '部屋を作る' }).click();
+    await expect
+      .element(screen.getByLabelText('PredictionHorizonFrames'))
+      .toHaveValue(7);
+    await expect
+      .element(screen.getByLabelText('PredictionHorizonFrames'))
+      .toBeDisabled();
+    await expect
+      .element(screen.getByLabelText('InputMaxFrameLead'))
+      .not.toBeInTheDocument();
   });
 
   test('部屋作成後の待機状態で部屋コード操作を表示する', async () => {

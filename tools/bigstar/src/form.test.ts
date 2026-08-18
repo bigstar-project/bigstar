@@ -5,12 +5,21 @@ import {
   initialForm,
   normalizedCourseStages,
   processExited,
+  rollbackInputDelayFrames,
+  rollbackInputMaxFrameLead,
+  rollbackPredictionHorizonFrames,
   selectedStageFrom,
   withRequiredPlan,
   withRequiredSeed,
 } from './form';
 
 describe('フォーム補助関数', () => {
+  test('ROM-loopロールバックの固定契約を使う', () => {
+    expect(rollbackInputDelayFrames).toBe(2);
+    expect(rollbackInputMaxFrameLead).toBe(0);
+    expect(rollbackPredictionHorizonFrames).toBe(7);
+  });
+
   test('現在のフォーム値から起動設定を組み立てる', () => {
     expect(
       currentSettings({
@@ -19,7 +28,7 @@ describe('フォーム補助関数', () => {
         courseMode: 'select',
         courseStages: [4, 3, 2, 1, 0],
         inputDelayFrames: 2,
-        inputMaxFrameLead: 2,
+        inputMaxFrameLead: 0,
         lives: '5',
         matchSeed: ' 0x0e ',
         rngSeeds: ['0x0e', '2', '3', '4', '5'],
@@ -31,7 +40,7 @@ describe('フォーム補助関数', () => {
       course_mode: 'select',
       course_stages: [4, 3, 2, 1, 0],
       input_delay_frames: 2,
-      input_max_frame_lead: 2,
+      input_max_frame_lead: 0,
       lives: '5',
       match_seed: '0x0e',
       rng_seeds: ['0x0e', '2', '3', '4', '5'],

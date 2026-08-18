@@ -63,3 +63,5 @@ pub(crate) const DEFAULT_PORT: u16 = 8165;
 pub(crate) const DEFAULT_FRAMES: u32 = 999_999;
 pub(crate) const NETPLAY_START_FRAME: u32 = 840;
 pub(crate) const REUSABLE_ROM_FORMAT: &str = "bigstar-reusable-runtime-config-v4";
+pub(crate) const ROM_LOOP_ROLLBACK_CONTRACT: &str = "romloop-v1-p7-h12";
+pub(crate) const ROM_LOOP_PREDICTION_HORIZON_FRAMES: u8 = 7;

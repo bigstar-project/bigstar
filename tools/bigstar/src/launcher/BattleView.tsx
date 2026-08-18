@@ -24,6 +24,7 @@ import {
   maxGamesForWins,
   rollbackInputDelayFrames,
   rollbackInputMaxFrameLead,
+  rollbackPredictionHorizonFrames,
 } from '../form';
 import type { CourseMode, FormState, Lives } from '../types';
 import { LauncherCard } from './LauncherCards';
@@ -416,15 +417,26 @@ function MatchSettingsFields({
             updateField('inputDelayFrames', clampNetplaySetting(value))
           }
         />
-        <NumberField
-          label="InputMaxFrameLead"
-          min={0}
-          max={16}
-          value={form.inputMaxFrameLead}
-          onChange={(value) =>
-            updateField('inputMaxFrameLead', clampNetplaySetting(value))
-          }
-        />
+        {form.rollbackEnabled ? (
+          <NumberField
+            disabled
+            label="PredictionHorizonFrames"
+            min={rollbackPredictionHorizonFrames}
+            max={rollbackPredictionHorizonFrames}
+            value={rollbackPredictionHorizonFrames}
+            onChange={() => undefined}
+          />
+        ) : (
+          <NumberField
+            label="InputMaxFrameLead"
+            min={0}
+            max={16}
+            value={form.inputMaxFrameLead}
+            onChange={(value) =>
+              updateField('inputMaxFrameLead', clampNetplaySetting(value))
+            }
+          />
+        )}
       </div>
     </div>
   );
@@ -612,7 +624,9 @@ function UpdateRequiredNotice({ version }: { version?: string }) {
 }
 
 function formatRoomSettings(room: MatchmakingRoomsState['rooms'][number]) {
-  const rollback = room.settings.rollback_enabled ? 'RB=on' : 'RB=off';
+  const netplay = room.settings.rollback_enabled
+    ? `Delay=${room.settings.input_delay_frames} P=${rollbackPredictionHorizonFrames} RB=ROM-loop`
+    : `Delay=${room.settings.input_delay_frames} Lead=${room.settings.input_max_frame_lead} RB=off`;
   const stages = room.settings.course_stages.join('/');
-  return `Course=${room.settings.course_mode}[${stages}] Wins=${room.settings.wins} Star=${room.settings.big_stars} Lives=${room.settings.lives} Delay=${room.settings.input_delay_frames} Lead=${room.settings.input_max_frame_lead} ${rollback}`;
+  return `Course=${room.settings.course_mode}[${stages}] Wins=${room.settings.wins} Star=${room.settings.big_stars} Lives=${room.settings.lives} ${netplay}`;
 }

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use tauri::AppHandle;
 
-use crate::config::{app_version, REUSABLE_ROM_FORMAT};
+use crate::config::{app_version, REUSABLE_ROM_FORMAT, ROM_LOOP_ROLLBACK_CONTRACT};
 use crate::models::{GenerateRomRequest, GenerateRomResponse, RomIdentity};
 use crate::paths::{
     absolutize_existing, ensure_parent_dir, find_bridge_binary, find_symbols_file,
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-const MANIFEST_VERSION: u8 = 3;
+const MANIFEST_VERSION: u8 = 4;
 const ROM_GENERATOR_SOURCES: &[&str] = &[
     include_str!("../../../bigstar-rom/src/lib.rs"),
     include_str!("../../../bigstar-rom/src/binary.rs"),
@@ -47,6 +47,7 @@ pub(crate) struct RomManifestOptions {
     big_stars: u8,
     lives: String,
     course_mode: String,
+    game_tick_probe: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -129,7 +130,7 @@ pub(crate) fn prepare_roms(
         course_mode: inputs.options.course_mode.clone(),
         scene_settings: None,
         symbols,
-        game_tick_probe: false,
+        game_tick_probe: inputs.options.game_tick_probe,
     };
 
     bigstar_rom::generate_stable_roms(&options)
@@ -270,6 +271,7 @@ fn canonical_rom_options() -> RomManifestOptions {
         big_stars: 10,
         lives: lives_value(crate::models::Lives::Three).to_owned(),
         course_mode: course_mode_value(crate::models::CourseMode::Random).to_owned(),
+        game_tick_probe: true,
     }
 }
 
@@ -363,7 +365,11 @@ fn sha256_text(parts: &[&str]) -> String {
 }
 
 fn rom_generator_id() -> String {
-    let mut parts = vec![app_version(), REUSABLE_ROM_FORMAT];
+    let mut parts = vec![
+        app_version(),
+        REUSABLE_ROM_FORMAT,
+        ROM_LOOP_ROLLBACK_CONTRACT,
+    ];
     parts.extend_from_slice(ROM_GENERATOR_SOURCES);
     sha256_text(&parts)
 }
@@ -439,6 +445,7 @@ pub(crate) fn write_reusable_rom_marker(rom: &Path) -> Result<(), String> {
                 big_stars: 5,
                 lives: "3".to_owned(),
                 course_mode: "select".to_owned(),
+                game_tick_probe: true,
             },
         },
         identity: RomIdentity {

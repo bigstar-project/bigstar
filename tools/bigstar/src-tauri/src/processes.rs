@@ -12,7 +12,9 @@ use flate2::Compression;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use crate::config::{app_version, DEFAULT_FRAMES, NETPLAY_START_FRAME};
+use crate::config::{
+    app_version, DEFAULT_FRAMES, NETPLAY_START_FRAME, ROM_LOOP_PREDICTION_HORIZON_FRAMES,
+};
 #[cfg(feature = "insiders-edition")]
 use crate::crash_report::{match_result_decided, send_crash_report_async};
 use crate::diagnostics::append_session_event;
@@ -615,10 +617,22 @@ pub(crate) fn melon_env(
     );
     env.insert(
         "MELONDS_NSML_INPUT_MAX_FRAME_LEAD".into(),
-        request.settings.input_max_frame_lead.to_string(),
+        if request.settings.rollback_enabled {
+            "-1".to_owned()
+        } else {
+            request.settings.input_max_frame_lead.to_string()
+        },
     );
     env.insert("MELONDS_NSML_INPUT_UNRELIABLE".into(), "1".into());
-    env.insert("MELONDS_NSML_INPUT_BUNDLE_HISTORY".into(), "8".into());
+    env.insert(
+        "MELONDS_NSML_INPUT_BUNDLE_HISTORY".into(),
+        if request.settings.rollback_enabled {
+            "11"
+        } else {
+            "8"
+        }
+        .into(),
+    );
     if request.performance_logs_enabled {
         env.insert(
             "MELONDS_NSML_PERFORMANCE_LOG".into(),
@@ -722,13 +736,25 @@ pub(crate) fn melon_env(
     }
     if request.settings.rollback_enabled {
         env.insert("MELONDS_NSML_ROLLBACK".into(), "1".into());
-        env.insert("MELONDS_NSML_ROLLBACK_BACKEND".into(), "coredelta".into());
-        env.insert("MELONDS_NSML_ROLLBACK_WINDOW".into(), "64".into());
+        env.insert("MELONDS_NSML_ROLLBACK_BACKEND".into(), "romloop".into());
+        env.insert("MELONDS_NSML_ROLLBACK_WINDOW".into(), "16".into());
         env.insert(
             "MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL".into(),
-            "8".into(),
+            "1".into(),
         );
         env.insert("MELONDS_NSML_ROLLBACK_RESIMULATE".into(), "1".into());
+        env.insert(
+            "MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES".into(),
+            ROM_LOOP_PREDICTION_HORIZON_FRAMES.to_string(),
+        );
+        env.insert(
+            "MELONDS_NSML_ROLLBACK_PREDICTION_HORIZON_FRAMES".into(),
+            ROM_LOOP_PREDICTION_HORIZON_FRAMES.to_string(),
+        );
+        env.insert(
+            "MELONDS_NSML_ROLLBACK_HORIZON_TIMEOUT_MS".into(),
+            "7000".into(),
+        );
         env.insert(
             "MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL".into(),
             "30".into(),
@@ -737,6 +763,29 @@ pub(crate) fn melon_env(
             "MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE".into(),
             "256".into(),
         );
+        env.insert("MELONDS_NSML_FIXED_FRAME_SLEEP".into(), "1".into());
+        env.insert(
+            "MELONDS_NSML_ROM_GAME_TICK_PROBE_GAME_RAM_ROLLBACK".into(),
+            "1".into(),
+        );
+        env.insert(
+            "MELONDS_NSML_ROM_GAME_TICK_PROBE_DEFER_LCD".into(),
+            "1".into(),
+        );
+        env.insert(
+            "MELONDS_NSML_ROM_GAME_TICK_PROBE_REPLAY_RENDER".into(),
+            "1".into(),
+        );
+        env.insert(
+            "MELONDS_NSML_ROM_GAME_TICK_PROBE_DISCARD_INTERMEDIATE_3D".into(),
+            "1".into(),
+        );
+        env.insert("MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN".into(), "1".into());
+        env.insert(
+            "MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE".into(),
+            "1".into(),
+        );
+        env.insert("MELONDS_NSML_JIT_SELF_LOOP_FAST_PATH".into(), "1".into());
     }
     env.insert("MELONDS_NSML_WAIT_FOR_PEER".into(), "1".into());
     env.insert(

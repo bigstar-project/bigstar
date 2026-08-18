@@ -215,12 +215,14 @@ export function FilePathField({
 }
 
 export function NumberField({
+  disabled = false,
   label,
   max,
   min,
   onChange,
   value,
 }: {
+  disabled?: boolean;
   label: string;
   value: number;
   min: number;
@@ -251,6 +253,7 @@ export function NumberField({
           fontWeight: 'semibold',
         })}
         type="number"
+        disabled={disabled}
         min={min}
         max={max}
         value={value}

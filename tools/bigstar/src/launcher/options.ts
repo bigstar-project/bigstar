@@ -31,5 +31,5 @@ export const livesOptions = [
 
 export const rollbackOptions = [
   { value: 'off', label: '無効' },
-  { value: 'on', label: '有効' },
+  { value: 'on', label: '有効（試験機能）' },
 ];

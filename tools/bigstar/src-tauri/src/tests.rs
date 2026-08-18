@@ -585,7 +585,7 @@ fn melon_env_carries_rollback_settings_when_enabled() {
     let mut request = request(Role::Host);
     request.settings.rollback_enabled = true;
     request.settings.input_delay_frames = 2;
-    request.settings.input_max_frame_lead = 2;
+    request.settings.input_max_frame_lead = 0;
 
     let env = melon_env(
         &request,
@@ -594,10 +594,49 @@ fn melon_env_carries_rollback_settings_when_enabled() {
     );
 
     assert_eq!(env["MELONDS_NSML_DELAY"], "2");
-    assert_eq!(env["MELONDS_NSML_INPUT_MAX_FRAME_LEAD"], "2");
+    assert_eq!(env["MELONDS_NSML_INPUT_MAX_FRAME_LEAD"], "-1");
+    assert_eq!(env["MELONDS_NSML_INPUT_BUNDLE_HISTORY"], "11");
     assert_eq!(env["MELONDS_NSML_ROLLBACK"], "1");
-    assert_eq!(env["MELONDS_NSML_ROLLBACK_BACKEND"], "coredelta");
+    assert_eq!(env["MELONDS_NSML_ROLLBACK_BACKEND"], "romloop");
+    assert_eq!(env["MELONDS_NSML_ROLLBACK_WINDOW"], "16");
+    assert_eq!(env["MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL"], "1");
     assert_eq!(env["MELONDS_NSML_ROLLBACK_RESIMULATE"], "1");
+    assert_eq!(env["MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES"], "7");
+    assert_eq!(env["MELONDS_NSML_ROLLBACK_PREDICTION_HORIZON_FRAMES"], "7");
+    assert_eq!(env["MELONDS_NSML_ROLLBACK_HORIZON_TIMEOUT_MS"], "7000");
+    assert_eq!(env["MELONDS_NSML_FIXED_FRAME_SLEEP"], "1");
+    assert_eq!(
+        env["MELONDS_NSML_ROM_GAME_TICK_PROBE_GAME_RAM_ROLLBACK"],
+        "1"
+    );
+    assert_eq!(env["MELONDS_NSML_ROM_GAME_TICK_PROBE_DEFER_LCD"], "1");
+    assert_eq!(env["MELONDS_NSML_ROM_GAME_TICK_PROBE_REPLAY_RENDER"], "1");
+    assert_eq!(
+        env["MELONDS_NSML_ROM_GAME_TICK_PROBE_DISCARD_INTERMEDIATE_3D"],
+        "1"
+    );
+    assert_eq!(env["MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN"], "1");
+    assert_eq!(
+        env["MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE"],
+        "1"
+    );
+    assert_eq!(env["MELONDS_NSML_JIT_SELF_LOOP_FAST_PATH"], "1");
+}
+
+#[test]
+fn melon_env_keeps_rom_loop_controls_disabled_without_rollback() {
+    let env = melon_env(
+        &request(Role::Host),
+        Path::new("bootstrap.inputs"),
+        Path::new("logs/bigstar-test"),
+    );
+
+    assert_eq!(env["MELONDS_NSML_INPUT_MAX_FRAME_LEAD"], "4");
+    assert_eq!(env["MELONDS_NSML_INPUT_BUNDLE_HISTORY"], "8");
+    assert!(!env.contains_key("MELONDS_NSML_ROLLBACK"));
+    assert!(!env.contains_key("MELONDS_NSML_ROLLBACK_BACKEND"));
+    assert!(!env.contains_key("MELONDS_NSML_ROM_GAME_TICK_PROBE_GAME_RAM_ROLLBACK"));
+    assert!(!env.contains_key("MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN"));
 }
 
 #[test]
@@ -707,6 +746,12 @@ fn reusable_rom_marker_requires_current_format_and_rom_file() {
 
     write_reusable_rom_marker(&rom).expect("write marker");
     assert!(reusable_rom_is_current(&rom));
+    let manifest: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(reusable_rom_marker_path(&rom)).expect("read marker"),
+    )
+    .expect("parse marker");
+    assert_eq!(manifest["manifest_version"], 4);
+    assert_eq!(manifest["options"]["game_tick_probe"], true);
 
     fs::write(reusable_rom_marker_path(&rom), "old-format\n").expect("write stale marker");
     assert!(!reusable_rom_is_current(&rom));

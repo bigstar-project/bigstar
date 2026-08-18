@@ -1,7 +1,7 @@
 param(
     [ValidateSet("DirectUdp", "WebRtc")]
     [string]$Mode = "DirectUdp",
-    [string]$SignalUrl = "wss://bigstar-signaling-signaling-prod.uniunitaro.workers.dev/session",
+    [string]$SignalUrl = "wss://bigstar-signaling-insiders-signaling-prod.uniunitaro.workers.dev/session",
     [string]$RoomCode = "",
     [int]$HostPort = 8165,
     [int]$ClientPort = 8265,
@@ -9,6 +9,7 @@ param(
     [int]$InputDelayFrames = 4,
     [int]$InputMaxFrameLead = 4,
     [int]$InputBundleHistory = 8,
+    [switch]$RomLoopRollback,
     [int]$StartupDelayMs = 1500,
     [string]$Exe = "",
     [string]$BridgeExe = "",
@@ -69,6 +70,18 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($RomLoopRollback) {
+    if (!$PSBoundParameters.ContainsKey('InputDelayFrames')) { $InputDelayFrames = 2 }
+    if (!$PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = -1 }
+    if (!$PSBoundParameters.ContainsKey('InputBundleHistory')) { $InputBundleHistory = 11 }
+    if (!$PSBoundParameters.ContainsKey('CachedHostRom')) {
+        $CachedHostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-romloop-gametick.tmp.nds"
+    }
+    if (!$PSBoundParameters.ContainsKey('CachedClientRom')) {
+        $CachedClientRom = "roms\nsmb-us-direct-mvl-entry-stable-client-romloop-gametick.tmp.nds"
+    }
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
@@ -302,6 +315,27 @@ function New-MelonEnv {
         $env.MELONDS_NSML_MVL_AUTO_RESTART_AFTER_RESULT = "1"
         $env.MELONDS_NSML_MVL_AUTO_RESTART_DELAY_FRAMES = "120"
     }
+    if ($RomLoopRollback) {
+        $env.MELONDS_NSML_INPUT_MAX_FRAME_LEAD = "-1"
+        $env.MELONDS_NSML_ROLLBACK = "1"
+        $env.MELONDS_NSML_ROLLBACK_BACKEND = "romloop"
+        $env.MELONDS_NSML_ROLLBACK_WINDOW = "16"
+        $env.MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL = "1"
+        $env.MELONDS_NSML_ROLLBACK_RESIMULATE = "1"
+        $env.MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES = "7"
+        $env.MELONDS_NSML_ROLLBACK_PREDICTION_HORIZON_FRAMES = "7"
+        $env.MELONDS_NSML_ROLLBACK_HORIZON_TIMEOUT_MS = "7000"
+        $env.MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL = "30"
+        $env.MELONDS_NSML_ROLLBACK_MAIN_RAM_PAGE_SIZE = "256"
+        $env.MELONDS_NSML_FIXED_FRAME_SLEEP = "1"
+        $env.MELONDS_NSML_ROM_GAME_TICK_PROBE_GAME_RAM_ROLLBACK = "1"
+        $env.MELONDS_NSML_ROM_GAME_TICK_PROBE_DEFER_LCD = "1"
+        $env.MELONDS_NSML_ROM_GAME_TICK_PROBE_REPLAY_RENDER = "1"
+        $env.MELONDS_NSML_ROM_GAME_TICK_PROBE_DISCARD_INTERMEDIATE_3D = "1"
+        $env.MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN = "1"
+        $env.MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE = "1"
+        $env.MELONDS_NSML_JIT_SELF_LOOP_FAST_PATH = "1"
+    }
     return $env
 }
 
@@ -379,6 +413,9 @@ if ($Mode -eq "DirectUdp") {
     if (-not $NoJit) {
         $manualParams.AllowJit = $true
     }
+    if ($RomLoopRollback) {
+        $manualParams.SlippiRollback = $true
+    }
     $manualParams.SoftwareRenderer = [bool]$SoftwareRenderer
     & $manualLocal @manualParams
     Write-Host ""
@@ -409,15 +446,18 @@ $clientRom = Join-Path $logRoot "generated-client.nds"
 $cachedHostRomPath = Resolve-RepoPath $CachedHostRom
 $cachedClientRomPath = Resolve-RepoPath $CachedClientRom
 if (!$SkipRomEnsure) {
-    & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") `
-        -SourceRom (Resolve-RepoPath $SourceRom -MustExist) `
-        -HostRom $cachedHostRomPath `
-        -ClientRom $cachedClientRomPath `
-        -MvlStage $effectiveStage `
-        -MvlWins $MvlWins `
-        -MvlBigStars $MvlBigStars `
-        -MvlLives $MvlLives `
-        -MvlCourseMode $MvlCourseMode
+    $cachedRomParams = @{
+        SourceRom = (Resolve-RepoPath $SourceRom -MustExist)
+        HostRom = $cachedHostRomPath
+        ClientRom = $cachedClientRomPath
+        MvlStage = $effectiveStage
+        MvlWins = $MvlWins
+        MvlBigStars = $MvlBigStars
+        MvlLives = $MvlLives
+        MvlCourseMode = $MvlCourseMode
+        GameTickProbe = [bool]$RomLoopRollback
+    }
+    & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") @cachedRomParams
 } else {
     Resolve-RepoPath $CachedHostRom -MustExist | Out-Null
     Resolve-RepoPath $CachedClientRom -MustExist | Out-Null
@@ -444,15 +484,18 @@ if ($ExistingHostRom -ne "" -or $ExistingClientRom -ne "") {
         }
     }
 } else {
-    & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") `
-        -SourceRom (Resolve-RepoPath $SourceRom -MustExist) `
-        -HostRom $hostRom `
-        -ClientRom $clientRom `
-        -MvlStage $effectiveStage `
-        -MvlWins $MvlWins `
-        -MvlBigStars $MvlBigStars `
-        -MvlLives $MvlLives `
-        -MvlCourseMode $MvlCourseMode
+    $runRomParams = @{
+        SourceRom = (Resolve-RepoPath $SourceRom -MustExist)
+        HostRom = $hostRom
+        ClientRom = $clientRom
+        MvlStage = $effectiveStage
+        MvlWins = $MvlWins
+        MvlBigStars = $MvlBigStars
+        MvlLives = $MvlLives
+        MvlCourseMode = $MvlCourseMode
+        GameTickProbe = [bool]$RomLoopRollback
+    }
+    & (Join-Path $PSScriptRoot "generate-nsmb-mvl-stable-roms.ps1") @runRomParams
 }
 
 @(
@@ -473,6 +516,7 @@ if ($ExistingHostRom -ne "" -or $ExistingClientRom -ne "") {
     "hostInputScript=$HostInputScript"
     "clientInputScript=$ClientInputScript"
     "inputBundleHistory=$InputBundleHistory"
+    "romLoopRollback=$($RomLoopRollback.IsPresent)"
     "melonDS=$Exe"
     "bridge=$BridgeExe"
     "bridgeDelayMs=$BridgeDelayMs"
