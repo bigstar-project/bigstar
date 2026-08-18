@@ -106,6 +106,10 @@ void WaitForRemoteStartReady(Context context, const Hooks &hooks,
                              melonDS::u32 syncFrame);
 void ThrottleFrameLead(Context context, const Hooks &hooks, melonDS::NDS *nds,
                        melonDS::u32 frame, melonDS::u32 sendFrame);
+void WaitForRollbackPredictionHorizon(
+    Context context, const Hooks &hooks, melonDS::NDS *nds,
+    melonDS::u32 rawFrame, melonDS::u32 logicalFrame,
+    melonDS::u32 sendFrame);
 
 } // namespace NsmbMvlNetplay::NetplaySession
 

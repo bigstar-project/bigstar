@@ -113,6 +113,30 @@ void TestPredictionMismatchScheduling()
     CHECK(!timeline.PendingRollbackFrame());
 }
 
+void TestPredictionUsesFrameOrderInsteadOfArrivalOrder()
+{
+    using NsmbMvlNetplay::InputTimeline::PredictionRuntime;
+    PredictionRuntime timeline;
+    PredictionRuntime::InputMap confirmed;
+    const auto neutral = Input(0xFFF);
+    const auto older = Input(0xFFE);
+    const auto newer = Input(0xFFD);
+
+    timeline.Confirm(102, newer, 103);
+    confirmed.emplace(102, newer);
+    timeline.Confirm(100, older, 103);
+    confirmed.emplace(100, older);
+
+    const auto afterNewer = timeline.Resolve(103, confirmed, neutral, {});
+    CHECK(afterNewer.Predicted);
+    CHECK(SameInput(afterNewer.Input, newer));
+
+    timeline.ClearPredictions();
+    const auto between = timeline.Resolve(101, confirmed, neutral, {});
+    CHECK(between.Predicted);
+    CHECK(SameInput(between.Input, older));
+}
+
 void TestPredictionProbeAndPrune()
 {
     using NsmbMvlNetplay::InputTimeline::PredictionProbe;
@@ -221,15 +245,35 @@ void TestRuntimeRemoteStorePrimeAndPrune()
     CHECK(runtime.LocalInputs.count(100) == 1);
     CHECK(runtime.RemoteInputs.count(103) == 1);
     CHECK(runtime.LastReceivedInputFrame == 103);
+    CHECK(runtime.HighestContiguousRemoteFrame() == 103);
+    CHECK(runtime.UnconfirmedRemoteFrameCountThrough(103) == 0);
+    CHECK(runtime.UnconfirmedRemoteFrameCountThrough(110) == 7);
 
     const auto stored = runtime.StoreRemote(105, Input(0xFFE), 106, false, noFrameLimit);
     CHECK(stored.PreviousLastReceived == 103);
     CHECK(runtime.LastReceivedInputFrame == 105);
     CHECK(runtime.RemoteInputs.at(105).KeyMask == 0xFFE);
+    CHECK(runtime.HighestContiguousRemoteFrame() == 103);
 
     const auto older = runtime.StoreRemote(104, Input(0xFFD), 106, false, noFrameLimit);
     CHECK(older.PreviousLastReceived == 105);
     CHECK(runtime.LastReceivedInputFrame == 105);
+    CHECK(runtime.HighestContiguousRemoteFrame() == 105);
+    CHECK(runtime.UnconfirmedRemoteFrameCountThrough(112) == 7);
+
+    Runtime zeroDelay;
+    zeroDelay.PrimeEpoch(200, 0, neutral, noFrameLimit);
+    CHECK(!zeroDelay.HighestContiguousRemoteFrame());
+    CHECK(zeroDelay.UnconfirmedRemoteFrameCountThrough(200) == 1);
+    CHECK(zeroDelay.UnconfirmedRemoteFrameCountThrough(206) == 7);
+    CHECK(zeroDelay.UnconfirmedRemoteFrameCountThrough(207) == 8);
+    zeroDelay.StoreRemote(202, Input(0xFFB), 203, false, noFrameLimit);
+    CHECK(!zeroDelay.HighestContiguousRemoteFrame());
+    zeroDelay.StoreRemote(200, Input(0xFFA), 203, false, noFrameLimit);
+    CHECK(zeroDelay.HighestContiguousRemoteFrame() == 200);
+    zeroDelay.StoreRemote(201, Input(0xFF9), 203, false, noFrameLimit);
+    CHECK(zeroDelay.HighestContiguousRemoteFrame() == 202);
+    CHECK(zeroDelay.UnconfirmedRemoteFrameCountThrough(209) == 7);
 
     runtime.LocalInputs.emplace(90, neutral);
     runtime.RemoteInputs.emplace(90, neutral);
@@ -271,7 +315,7 @@ void TestReplayFrameInputResolution()
     const auto predicted = ResolveReplayFrameInputs(runtime, 41, 1, neutral);
     CHECK(predicted.has_value());
     CHECK(predicted && SameInput(predicted->Local, neutral));
-    CHECK(predicted && SameInput(predicted->Remote, neutral));
+    CHECK(predicted && SameInput(predicted->Remote, remote));
     CHECK(predicted && predicted->RemotePredicted);
     CHECK(!ResolveReplayFrameInputs(runtime, 40, -1, neutral));
     CHECK(!ResolveReplayFrameInputs(runtime, 40, 2, neutral));
@@ -313,6 +357,8 @@ void TestRuntimeRestartContractAndStatistics()
     CHECK(runtime.LastInputHealthSummaryFrame == noFrameLimit);
     CHECK(runtime.LastInputFrameLeadResendAt == std::chrono::steady_clock::time_point{});
     CHECK(runtime.InputFrameLeadResendCount == 0);
+    CHECK(!runtime.HighestContiguousRemoteFrame());
+    CHECK(!runtime.UnconfirmedRemoteFrameCountThrough(20));
     CHECK(runtime.RemoteInputWaitCount == 1);
     CHECK(runtime.RemoteInputWaitLoops == 3);
     CHECK(runtime.RemoteInputWaitUs == 100);
@@ -466,6 +512,7 @@ int main()
 {
     TestPredictionAndConfirmation();
     TestPredictionMismatchScheduling();
+    TestPredictionUsesFrameOrderInsteadOfArrivalOrder();
     TestPredictionProbeAndPrune();
     TestRuntimeRemoteStorePrimeAndPrune();
     TestReplayFrameInputResolution();

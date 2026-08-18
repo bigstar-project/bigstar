@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <utility>
 #include <vector>
@@ -552,17 +553,32 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
     const bool romLoopBackend =
         context.Config.Backend == Config::RollbackBackend::RomLoop;
     const melonDS::u32 originalMismatchFrame = mismatchFrame;
-    const int maxResimFrames =
-        romLoopBackend ? static_cast<int>(kRomLoopHistoryCapacity - 1)
-                       : context.Config.MaxResimFrames;
-    mismatchFrame = RollbackStorage::ClampResimulationMismatch(
-        mismatchFrame, frame, maxResimFrames);
-    if (mismatchFrame != originalMismatchFrame && context.Input.NetplayTrace) {
-      TraceOutput::Printf(
-          "NSMB Rollback: capping resim window originalMismatch=%u "
-          "cappedMismatch=%u current=%u maxFrames=%u\n",
-          originalMismatchFrame, mismatchFrame, frame,
-          static_cast<melonDS::u32>(maxResimFrames));
+    if (romLoopBackend && context.Config.PredictionHorizonFrames > 0) {
+      const melonDS::u32 mismatchDepth = frame - mismatchFrame;
+      if (mismatchDepth > static_cast<melonDS::u32>(
+                              context.Config.PredictionHorizonFrames)) {
+        TraceOutput::Printf(
+            "NSMB Rollback: prediction horizon invariant failed "
+            "mismatch=%u current=%u depth=%u horizon=%d\n",
+            mismatchFrame, frame, mismatchDepth,
+            context.Config.PredictionHorizonFrames);
+        TraceOutput::Flush();
+        std::_Exit(74);
+      }
+    } else {
+      const int maxResimFrames =
+          romLoopBackend ? static_cast<int>(kRomLoopHistoryCapacity - 1)
+                         : context.Config.MaxResimFrames;
+      mismatchFrame = RollbackStorage::ClampResimulationMismatch(
+          mismatchFrame, frame, maxResimFrames);
+      if (mismatchFrame != originalMismatchFrame &&
+          context.Input.NetplayTrace) {
+        TraceOutput::Printf(
+            "NSMB Rollback: capping resim window originalMismatch=%u "
+            "cappedMismatch=%u current=%u maxFrames=%u\n",
+            originalMismatchFrame, mismatchFrame, frame,
+            static_cast<melonDS::u32>(maxResimFrames));
+      }
     }
     const auto observedFrame =
         context.Inputs.RollbackInputs.PendingRollbackObservedFrame();

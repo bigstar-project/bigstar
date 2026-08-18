@@ -831,26 +831,37 @@ void WritePacketBridgeJitScratchIfNeeded(
         }
         networkUs = static_cast<unsigned long long>(ElapsedUs(networkStart));
 
-        // Frame-lead throttling pumps the network. Do it before choosing the
-        // remote input so a packet received here cannot confirm a prediction
-        // after that prediction has already been committed to guest scratch.
+        const melonDS::u32 rollbackInputEpoch =
+            G.Connection.SharedLogicalEpoch != 0
+            ? G.Connection.SharedLogicalEpoch
+            : G.Connection.LocalStartupRawFrame;
+        const bool rollbackInputActive = G.Rollback.Enabled
+            && G.Input.NetplayOnly
+            && (rollbackInputEpoch == 0
+                || logicalFrame >= rollbackInputEpoch);
+
+        // Both gates pump the network. Do it before choosing the remote input
+        // so a packet received here cannot confirm a prediction after that
+        // prediction has already been committed to guest scratch.
         const auto throttleStart = std::chrono::steady_clock::now();
-        NetplaySession::ThrottleFrameLead(
-            NetplaySessionContext(), NetplaySessionHooks(), nds, frame, sendFrame);
+        if (rollbackInputActive && G.Rollback.PredictionHorizonFrames > 0)
+        {
+            NetplaySession::WaitForRollbackPredictionHorizon(
+                NetplaySessionContext(), NetplaySessionHooks(), nds, frame,
+                logicalFrame, sendFrame);
+        }
+        else
+        {
+            NetplaySession::ThrottleFrameLead(
+                NetplaySessionContext(), NetplaySessionHooks(), nds, frame,
+                sendFrame);
+        }
         throttleUs = static_cast<unsigned long long>(ElapsedUs(throttleStart));
 
         const auto resolveStart = std::chrono::steady_clock::now();
         {
             std::unique_lock<std::mutex> lock(G.Mutex);
             auto it = G.InputRuntime.RemoteInputs.find(logicalFrame);
-            const melonDS::u32 rollbackInputEpoch =
-                G.Connection.SharedLogicalEpoch != 0
-                ? G.Connection.SharedLogicalEpoch
-                : G.Connection.LocalStartupRawFrame;
-            const bool rollbackInputActive = G.Rollback.Enabled
-                && G.Input.NetplayOnly
-                && (rollbackInputEpoch == 0
-                    || logicalFrame >= rollbackInputEpoch);
             if (rollbackInputActive)
             {
                 if (it == G.InputRuntime.RemoteInputs.end())

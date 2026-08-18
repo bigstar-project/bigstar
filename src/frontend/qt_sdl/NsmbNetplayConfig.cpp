@@ -585,6 +585,13 @@ RollbackConfig LoadRollbackConfig(const Environment &environment) {
       0, 30);
   config.MaxResimFrames = std::clamp(
       ReadInt(environment, "MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES", 0), 0, 30);
+  config.PredictionHorizonFrames = std::clamp(
+      ReadInt(environment,
+              "MELONDS_NSML_ROLLBACK_PREDICTION_HORIZON_FRAMES", 0),
+      0, 11);
+  config.PredictionHorizonTimeoutMs = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_ROLLBACK_HORIZON_TIMEOUT_MS", 7000),
+      100, 60000);
   return config;
 }
 

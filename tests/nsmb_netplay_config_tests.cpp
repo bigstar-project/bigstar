@@ -545,6 +545,8 @@ void TestRollbackConfigDefaultsAndBackendAliases() {
   CHECK(config.CheckpointInterval == 1);
   CHECK(config.DeltaKeyframeInterval == 10);
   CHECK(config.MainRAMPageSize == 4096);
+  CHECK(config.PredictionHorizonFrames == 0);
+  CHECK(config.PredictionHorizonTimeoutMs == 7000);
 
   const std::pair<const char *, RollbackBackend> aliases[] = {
       {"core-lite", RollbackBackend::CoreLite},
@@ -598,6 +600,8 @@ void TestRollbackConfigReadsClampsAndDependencies() {
       {"MELONDS_NSML_ROLLBACK_TINY_CORE_FLAGS", "9999"},
       {"MELONDS_NSML_ROLLBACK_RESIMULATE_DELAY_FRAMES", "99"},
       {"MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES", "-1"},
+      {"MELONDS_NSML_ROLLBACK_PREDICTION_HORIZON_FRAMES", "99"},
+      {"MELONDS_NSML_ROLLBACK_HORIZON_TIMEOUT_MS", "1"},
   };
 
   const auto config = NsmbMvlNetplay::Config::LoadRollbackConfig(environment);
@@ -623,6 +627,8 @@ void TestRollbackConfigReadsClampsAndDependencies() {
   CHECK(config.TinyCoreFlags == 2047);
   CHECK(config.ResimulateDelayFrames == 30);
   CHECK(config.MaxResimFrames == 0);
+  CHECK(config.PredictionHorizonFrames == 11);
+  CHECK(config.PredictionHorizonTimeoutMs == 100);
 }
 
 void TestMvlConfigDefaults() {

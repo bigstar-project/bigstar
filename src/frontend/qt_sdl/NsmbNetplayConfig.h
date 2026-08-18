@@ -183,6 +183,8 @@ struct RollbackConfig {
   int TinyCoreFlags = 0;
   int ResimulateDelayFrames = 0;
   int MaxResimFrames = 0;
+  int PredictionHorizonFrames = 0;
+  int PredictionHorizonTimeoutMs = 7000;
 };
 
 struct MvlCameraInitHoldConfig {

@@ -87,7 +87,6 @@ public:
 private:
     InputMap Predictions_;
     InputMap PredictionProbeConfirmations_;
-    std::optional<InputState> LastConfirmedInput_;
     std::optional<melonDS::u32> PendingRollbackFrame_;
     std::optional<melonDS::u32> PendingRollbackObservedFrame_;
     melonDS::u32 PredictionCount_ = 0;
@@ -127,6 +126,9 @@ public:
         melonDS::u32 delay,
         const InputState& neutralInput,
         melonDS::u32 noFrameLimit);
+    std::optional<melonDS::u32> HighestContiguousRemoteFrame() const;
+    std::optional<melonDS::u32> UnconfirmedRemoteFrameCountThrough(
+        melonDS::u32 frame) const;
     int Lead(melonDS::u32 sendFrame, melonDS::u32 noFrameLimit) const;
     void RecordRemoteInputWait(unsigned long long elapsedUs, unsigned long long loops);
     void RecordFrameLeadThrottle(unsigned long long elapsedUs, unsigned long long loops);
@@ -147,6 +149,7 @@ public:
     melonDS::u32 LastInputHealthReceiveGapFrame = 0;
     melonDS::u32 LastInputHealthSendGapFrame = 0;
     melonDS::u32 LastInputFrameThrottleTraceFrame = 0;
+    melonDS::u32 LastRollbackHorizonTraceFrame = 0;
     unsigned long long RemoteInputWaitCount = 0;
     unsigned long long RemoteInputWaitLoops = 0;
     unsigned long long RemoteInputWaitUs = 0;
@@ -155,6 +158,12 @@ public:
     unsigned long long FrameLeadThrottleLoops = 0;
     unsigned long long FrameLeadThrottleUs = 0;
     unsigned long long FrameLeadThrottleMaxUs = 0;
+
+private:
+    void AdvanceContiguousRemoteFrame();
+
+    std::optional<melonDS::u32> RemoteInputEpochStartFrame_;
+    std::optional<melonDS::u32> HighestContiguousRemoteFrame_;
 };
 
 std::optional<ReplayFrameInputs> ResolveReplayFrameInputs(

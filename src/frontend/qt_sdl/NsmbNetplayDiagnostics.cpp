@@ -679,7 +679,7 @@ std::string FormatNetplayStartupReport(
     const char *rollbackBackend, const Config::MvlConfig &mvl,
     int currentStage, melonDS::u32 currentSceneSettings) {
   return FormatPrintf(
-      "NSMB MvL Netplay: enabled tUnixMs=%llu role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputHealthTrace=%d inputHealthInterval=%d inputHealthWaitThresholdMs=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputSendDelay=%d inputSendJitter=%d inputSendDelayStart=%u inputSendDelayEnd=%u inputDropModulo=%d inputDropOffset=%d inputDropStart=%u inputDropEnd=%u netPumpThread=%d netPumpSleepUs=%d inputWaitPollUs=%d rollbackInputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d matchSeed=0x%08X seedConfigured=%d mvlStage=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
+      "NSMB MvL Netplay: enabled tUnixMs=%llu role=%s port=%d peer=%s delay=%d warmup=%d localInstance=%d netplayStartFrame=%u localWait=%d remoteTimeoutFatal=%d waitForPeer=%d waitForPeerAtStart=%d deferNetworkUntilStart=%d netplayFrameBarrier=%d packetBridge=%d packetBridgeOnly=%d packetBridgePreGame=%d packetBridgeTrace=%d packetBridgeDirect=%d packetBridgeForceTick=%d packetBridgeForceTickStart=%u packetBridgeMaxFrameLead=%d packetBridgeThrottleMs=%d packetBridgeThrottleStart=%u inputNetplayOnly=%d inputNetplayTrace=%d inputHealthTrace=%d inputHealthInterval=%d inputHealthWaitThresholdMs=%d inputMaxFrameLead=%d inputUnreliable=%d inputBundleHistory=%d inputSendDelay=%d inputSendJitter=%d inputSendDelayStart=%u inputSendDelayEnd=%u inputDropModulo=%d inputDropOffset=%d inputDropStart=%u inputDropEnd=%u netPumpThread=%d netPumpSleepUs=%d inputWaitPollUs=%d rollbackInputWaitUs=%d rollback=%d rollbackBackend=%s rollbackWindow=%d rollbackCheckpointInterval=%d rollbackResimDelay=%d rollbackResimulate=%d rollbackRestoreProbe=%d rollbackPredProbeModulo=%d rollbackPredProbeLimit=%d rollbackPredictionHorizon=%d rollbackHorizonTimeoutMs=%d matchSeed=0x%08X seedConfigured=%d mvlStage=%d mvlSceneSettings=0x%08X mvlCourseMode=%s mvlBigStarTarget=%d\n",
       static_cast<unsigned long long>(unixMs), role, connection.Port,
       connection.PeerHost.c_str(), connection.Delay, connection.WarmupFrames,
       connection.LocalInstance, connection.StartFrame,
@@ -707,7 +707,8 @@ std::string FormatNetplayStartupReport(
       rollbackBackend, rollback.Window, rollback.CheckpointInterval,
       rollback.ResimulateDelayFrames, rollback.Resimulate ? 1 : 0,
       rollback.RestoreProbe ? 1 : 0, rollback.PredictionProbeModulo,
-       rollback.PredictionProbeLimit, mvl.MatchSeed,
+       rollback.PredictionProbeLimit, rollback.PredictionHorizonFrames,
+       rollback.PredictionHorizonTimeoutMs, mvl.MatchSeed,
        mvl.MatchSeedConfigured ? 1 : 0, currentStage, currentSceneSettings,
        mvl.CourseMode.c_str(),
       mvl.BigStarTarget);

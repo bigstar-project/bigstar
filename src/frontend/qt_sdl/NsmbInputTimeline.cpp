@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <sstream>
 
 namespace NsmbMvlNetplay::InputTimeline
@@ -246,7 +247,6 @@ ConfirmedInputResult PredictionRuntime::Confirm(
 
     PredictionProbeConfirmations_.erase(frame);
 
-    LastConfirmedInput_ = input;
     return result;
 }
 
@@ -292,8 +292,15 @@ PredictedInput PredictionRuntime::Resolve(
         : Predictions_.end();
     if (previous != Predictions_.end())
         input = previous->second;
-    else if (LastConfirmedInput_)
-        input = *LastConfirmedInput_;
+    else
+    {
+        auto priorConfirmed = confirmedInputs.lower_bound(frame);
+        if (priorConfirmed != confirmedInputs.begin())
+        {
+            --priorConfirmed;
+            input = priorConfirmed->second;
+        }
+    }
 
     if (applyProbe)
     {
@@ -337,7 +344,6 @@ void PredictionRuntime::ClearPredictions()
 void PredictionRuntime::ResetForRestart()
 {
     ClearPredictions();
-    LastConfirmedInput_.reset();
     ClearPendingRollback();
 }
 
@@ -424,8 +430,11 @@ void Runtime::ResetForRestart(melonDS::u32 noFrameLimit)
     LastInputHealthReceiveGapFrame = noFrameLimit;
     LastInputHealthSendGapFrame = noFrameLimit;
     LastInputFrameThrottleTraceFrame = noFrameLimit;
+    LastRollbackHorizonTraceFrame = noFrameLimit;
     LastInputFrameLeadResendAt = {};
     InputFrameLeadResendCount = 0;
+    RemoteInputEpochStartFrame_.reset();
+    HighestContiguousRemoteFrame_.reset();
 }
 
 RemoteInputStoreResult Runtime::StoreRemote(
@@ -442,6 +451,7 @@ RemoteInputStoreResult Runtime::StoreRemote(
     RemoteInputs[frame] = input;
     if (LastReceivedInputFrame == noFrameLimit || LastReceivedInputFrame < frame)
         LastReceivedInputFrame = frame;
+    AdvanceContiguousRemoteFrame();
     return result;
 }
 
@@ -459,17 +469,59 @@ void Runtime::PrimeEpoch(
 {
     PruneHistory(startFrame);
     const melonDS::u32 firstInputFrame = startFrame + delay;
+    RemoteInputEpochStartFrame_ = startFrame;
+    HighestContiguousRemoteFrame_.reset();
     for (melonDS::u32 frame = startFrame; frame < firstInputFrame; frame++)
     {
         LocalInputs.emplace(frame, neutralInput);
         RemoteInputs.emplace(frame, neutralInput);
     }
-    if (delay == 0)
+    if (delay > 0)
+    {
+        const melonDS::u32 primedThrough = firstInputFrame - 1;
+        if (LastReceivedInputFrame == noFrameLimit || LastReceivedInputFrame < primedThrough)
+            LastReceivedInputFrame = primedThrough;
+    }
+    AdvanceContiguousRemoteFrame();
+}
+
+void Runtime::AdvanceContiguousRemoteFrame()
+{
+    if (!RemoteInputEpochStartFrame_)
         return;
 
-    const melonDS::u32 primedThrough = firstInputFrame - 1;
-    if (LastReceivedInputFrame == noFrameLimit || LastReceivedInputFrame < primedThrough)
-        LastReceivedInputFrame = primedThrough;
+    if (HighestContiguousRemoteFrame_
+        && *HighestContiguousRemoteFrame_ == std::numeric_limits<melonDS::u32>::max())
+        return;
+    melonDS::u32 nextFrame = HighestContiguousRemoteFrame_
+        ? *HighestContiguousRemoteFrame_ + 1
+        : *RemoteInputEpochStartFrame_;
+    while (RemoteInputs.find(nextFrame) != RemoteInputs.end())
+    {
+        HighestContiguousRemoteFrame_ = nextFrame;
+        if (nextFrame == std::numeric_limits<melonDS::u32>::max())
+            break;
+        nextFrame++;
+    }
+}
+
+std::optional<melonDS::u32> Runtime::HighestContiguousRemoteFrame() const
+{
+    return HighestContiguousRemoteFrame_;
+}
+
+std::optional<melonDS::u32> Runtime::UnconfirmedRemoteFrameCountThrough(
+    melonDS::u32 frame) const
+{
+    if (!RemoteInputEpochStartFrame_ || frame < *RemoteInputEpochStartFrame_)
+        return std::nullopt;
+
+    if (HighestContiguousRemoteFrame_ && frame <= *HighestContiguousRemoteFrame_)
+        return 0;
+    const melonDS::u32 firstUnconfirmed = HighestContiguousRemoteFrame_
+        ? *HighestContiguousRemoteFrame_ + 1
+        : *RemoteInputEpochStartFrame_;
+    return frame - firstUnconfirmed + 1;
 }
 
 int Runtime::Lead(melonDS::u32 sendFrame, melonDS::u32 noFrameLimit) const

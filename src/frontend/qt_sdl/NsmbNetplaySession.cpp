@@ -1123,4 +1123,80 @@ void ThrottleFrameLead(Context context, const Hooks &hooks, melonDS::NDS *nds,
   }
 }
 
+void WaitForRollbackPredictionHorizon(
+    Context context, const Hooks &hooks, melonDS::NDS *nds,
+    melonDS::u32 rawFrame, melonDS::u32 logicalFrame,
+    melonDS::u32 sendFrame) {
+  if (!context.Rollback.Enabled || !context.Input.NetplayOnly ||
+      context.Rollback.PredictionHorizonFrames <= 0 || !context.Enabled ||
+      !context.Ready || IsPastTestInputRange(context, sendFrame))
+    return;
+
+  const auto start = std::chrono::steady_clock::now();
+  bool blocked = false;
+  for (;;) {
+    std::optional<melonDS::u32> unconfirmedFrames;
+    std::optional<melonDS::u32> contiguousFrame;
+    {
+      std::lock_guard<std::mutex> lock(context.Mutex);
+      PumpLocked(context, hooks, nds, rawFrame);
+      MaybeResendStartReadyLocked(context, hooks);
+      unconfirmedFrames =
+          context.Inputs.UnconfirmedRemoteFrameCountThrough(logicalFrame);
+      contiguousFrame = context.Inputs.HighestContiguousRemoteFrame();
+      if (unconfirmedFrames &&
+          *unconfirmedFrames > static_cast<melonDS::u32>(
+                                   context.Rollback.PredictionHorizonFrames)) {
+        MaybeResendLatestInputForFrameLeadLocked(context, hooks);
+      }
+    }
+
+    if (!unconfirmedFrames ||
+        *unconfirmedFrames <= static_cast<melonDS::u32>(
+                                  context.Rollback.PredictionHorizonFrames)) {
+      if (blocked && context.Input.NetplayTrace) {
+        const auto waitedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  std::chrono::steady_clock::now() - start)
+                                  .count();
+        TraceOutput::Printf(
+            "NSMB Rollback: prediction horizon resumed rawFrame=%u "
+            "logicalFrame=%u contiguous=%u waitedMs=%lld horizon=%d\n",
+            rawFrame, logicalFrame, contiguousFrame.value_or(kNoFrame),
+            static_cast<long long>(waitedMs),
+            context.Rollback.PredictionHorizonFrames);
+      }
+      return;
+    }
+
+    blocked = true;
+    if (context.Input.NetplayTrace &&
+        context.Inputs.LastRollbackHorizonTraceFrame != logicalFrame) {
+      context.Inputs.LastRollbackHorizonTraceFrame = logicalFrame;
+      TraceOutput::Printf(
+          "NSMB Rollback: prediction horizon blocked rawFrame=%u "
+          "logicalFrame=%u contiguous=%u unconfirmed=%u horizon=%d "
+          "sendFrame=%u\n",
+          rawFrame, logicalFrame, contiguousFrame.value_or(kNoFrame),
+          *unconfirmedFrames, context.Rollback.PredictionHorizonFrames,
+          sendFrame);
+    }
+
+    const auto waitedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now() - start)
+                              .count();
+    if (waitedMs >= context.Rollback.PredictionHorizonTimeoutMs) {
+      TraceOutput::Printf(
+          "NSMB Rollback: prediction horizon timeout rawFrame=%u "
+          "logicalFrame=%u contiguous=%u unconfirmed=%u horizon=%d "
+          "waitedMs=%lld\n",
+          rawFrame, logicalFrame, contiguousFrame.value_or(kNoFrame),
+          *unconfirmedFrames, context.Rollback.PredictionHorizonFrames,
+          static_cast<long long>(waitedMs));
+      TraceOutput::Flush();
+      std::_Exit(73);
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+}
+
 } // namespace NsmbMvlNetplay::NetplaySession

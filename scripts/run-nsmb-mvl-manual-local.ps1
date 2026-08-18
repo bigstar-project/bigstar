@@ -31,6 +31,8 @@ param(
     [int]$RollbackResimulateDelayFrames = 0,
     [int]$RollbackInputWaitUs = 0,
     [int]$RollbackMaxResimFrames = 0,
+    [int]$RollbackPredictionHorizonFrames = 0,
+    [int]$RollbackHorizonTimeoutMs = 7000,
     [switch]$RollbackResimulate,
     [switch]$WorldStateTraceObjectLifecycles,
     [switch]$WorldStateTraceActorInternals,
@@ -164,8 +166,8 @@ if ($useRomLoopRollback) {
 }
 
 if ($LowLatencyRollback) {
-    $InputDelayFrames = 0
-    $InputMaxFrameLead = 8
+    if (-not $PSBoundParameters.ContainsKey('InputDelayFrames')) { $InputDelayFrames = 0 }
+    if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = 8 }
     $Rollback = $true
     if (-not $PSBoundParameters.ContainsKey('RollbackBackend')) { $RollbackBackend = "coredelta" }
     if (-not $PSBoundParameters.ContainsKey('RollbackWindow')) { $RollbackWindow = 64 }
@@ -179,9 +181,14 @@ if ($useRomLoopRollback) {
     $RollbackBackend = "romloop"
     $RollbackWindow = 16
     $RollbackCheckpointInterval = 1
+    if (-not $PSBoundParameters.ContainsKey('InputDelayFrames')) { $InputDelayFrames = 2 }
+    if (-not $PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = -1 }
+    if (-not $PSBoundParameters.ContainsKey('RollbackPredictionHorizonFrames')) { $RollbackPredictionHorizonFrames = 7 }
     if (-not $PSBoundParameters.ContainsKey('RollbackMaxResimFrames')) { $RollbackMaxResimFrames = 7 }
     if (-not $PSBoundParameters.ContainsKey('InputSendDelayFrames')) { $InputSendDelayFrames = 2 }
     if (-not $PSBoundParameters.ContainsKey('InputSendJitterFrames')) { $InputSendJitterFrames = 1 }
+    $InputUnreliable = $true
+    if (-not $PSBoundParameters.ContainsKey('InputBundleHistory')) { $InputBundleHistory = 11 }
     if (-not $PSBoundParameters.ContainsKey('HostReadyTimeoutMs')) { $HostReadyTimeoutMs = 0 }
     if (-not $PSBoundParameters.ContainsKey('HostRom')) {
         $HostRom = "roms\nsmb-us-direct-mvl-entry-stable-host-romloop-gametick.tmp.nds"
@@ -521,6 +528,13 @@ if ($RollbackMaxResimFrames -gt 0) {
 } else {
     Remove-Item Env:\MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES -ErrorAction SilentlyContinue
 }
+if ($RollbackPredictionHorizonFrames -gt 0) {
+    $env:MELONDS_NSML_ROLLBACK_PREDICTION_HORIZON_FRAMES = "$RollbackPredictionHorizonFrames"
+    $env:MELONDS_NSML_ROLLBACK_HORIZON_TIMEOUT_MS = "$RollbackHorizonTimeoutMs"
+} else {
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_HORIZON_FRAMES -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_HORIZON_TIMEOUT_MS -ErrorAction SilentlyContinue
+}
 if ($NetworkPumpThread) {
     $env:MELONDS_NSML_NET_PUMP_THREAD = "1"
     $env:MELONDS_NSML_NET_PUMP_SLEEP_US = "$NetworkPumpSleepUs"
@@ -752,7 +766,7 @@ if ($ClientOnly) {
     Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
 }
 Write-Host "physical input neutralized host=$([bool]$NeutralizeHostInput) client=$([bool]$NeutralizeClientInput)"
-Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames hostSendDelay=$(if ($HostInputSendDelayFrames -ge 0) { $HostInputSendDelayFrames } else { 'common' }) clientSendDelay=$(if ($ClientInputSendDelayFrames -ge 0) { $ClientInputSendDelayFrames } else { 'common' }) jitter=$InputSendJitterFrames networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame startBarrier=$([bool]$WaitForPeerAtNetplayStart) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
+Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead predictionHorizon=$RollbackPredictionHorizonFrames horizonTimeoutMs=$RollbackHorizonTimeoutMs internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames hostSendDelay=$(if ($HostInputSendDelayFrames -ge 0) { $HostInputSendDelayFrames } else { 'common' }) clientSendDelay=$(if ($ClientInputSendDelayFrames -ge 0) { $ClientInputSendDelayFrames } else { 'common' }) jitter=$InputSendJitterFrames networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame startBarrier=$([bool]$WaitForPeerAtNetplayStart) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown)"
 Write-Host "gameplay heartbeat interval=$GameplayHeartbeatInterval"
 if ($HostAIPlayLog -or $ClientAIPlayLog) {
     Write-Host "AI play log host=$(if ($HostAIPlayLog) { $HostAIPlayLog } else { 'off' }) client=$(if ($ClientAIPlayLog) { $ClientAIPlayLog } else { 'off' }) interval=$AIPlayLogInterval flushInterval=$AIPlayLogFlushInterval maxObjects=$AIPlayLogMaxObjects"
