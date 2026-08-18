@@ -36,6 +36,10 @@ param(
     [int]$WorldStateTraceObjectLifecyclesStartFrame = 0,
     [int]$WorldStateTraceObjectLifecyclesEndFrame = 0,
     [int]$ScreenshotInterval = 600,
+    [int]$ScreenshotStartFrame = 0,
+    [int]$ScreenshotEndFrame = 0,
+    [ValidateRange(1, 1000000)] [int]$HashInterval = 300,
+    [switch]$ScreenHash,
     [string]$RamDumpFrames = "",
     [int]$RamDumpInterval = 0,
     [string]$StateSaveDir = "",
@@ -150,6 +154,11 @@ param(
     [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
     [int]$ForcePlayerInventoryPowerup0 = 0,
     [int]$ForcePlayerInventoryPowerup1 = 0,
+    [switch]$ForcePlayerCoins,
+    [int]$ForcePlayerCoinsStartFrame = 0,
+    [int]$ForcePlayerCoinsEndFrame = 0,
+    [ValidateRange(0, 7)] [int]$ForcePlayerCoins0 = 0,
+    [ValidateRange(0, 7)] [int]$ForcePlayerCoins1 = 0,
     [switch]$ForcePlayerStarCounters,
     [int]$ForcePlayerStarCountersStartFrame = 0,
     [int]$ForcePlayerStarCountersEndFrame = 0,
@@ -750,13 +759,21 @@ function Start-MelonLANProcess {
         $env:MELONDS_NSML_DISABLE_HASH = "1"
         Remove-Item Env:\MELONDS_NSML_HASH_LOG -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_HASH_INTERVAL -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SCREEN_HASH -ErrorAction SilentlyContinue
     } else {
         Remove-Item Env:\MELONDS_NSML_DISABLE_HASH -ErrorAction SilentlyContinue
         $env:MELONDS_NSML_HASH_LOG = $HashLog
-        $env:MELONDS_NSML_HASH_INTERVAL = "300"
+        $env:MELONDS_NSML_HASH_INTERVAL = "$HashInterval"
+        if ($ScreenHash) {
+            $env:MELONDS_NSML_SCREEN_HASH = "1"
+        } else {
+            Remove-Item Env:\MELONDS_NSML_SCREEN_HASH -ErrorAction SilentlyContinue
+        }
     }
     $env:MELONDS_NSML_SCREENSHOT_DIR = $ScreenshotDir
     $env:MELONDS_NSML_SCREENSHOT_INTERVAL = "$ScreenshotInterval"
+    if ($ScreenshotStartFrame -gt 0) { $env:MELONDS_NSML_SCREENSHOT_START_FRAME = "$ScreenshotStartFrame" } else { Remove-Item Env:\MELONDS_NSML_SCREENSHOT_START_FRAME -ErrorAction SilentlyContinue }
+    if ($ScreenshotEndFrame -gt 0) { $env:MELONDS_NSML_SCREENSHOT_END_FRAME = "$ScreenshotEndFrame" } else { Remove-Item Env:\MELONDS_NSML_SCREENSHOT_END_FRAME -ErrorAction SilentlyContinue }
     if ($MvlStage -ge 0) { $env:MELONDS_NSML_MVL_STAGE = "$MvlStage" } else { Remove-Item Env:\MELONDS_NSML_MVL_STAGE -ErrorAction SilentlyContinue }
     if ($MvlSceneSettings) { $env:MELONDS_NSML_MVL_SCENE_SETTINGS = "$MvlSceneSettings" } else { Remove-Item Env:\MELONDS_NSML_MVL_SCENE_SETTINGS -ErrorAction SilentlyContinue }
     $env:MELONDS_NSML_MVL_WINS = "$MvlWins"
@@ -1024,6 +1041,19 @@ function Start-MelonLANProcess {
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_END_FRAME -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP0 -ErrorAction SilentlyContinue
         Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP1 -ErrorAction SilentlyContinue
+    }
+    if ($ForcePlayerCoins) {
+        $env:MELONDS_NSML_FORCE_PLAYER_COINS = "1"
+        $env:MELONDS_NSML_FORCE_PLAYER_COINS_START_FRAME = "$ForcePlayerCoinsStartFrame"
+        $env:MELONDS_NSML_FORCE_PLAYER_COINS_END_FRAME = "$ForcePlayerCoinsEndFrame"
+        $env:MELONDS_NSML_FORCE_PLAYER_COINS0 = "$ForcePlayerCoins0"
+        $env:MELONDS_NSML_FORCE_PLAYER_COINS1 = "$ForcePlayerCoins1"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COINS -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COINS_START_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COINS_END_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COINS0 -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_FORCE_PLAYER_COINS1 -ErrorAction SilentlyContinue
     }
     if ($ForcePlayerStarCounters) {
         $env:MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS = "1"
@@ -1679,6 +1709,11 @@ function Start-MelonLANProcess {
         "fixedFrameTime=$($env:MELONDS_NSML_FIXED_FRAME_TIMESTEP)"
         "targetFps=$($env:MELONDS_NSML_TARGET_FPS)"
         "disableHash=$($env:MELONDS_NSML_DISABLE_HASH)"
+        "hashInterval=$($env:MELONDS_NSML_HASH_INTERVAL)"
+        "screenHash=$($env:MELONDS_NSML_SCREEN_HASH)"
+        "screenshotInterval=$($env:MELONDS_NSML_SCREENSHOT_INTERVAL)"
+        "screenshotStartFrame=$($env:MELONDS_NSML_SCREENSHOT_START_FRAME)"
+        "screenshotEndFrame=$($env:MELONDS_NSML_SCREENSHOT_END_FRAME)"
         "mvlStage=$($env:MELONDS_NSML_MVL_STAGE)"
         "mvlSceneSettings=$($env:MELONDS_NSML_MVL_SCENE_SETTINGS)"
         "mvlWins=$($env:MELONDS_NSML_MVL_WINS)"
@@ -1727,6 +1762,12 @@ function Start-MelonLANProcess {
         "forcePlayerInventoryPowerupsEnd=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_END_FRAME)"
         "forcePlayerInventoryPowerup0=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP0)"
         "forcePlayerInventoryPowerup1=$($env:MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP1)"
+        "forcePlayerCoinsSwitch=$ForcePlayerCoins"
+        "forcePlayerCoinsEnv=$($env:MELONDS_NSML_FORCE_PLAYER_COINS)"
+        "forcePlayerCoinsStart=$($env:MELONDS_NSML_FORCE_PLAYER_COINS_START_FRAME)"
+        "forcePlayerCoinsEnd=$($env:MELONDS_NSML_FORCE_PLAYER_COINS_END_FRAME)"
+        "forcePlayerCoins0=$($env:MELONDS_NSML_FORCE_PLAYER_COINS0)"
+        "forcePlayerCoins1=$($env:MELONDS_NSML_FORCE_PLAYER_COINS1)"
         "forcePlayerStarCountersSwitch=$ForcePlayerStarCounters"
         "forcePlayerStarCountersEnv=$($env:MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS)"
         "forcePlayerStarCountersStart=$($env:MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS_START_FRAME)"

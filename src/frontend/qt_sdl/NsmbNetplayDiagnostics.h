@@ -236,6 +236,7 @@ enum class RuntimePatchLogKind : std::size_t {
   ForceDeathCounters,
   ForcePowerups,
   ForceInventoryPowerups,
+  ForceCoins,
   ForceStarCounters,
   Count,
 };

@@ -700,6 +700,7 @@ void ApplyRollbackResimFramePatches(int instanceID, melonDS::u32 frame, melonDS:
     MvlGameHooks::ClearCameraInitHold(MvlHooksContext(), instanceID, frame, nds);
     MvlGameHooks::ForcePlayerDeathCounters(MvlHooksContext(), instanceID, frame, nds);
     MvlGameHooks::ForcePlayerInventoryPowerups(MvlHooksContext(), instanceID, frame, nds);
+    MvlGameHooks::ForcePlayerCoins(MvlHooksContext(), instanceID, frame, nds);
     MvlGameHooks::ForcePlayerStarCounters(MvlHooksContext(), instanceID, frame, nds);
 }
 
@@ -1235,6 +1236,7 @@ void RunBeforeFrameSetupPhase(int instanceID, melonDS::u32 frame, melonDS::NDS* 
     MvlGameHooks::ForcePlayerDeathCounters(MvlHooksContext(), instanceID, frame, nds);
     MvlGameHooks::ForcePlayerPowerups(MvlHooksContext(), instanceID, frame, nds);
     MvlGameHooks::ForcePlayerInventoryPowerups(MvlHooksContext(), instanceID, frame, nds);
+    MvlGameHooks::ForcePlayerCoins(MvlHooksContext(), instanceID, frame, nds);
     MvlGameHooks::ForcePlayerStarCounters(MvlHooksContext(), instanceID, frame, nds);
 }
 
@@ -1648,6 +1650,7 @@ void RunAfterFrameRuntimePatchPhase(int instanceID, melonDS::u32 logFrame, melon
     MvlGameHooks::ForcePlayerDeathCounters(MvlHooksContext(), instanceID, logFrame, nds);
     MvlGameHooks::ForcePlayerPowerups(MvlHooksContext(), instanceID, logFrame, nds);
     MvlGameHooks::ForcePlayerInventoryPowerups(MvlHooksContext(), instanceID, logFrame, nds);
+    MvlGameHooks::ForcePlayerCoins(MvlHooksContext(), instanceID, logFrame, nds);
     MvlGameHooks::ForcePlayerStarCounters(MvlHooksContext(), instanceID, logFrame, nds);
     MvlLifecycle::SaveGameplayCheckpointIfNeeded(
         MvlLifecycleContext(), MvlLifecycleHooks(), instanceID, logFrame, nds);

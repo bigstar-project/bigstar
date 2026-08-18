@@ -1,12 +1,12 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
-> 現在の判断は直下の2026-08-18節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
+> 現在の判断は直下の2026-08-19節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
 
-## 2026-08-18 Slippi型を実用化するための制御方針、P=7実測と再戦境界
+## 2026-08-19 Slippi型を実用化するための制御方針、P=7実測と出力・event gate
 
 ### 現時点の独立判断
 
-Slippiの制御原則、すなわち「少量の実入力遅延を先に入れる」「訂正可能範囲だけ予測する」「上限を越える前にgame frameを止める」「欠落入力を再送する」を本forkにも採用した。前節の`D=2/P=5/H=12`を先に製品候補とする判断は撤回する。ユーザーの評価順が「Bigstar統合より先に既存scriptでP=7まで実装・試験」へ明確化されたためである。現在のscript試験候補はlocal input delay `D=2`、最大連続投機tick `P=7`、ROM側history容量`H=12`とし、Bigstar GUI起動経路は変更しない。後述の手動runで見つかったP=7 transaction境界競合、結果画面で旧generationの遅延入力を失う再戦境界、再戦後の人工送信遅延が生raw frameとgeneration-local logical frameの混用で無効になる試験系の不具合を修正した。さらにcontiguous ACKと未ACK入力再送をbundle protocolへ入れ、周期loss、再順序化、短時間断、複合WAN条件、死亡・土管復帰・Big Star取得・stock item消費、音声underrunを実ROMで通した。2D OAMを含む追加画像比較、音声波形・実聴、未網羅eventを残すため、製品完成とは判定しない。
+Slippiの制御原則、すなわち「少量の実入力遅延を先に入れる」「訂正可能範囲だけ予測する」「上限を越える前にgame frameを止める」「欠落入力を再送する」を本forkにも採用した。前節の`D=2/P=5/H=12`を先に製品候補とする判断は撤回する。ユーザーの評価順が「Bigstar統合より先に既存scriptでP=7まで実装・試験」へ明確化されたためである。現在のscript試験候補はlocal input delay `D=2`、最大連続投機tick `P=7`、ROM側history容量`H=12`とし、Bigstar GUI起動経路は変更しない。後述のP=7 transaction境界、再戦generation、人工遅延時刻軸、contiguous ACK/未ACK再送を修正し、周期loss、再順序化、短時間断、複合WAN、死亡・土管復帰・Big Star、stock item、block、8 coin、player接触を実ROMで通した。2D/3D表示は恒久差を作らず3 frame以内に対照画像へ戻るが、音声は訂正側だけ同じsample sourceを重複開始することを確認した。従ってgame-state/network/eventの実現可能性は高まった一方、音声を含む製品完成とは判定しない。
 
 software renderer・60fps制限ありの通常条件 `logs/codex-slippi-horizon7-practical-20260818` は人工送信遅延2-3 frameで、host/client各38訂正、最大log depth `3/2`、最大replay tick `4/3`、active平均`16.664/16.667ms`、最大`28.129/27.640ms`、33ms超0、horizon待機0、26共有heartbeat差0だった。P=7設定そのものによる通常時の性能低下はこのrunでは検出していない。
 
@@ -48,7 +48,17 @@ bundle wire protocolはversion 3へ更新し、各packetにgeneration内の`high
 
 `logs/codex-slippi-wan-stock-item-20260818`はframe 900-2000にLuigiのstock item 2を決定的に用意し、touch後に両roleともframe 2070まで在庫2、2100から0、最終powerup 1を観測した。39/38件のROM-loop訂正、両role各233 packet lossでも19共有heartbeat差0、active平均は両role`16.666ms`、最大`31.649/29.002ms`、33ms超0だった。回帰用に「指定playerの非zero inventoryを観測後、同一区間でzeroへ遷移」の明示gateをmanual/local runnerへ追加した。解析器が入力script終了後の静止を`freeze-suspect`としたのは、heartbeat plateauだけで判定していた偽陽性だった。現在はheartbeat停止に加え、入力保持中のactor座標plateauも同時に閾値を越えた場合だけfreeze疑いとする。
 
-音声についてはSDL callbackが要求したsample数とSPUから読めたsample数を原子的に集計し、性能JSONLへcallback数、underrun回数、不足sample数を120 frame区間で出すようにした。通常起動のemulation hot pathには計測を加えず、性能ログ有効時だけemulation threadから累積値を読む。`logs/codex-slippi-wan-audio-underrun-20260818`の複合WAN・再戦runは、対戦開始後に各role 2250 callbackを観測してunderrun `0/0`、不足sample `0/0`だった。起動前にはhost/client `114/32`回の初期化時underrunがあるため別集計とした。状態差0、active平均`16.727/16.727ms`、連続slow最大1である。これはspeaker供給切れがない証拠だが、既に再生された誤予測音、同じ効果音の重複発行、波形一致、実聴を証明しない。変更後のmelonDS再build、PowerShell 3 scriptの構文解析、CTest全16件は成功した。
+音声についてはSDL callbackが要求したsample数とSPUから読めたsample数を原子的に集計し、性能JSONLへcallback数、underrun回数、不足sample数を120 frame区間で出すようにした。`logs/codex-slippi-wan-audio-underrun-20260818`の複合WAN・再戦runは、対戦開始後に各role 2250 callbackを観測してunderrun `0/0`、不足sample `0/0`だった。これはspeaker供給切れがない証拠だが、波形や効果音の重複までは証明しないため、最終SDL S16 stereo出力、callbackとframeの対応、SPU channel startのsample sourceを診断時だけ記録する経路を追加した。通常起動ではファイルを開かず、emulation threadのframe番号更新も行わない。
+
+同一入力・同一seedのframes 900-1200をlockstep対照とROM-loop候補で比較した `logs/codex-audio-spu-{reference-lockstep,candidate-rollback}-20260819` と、transaction flagを加えた再測定 `logs/codex-audio-spu-transaction-candidate-20260819` では、9回訂正したhostだけ波形gateに失敗した。hostはenvelope correlation `0.926559`、NRMSE `0.289334`、追加transient 8件で、そのうち4件が訂正完了±4 frame内だった。訂正0回のclientはcorrelation `0.975289`、NRMSE `0.165311`でgateを通り、両roleとも対戦区間underrunは0だった。さらにhostのSPU sample startは対照96件に対して104件、対照にあるsourceの欠落0・同一sourceの余分な開始8件（内訳4/2/2件）だった。clientは`97/97`、欠落・余分とも0である。候補hostでは13件のstartがROM-loop transaction中に直接発行されていたため、PCMの揺らぎではなく訂正loopが効果音を再発行していると判定する。
+
+中間replay sampleをSPU出力FIFOへ入れないだけの実験は追加transientを22件から19件へしか減らさず、採用しなかった。ROM-loopはMain RAMだけを戻し、ARM7/SPU hardware timelineを戻さないため、出力を捨ててもchannel再開始後の状態が残る。またtransaction中のchannel start 13件を一律に無視すると、対照との差で余分なのは8件だけなので、少なくとも5件の正しいstartまで消す。安全な修正には、sound command/sample sourceをgame tick単位で識別して投機中はcommitを遅らせ、訂正時に重複だけを置換するledger、または同等の音声専用rollback stateが必要である。これは単純mute/crossfadeでは解決しない現行の最重要blockerとする。
+
+表示は `compare-nsmb-mvl-screen-hash.ps1` で訂正単位の安定収束も判定できるようにした。`logs/codex-screen-candidate-practical-20260818` はhost 26訂正の訂正後0-3 frame、計104標本中97一致・7不一致で、全訂正が3 frame以内に同一role対照へ安定収束した。targeted PNGの8不一致は111-441 pixel、bounding boxは幅15-21px・高さ24-43pxでMario/Luigi spriteの位置だけに局在し、背景・地形・土管・HUD差は0だった。従って以前のpipe二重geometryは再発していない。ただし訂正直後のplayer imageが毎回完全一致する契約ではなく、最大3 frameのsprite位相差を許容している。LCD deferを外す対照はgame-state correctness自体を壊したため棄却した。
+
+未網羅event用にplayer coinを0-7へ期間限定で固定する診断hookと、両peerのevent timelineを比較する `analyze_nsmb_rollback_events.py` を追加した。`logs/codex-rollback-eight-coin-event-20260818` は各role 33訂正中、player 0 coinsが両側ともframe 1660で`7 -> 0`、reward actor `01F/00080002`も同じ時系列で生成され、継続状態差0だった。`logs/codex-rollback-block-event-long-20260818` は各role 38訂正中、frames `1646/1766/2044`の3 blockが両側で同じ使用済みtile 24へ変化し、frame 961以降は実効`59.999/59.999fps`、outer最大`21.251/22.758ms`、25ms超0だった。`logs/codex-rollback-contact-event-20260818` はhost/client `18/20`訂正中、frames `1003-1005`でplayer hitbox overlap、衝突後の速度反転、collision/sub-action flagを両側完全一致で記録した。これらは今回のblock・8 coin・player接触routeを通した証拠であり、全stage・全object typeの網羅を意味しない。
+
+今回の診断追加後はmelonDS Release build、PowerShell 3 scriptの構文解析、Python 2解析器の構文検査、CTest全16件を通した。SPU/PCM診断を有効にした最終1200-frame候補もhost 9訂正、状態fatal 0、対戦区間underrun`0/0`、実効`59.999/59.999fps`、outer最大`19.188/19.198ms`、25ms超0だった。診断を有効にしてもこの短いrouteで性能gate低下は検出していない。
 
 `logs/codex-slippi-horizon7-timeout-20260818` はtimeoutだけ500msへ短縮し、入力を100 frame遅らせた。両roleとも連続確定frontierから8個目へ進む前に停止し、`500/501ms`でexit 73となった。製品候補の既定値はSlippiと同じ7秒である。
 
@@ -73,15 +83,16 @@ rollback有効時の現行`InputMaxFrameLead`は、future labelである`sendFra
 ### 実装と昇格の順序
 
 1. 完了: ROM不要testで、連続frontier、穴あき・逆順packet、generation reset、P=7と8個目の区別を固定した。arrival-order依存のstale predictionをframe順探索へ変更し、P有効時のROM-loop事後clampをfatal invariantへ置き換えた。
-2. 完了: manual `-SlippiRollback`を`D=2/P=7/H=12`、software renderer、旧`InputMaxFrameLead`無効、7秒timeoutへ揃えた。通常2-3 frame条件、深度7を発生させる8-9 frame条件、短縮timeoutを実ROMで試した。ただし8-9 frameの長時間手動条件では上記競合により失敗した。
+2. 完了: manual `-SlippiRollback`を`D=2/P=7/H=12`、software renderer、旧`InputMaxFrameLead`無効、7秒timeoutへ揃えた。通常2-3 frame条件、深度7を発生させる8-9 frame条件、短縮timeoutを実ROMで試した。初回8-9 frame手動条件で見つかったtransaction競合は次項の早期finalizeで解決済みである。
 3. 完了: ROM-loop transaction実行中に到着した次の不一致がP=7を越えて老化する競合を、outer-frame末尾の早期finalizeで修正した。古い入力を捨てたりPを名目だけ8へ広げたりせず、unit test、同一入力replay、最大depth 7の5400-frame実ROM stressを通した。
 4. 完了: 結果sceneでnetwork pumpが止まり、人工遅延queueの最終入力をgeneration resetが消すdeadlockを修正した。8-9 frame遅延queueを残した決定的な再戦runで実payload排出、generation 1 handshake、状態差0を確認し、同じ設定の手動再戦も状態差なしで通った。
 5. 完了: 再戦後に人工送信遅延が無効になるraw/logical frame混用を直した。unit testと実ROM再戦でgeneration 1にも8-9 frame遅延、prediction mismatch、ROM-loop訂正が発生し、状態差0で完走した。修正後の手動再戦も状態差なしだった。8-9 frame時の黒枠の遅さは高遅延条件全体によるため、ユーザー指示どおり今回の修正対象から外した。
 6. 完了: contiguous ACK/未ACK再送をbundle protocolへ加えた。20%周期loss、明示的な逆順配送、5 frame短時間断をscriptと実ROMで試し、再戦後まで状態差0、cannot-arm/cap/fatal/timeout 0、実効約59.8fpsを確認した。重複入力は未ACK再送とhistory bundleで常時発生し、同一frame上書きとして処理される。
 7. 完了: 同一の複合WAN profileで`D=0/1/2`を別runとしてA/Bした。`D=0/1/2`でhostのhorizon待機は`12/6/0`となり、D=0だけ対戦中52.130ms spikeと2連続slow frameを生じたため、現時点では`D=2`を維持する。
 8. 完了: 複合WAN条件で死亡・復帰・土管表示、死亡中moving hazard、実Big Star取得、stock item消費を通した。実音声callbackのunderrun計測も追加し、対戦中0回を確認した。既存のpipe 3D geometry gateは上記の中間scene discard修正で通っている。
-9. 次: 同一role・同一seed対照を使ったplayer/2D OAMの訂正直後画像比較、音声波形・重複効果音・実聴、block break・8 coin item・接触など未網羅eventを検証する。P=7の合格条件は、cannot-arm/cap/fatal invariantが0、継続heartbeat差0、通常network条件で対戦中実効`59.5fps`以上、rollback起因の33ms超連続frameが0、訂正区間後の画像差が0、停止後の復帰または理由付き終了とする。
-10. ユーザー指示により、Bigstarの現行`coredelta`起動設定とGUIはこの段階では変更しない。P=7のscript検証を先に続ける。
+9. 完了: 同一role・同一seed対照でplayer/2D OAMを含む訂正直後画像、最終SDL波形、SPU sample start、block、8 coin reward、player接触を検証した。地形・土管は一致しplayer spriteは最大3 frameで収束、低頻度eventは両peer一致したが、訂正側だけ同一sample sourceを8回余分に開始したため音声gateは不合格である。
+10. 次: Bigstarへ進む前に、音声event ledgerまたは音声専用rollback stateを小さな実験で比較する。訂正側のSPU source欠落・余分を0、PCM gateを両role合格、対戦中実効`59.5fps`以上、33ms超連続frame 0にできなければ、ROM-loop方式の製品上の限界として明記する。単純mute、全transaction start抑止、crossfadeだけでは昇格させない。
+11. ユーザー指示により、Bigstarの現行`coredelta`起動設定とGUIはこの段階では変更しない。P=7のscript検証と音声blockerの可否判断を先に続ける。
 
 ## 2026-08-18 Slippi/Tangoの遅延・深度制御再確認
 

@@ -286,6 +286,7 @@ void TestRuntimePatchConfigDefaults() {
   CHECK(config.ForcePlayerLife1 == 5u);
   CHECK(!config.ForcePlayerPowerupsEnabled);
   CHECK(!config.ForcePlayerInventoryPowerupsEnabled);
+  CHECK(!config.ForcePlayerCoinsEnabled);
   CHECK(!config.ForcePlayerStarCountersEnabled);
   CHECK(!config.TracePlayerLifeChanges);
   CHECK(!config.PacketBridgeJitHelperPatchEnabled);
@@ -317,6 +318,11 @@ void TestRuntimePatchConfigReadsAndClampsEnvironment() {
       {"MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUPS_END_FRAME", "60"},
       {"MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP0", "1"},
       {"MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP1", "5"},
+      {"MELONDS_NSML_FORCE_PLAYER_COINS", "1"},
+      {"MELONDS_NSML_FORCE_PLAYER_COINS_START_FRAME", "61"},
+      {"MELONDS_NSML_FORCE_PLAYER_COINS_END_FRAME", "69"},
+      {"MELONDS_NSML_FORCE_PLAYER_COINS0", "8"},
+      {"MELONDS_NSML_FORCE_PLAYER_COINS1", "-1"},
       {"MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS", "1"},
       {"MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS_START_FRAME", "70"},
       {"MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS_END_FRAME", "80"},
@@ -356,6 +362,11 @@ void TestRuntimePatchConfigReadsAndClampsEnvironment() {
   CHECK(config.ForcePlayerInventoryPowerupsEndFrame == 60u);
   CHECK(config.ForcePlayerInventoryPowerup0 == 1u);
   CHECK(config.ForcePlayerInventoryPowerup1 == 5u);
+  CHECK(config.ForcePlayerCoinsEnabled);
+  CHECK(config.ForcePlayerCoinsStartFrame == 61u);
+  CHECK(config.ForcePlayerCoinsEndFrame == 69u);
+  CHECK(config.ForcePlayerCoins0 == 7u);
+  CHECK(config.ForcePlayerCoins1 == 0u);
   CHECK(config.ForcePlayerStarCountersEnabled);
   CHECK(config.ForcePlayerStarCountersStartFrame == 70u);
   CHECK(config.ForcePlayerStarCountersEndFrame == 80u);
@@ -757,6 +768,8 @@ void TestDiagnosticsConfigDefaults() {
   CHECK(config.HashLogPath.empty());
   CHECK(config.ScreenshotDir.empty());
   CHECK(config.ScreenshotInterval == 0);
+  CHECK(config.ScreenshotStartFrame == 0u);
+  CHECK(config.ScreenshotEndFrame == 0u);
   CHECK(!config.ScreenshotRegisterTrace);
   CHECK(config.RamDumpDir.empty());
   CHECK(config.RamDumpInterval == 0);
@@ -806,6 +819,8 @@ void TestDiagnosticsConfigReadsClampsAndPreservesPriority() {
       {"MELONDS_NSML_HASH_LOG", "hash.log"},
       {"MELONDS_NSML_SCREENSHOT_DIR", "screens"},
       {"MELONDS_NSML_SCREENSHOT_INTERVAL", "-1"},
+      {"MELONDS_NSML_SCREENSHOT_START_FRAME", "10"},
+      {"MELONDS_NSML_SCREENSHOT_END_FRAME", "5"},
       {"MELONDS_NSML_SCREENSHOT_REG_TRACE", "1"},
       {"MELONDS_NSML_RAM_DUMP_DIR", "ram"},
       {"MELONDS_NSML_RAM_DUMP_INTERVAL", "-2"},
@@ -852,6 +867,8 @@ void TestDiagnosticsConfigReadsClampsAndPreservesPriority() {
   CHECK(config.HashLogPath == "hash.log");
   CHECK(config.ScreenshotDir == "screens");
   CHECK(config.ScreenshotInterval == 0);
+  CHECK(config.ScreenshotStartFrame == 10u);
+  CHECK(config.ScreenshotEndFrame == 10u);
   CHECK(config.ScreenshotRegisterTrace);
   CHECK(config.RamDumpDir == "ram");
   CHECK(config.RamDumpInterval == 0);

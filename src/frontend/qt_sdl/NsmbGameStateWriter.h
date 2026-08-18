@@ -31,6 +31,10 @@ struct PlayerBytePairPatchResult {
   melonDS::u8 OldValues[2]{};
 };
 
+struct PlayerWordPairPatchResult {
+  melonDS::u32 OldValues[2]{};
+};
+
 struct PlayerPowerupPatchResult {
   melonDS::u8 OldGlobalValues[2]{};
   melonDS::u32 ActorBases[2]{};
@@ -73,6 +77,9 @@ bool WritePlayerDeathCounterPatch(
 bool WritePlayerInventoryPowerupPatch(
     melonDS::NDS *nds, const melonDS::u8 values[2],
     PlayerBytePairPatchResult &result);
+bool WritePlayerCoinPatch(melonDS::NDS *nds,
+                          const melonDS::u32 values[2],
+                          PlayerWordPairPatchResult &result);
 bool WritePlayerPowerupPatch(melonDS::NDS *nds,
                              const melonDS::u8 values[2],
                              PlayerPowerupPatchResult &result);

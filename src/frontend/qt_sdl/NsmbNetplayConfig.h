@@ -91,6 +91,11 @@ struct RuntimePatchConfig {
   std::uint32_t ForcePlayerInventoryPowerupsEndFrame = 0;
   std::uint32_t ForcePlayerInventoryPowerup0 = 0;
   std::uint32_t ForcePlayerInventoryPowerup1 = 0;
+  bool ForcePlayerCoinsEnabled = false;
+  std::uint32_t ForcePlayerCoinsStartFrame = 0;
+  std::uint32_t ForcePlayerCoinsEndFrame = 0;
+  std::uint32_t ForcePlayerCoins0 = 0;
+  std::uint32_t ForcePlayerCoins1 = 0;
   bool ForcePlayerStarCountersEnabled = false;
   std::uint32_t ForcePlayerStarCountersStartFrame = 0;
   std::uint32_t ForcePlayerStarCountersEndFrame = 0;
@@ -245,6 +250,8 @@ struct DiagnosticsConfig {
   std::string HashLogPath;
   std::string ScreenshotDir;
   int ScreenshotInterval = 0;
+  std::uint32_t ScreenshotStartFrame = 0;
+  std::uint32_t ScreenshotEndFrame = 0;
   bool ScreenshotRegisterTrace = false;
   std::string RamDumpDir;
   int RamDumpInterval = 0;

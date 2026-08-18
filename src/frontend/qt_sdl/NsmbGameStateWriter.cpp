@@ -272,6 +272,20 @@ bool WritePlayerInventoryPowerupPatch(
   return true;
 }
 
+bool WritePlayerCoinPatch(melonDS::NDS *nds,
+                          const melonDS::u32 values[2],
+                          PlayerWordPairPatchResult &result) {
+  result = {};
+  if (!nds || !nds->MainRAM)
+    return false;
+  result.OldValues[0] = nds->ARM9Read32(kGamePlayerCoinsAddr);
+  result.OldValues[1] =
+      nds->ARM9Read32(kGamePlayerCoinsAddr + sizeof(melonDS::u32));
+  nds->ARM9Write32(kGamePlayerCoinsAddr, values[0]);
+  nds->ARM9Write32(kGamePlayerCoinsAddr + sizeof(melonDS::u32), values[1]);
+  return true;
+}
+
 bool WritePlayerPowerupPatch(melonDS::NDS *nds,
                              const melonDS::u8 values[2],
                              PlayerPowerupPatchResult &result) {

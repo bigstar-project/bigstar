@@ -17,6 +17,7 @@
 */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <cmath>
 #include "Platform.h"
@@ -34,6 +35,26 @@ namespace melonDS
 {
 using Platform::Log;
 using Platform::LogLevel;
+
+namespace
+{
+
+FILE* NSMLSPUEventLog()
+{
+    static FILE* file = []
+    {
+        const char* path = getenv("MELONDS_NSML_SPU_EVENT_LOG");
+        if (!path || !*path)
+            return static_cast<FILE*>(nullptr);
+        FILE* result = fopen(path, "w");
+        if (result)
+            fputs("frame,systemTimestamp,arm7Timestamp,rollbackTransaction,channel,cnt,srcAddr,timerReload,loopPos,length\n", result);
+        return result;
+    }();
+    return file;
+}
+
+}
 
 
 // SPU TODO
@@ -471,6 +492,16 @@ T SPUChannel::FIFO_ReadData()
 
 void SPUChannel::Start()
 {
+    if (FILE* log = NSMLSPUEventLog())
+    {
+        fprintf(log, "%u,%llu,%llu,%u,%u,%08X,%08X,%u,%u,%u\n",
+            NDS.NumFrames,
+            static_cast<unsigned long long>(NDS.GetSysClockCycles(0)),
+            static_cast<unsigned long long>(NDS.ARM7Timestamp),
+            NDS.IsNSMLGameRAMRollbackTransactionInFlight() ? 1u : 0u,
+            Num, Cnt, SrcAddr, TimerReload, LoopPos, Length);
+    }
+
     Timer = TimerReload;
 
     if (((Cnt >> 29) & 0x3) == 3)

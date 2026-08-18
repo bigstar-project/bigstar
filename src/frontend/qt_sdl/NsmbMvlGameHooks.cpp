@@ -178,6 +178,32 @@ void ForcePlayerInventoryPowerups(const Context &context, int instanceID,
   }
 }
 
+void ForcePlayerCoins(const Context &context, int instanceID,
+                      melonDS::u32 frame, melonDS::NDS *nds) {
+  const Config::RuntimePatchConfig &patches = context.Patches;
+  if (!patches.ForcePlayerCoinsEnabled || !nds || !nds->MainRAM ||
+      !IsValidInstance(instanceID) ||
+      !MvlRuntime::IsFrameInRange(frame, patches.ForcePlayerCoinsStartFrame,
+                                  patches.ForcePlayerCoinsEndFrame) ||
+      !IsMarioVsLuigiGameplay(nds))
+    return;
+
+  const melonDS::u32 values[2]{patches.ForcePlayerCoins0,
+                               patches.ForcePlayerCoins1};
+  GameStateWriter::PlayerWordPairPatchResult result;
+  if (!GameStateWriter::WritePlayerCoinPatch(nds, values, result))
+    return;
+
+  if (context.Diagnostics.TakeRuntimePatchLog(
+          instanceID, Diagnostics::RuntimePatchLogKind::ForceCoins)) {
+    std::printf("NSMB Test: force player coins inst=%d frame=%u range=%u-%u "
+                "old=%u/%u value=%u/%u\n",
+                instanceID, frame, patches.ForcePlayerCoinsStartFrame,
+                patches.ForcePlayerCoinsEndFrame, result.OldValues[0],
+                result.OldValues[1], values[0], values[1]);
+  }
+}
+
 void ForcePlayerPowerups(const Context &context, int instanceID,
                          melonDS::u32 frame, melonDS::NDS *nds) {
   const Config::RuntimePatchConfig &patches = context.Patches;

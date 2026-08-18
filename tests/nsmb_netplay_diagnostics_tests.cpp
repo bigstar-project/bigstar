@@ -112,9 +112,13 @@ void TestRamDumpFrameSelectionContract() {
   CHECK(!Diagnostics::ShouldCaptureScreenshotFrame(config, 0));
   config.ScreenshotDir = "screenshots";
   config.ScreenshotInterval = 5;
-  CHECK(Diagnostics::ShouldCaptureScreenshotFrame(config, 0));
+  config.ScreenshotStartFrame = 5;
+  config.ScreenshotEndFrame = 10;
+  CHECK(!Diagnostics::ShouldCaptureScreenshotFrame(config, 0));
   CHECK(!Diagnostics::ShouldCaptureScreenshotFrame(config, 4));
   CHECK(Diagnostics::ShouldCaptureScreenshotFrame(config, 5));
+  CHECK(Diagnostics::ShouldCaptureScreenshotFrame(config, 10));
+  CHECK(!Diagnostics::ShouldCaptureScreenshotFrame(config, 15));
 }
 
 void TestRamDumpArtifactContract() {

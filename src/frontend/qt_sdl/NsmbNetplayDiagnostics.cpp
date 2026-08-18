@@ -826,6 +826,8 @@ bool ShouldCaptureRamDumpFrame(
 bool ShouldCaptureScreenshotFrame(const Config::DiagnosticsConfig &config,
                                   melonDS::u32 frame) {
   return !config.ScreenshotDir.empty() && config.ScreenshotInterval > 0 &&
+         frame >= config.ScreenshotStartFrame &&
+         (config.ScreenshotEndFrame == 0 || frame <= config.ScreenshotEndFrame) &&
          (frame % static_cast<melonDS::u32>(config.ScreenshotInterval)) == 0;
 }
 

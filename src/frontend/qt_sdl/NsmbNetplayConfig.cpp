@@ -345,6 +345,17 @@ RuntimePatchConfig LoadRuntimePatchConfig(const Environment &environment) {
   config.ForcePlayerInventoryPowerup1 = static_cast<std::uint32_t>(
       std::max(0, ReadInt(environment,
                           "MELONDS_NSML_FORCE_PLAYER_INVENTORY_POWERUP1", 0)));
+  config.ForcePlayerCoinsEnabled =
+      ReadFlag(environment, "MELONDS_NSML_FORCE_PLAYER_COINS");
+  config.ForcePlayerCoinsStartFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_FORCE_PLAYER_COINS_START_FRAME",
+                 0)));
+  config.ForcePlayerCoinsEndFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_FORCE_PLAYER_COINS_END_FRAME", 0)));
+  config.ForcePlayerCoins0 = static_cast<std::uint32_t>(std::clamp(
+      ReadInt(environment, "MELONDS_NSML_FORCE_PLAYER_COINS0", 0), 0, 7));
+  config.ForcePlayerCoins1 = static_cast<std::uint32_t>(std::clamp(
+      ReadInt(environment, "MELONDS_NSML_FORCE_PLAYER_COINS1", 0), 0, 7));
   config.ForcePlayerStarCountersEnabled =
       ReadFlag(environment, "MELONDS_NSML_FORCE_PLAYER_STAR_COUNTERS");
   config.ForcePlayerStarCountersStartFrame = static_cast<std::uint32_t>(
@@ -748,6 +759,13 @@ DiagnosticsConfig LoadDiagnosticsConfig(const Environment &environment,
       ReadCString(environment, "MELONDS_NSML_SCREENSHOT_DIR", "");
   config.ScreenshotInterval =
       std::max(0, ReadInt(environment, "MELONDS_NSML_SCREENSHOT_INTERVAL", 0));
+  config.ScreenshotStartFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_SCREENSHOT_START_FRAME", 0)));
+  config.ScreenshotEndFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_SCREENSHOT_END_FRAME", 0)));
+  if (config.ScreenshotEndFrame != 0 &&
+      config.ScreenshotEndFrame < config.ScreenshotStartFrame)
+    config.ScreenshotEndFrame = config.ScreenshotStartFrame;
   config.ScreenshotRegisterTrace =
       ReadFlag(environment, "MELONDS_NSML_SCREENSHOT_REG_TRACE");
   config.RamDumpDir = ReadCString(environment, "MELONDS_NSML_RAM_DUMP_DIR", "");

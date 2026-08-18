@@ -35,6 +35,8 @@ void ForcePlayerDeathCounters(const Context &context, int instanceID,
                               melonDS::u32 frame, melonDS::NDS *nds);
 void ForcePlayerInventoryPowerups(const Context &context, int instanceID,
                                   melonDS::u32 frame, melonDS::NDS *nds);
+void ForcePlayerCoins(const Context &context, int instanceID,
+                      melonDS::u32 frame, melonDS::NDS *nds);
 void ForcePlayerPowerups(const Context &context, int instanceID,
                          melonDS::u32 frame, melonDS::NDS *nds);
 void ForcePlayerStarCounters(const Context &context, int instanceID,

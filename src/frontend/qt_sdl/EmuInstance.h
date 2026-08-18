@@ -20,6 +20,7 @@
 #define EMUINSTANCE_H
 
 #include <atomic>
+#include <cstdio>
 
 #include <SDL2/SDL.h>
 
@@ -327,6 +328,11 @@ private:
     std::atomic<melonDS::u64> audioCallbackCount {0};
     std::atomic<melonDS::u64> audioUnderrunCount {0};
     std::atomic<melonDS::u64> audioUnderrunSamples {0};
+    bool audioCaptureEnabled = false;
+    std::atomic<melonDS::u64> audioCaptureFrame {0};
+    std::FILE* audioPcmLog = nullptr;
+    std::FILE* audioCallbackLog = nullptr;
+    melonDS::u64 audioCaptureSampleOffset = 0;
 
     int mpAudioMode;
 

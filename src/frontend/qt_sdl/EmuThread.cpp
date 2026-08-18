@@ -882,6 +882,9 @@ void EmuThread::run()
                     emuInstance->instanceID,
                     frameBeforeRun,
                     emuInstance->nds);
+                if (emuInstance->audioCaptureEnabled)
+                    emuInstance->audioCaptureFrame.store(
+                        emuInstance->nds->NumFrames, std::memory_order_relaxed);
                 if (nsmlPerfPhaseTiming)
                 {
                     nsmlPhaseAfterHook = SDL_GetPerformanceCounter() * perfCountsSec - nsmlAfterRunFrameStart;

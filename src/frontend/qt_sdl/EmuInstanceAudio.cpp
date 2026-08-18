@@ -24,6 +24,8 @@
 
 #include "mic_blow.h"
 
+#include <cstdlib>
+
 using namespace melonDS;
 
 #define INTERNAL_FRAME_RATE 59.8260982880808f
@@ -44,6 +46,37 @@ void EmuInstance::audioInit()
     audioCallbackCount.store(0, std::memory_order_relaxed);
     audioUnderrunCount.store(0, std::memory_order_relaxed);
     audioUnderrunSamples.store(0, std::memory_order_relaxed);
+    audioCaptureFrame.store(0, std::memory_order_relaxed);
+    audioCaptureSampleOffset = 0;
+    if (const char* pcmPath = std::getenv("MELONDS_NSML_AUDIO_PCM_LOG"))
+    {
+        if (*pcmPath)
+        {
+            audioPcmLog = std::fopen(pcmPath, "wb");
+            if (!audioPcmLog)
+                Platform::Log(Platform::LogLevel::Error,
+                    "Failed to open NSMB audio PCM log: %s\n", pcmPath);
+        }
+    }
+    if (const char* callbackPath = std::getenv("MELONDS_NSML_AUDIO_CALLBACK_LOG"))
+    {
+        if (*callbackPath)
+        {
+            audioCallbackLog = std::fopen(callbackPath, "w");
+            if (audioCallbackLog)
+            {
+                std::fputs(
+                    "callback,frame,sampleOffset,outputSamples,requestedSourceSamples,sourceSamples,underrunSamples,muted\n",
+                    audioCallbackLog);
+            }
+            else
+            {
+                Platform::Log(Platform::LogLevel::Error,
+                    "Failed to open NSMB audio callback log: %s\n", callbackPath);
+            }
+        }
+    }
+    audioCaptureEnabled = audioPcmLog || audioCallbackLog;
 
     audioFreq = 48000; // TODO: make both of these configurable?
     audioBufSize = 512;
@@ -86,6 +119,11 @@ void EmuInstance::audioDeInit()
 {
     if (audioDevice) SDL_CloseAudioDevice(audioDevice);
     audioDevice = 0;
+    audioCaptureEnabled = false;
+    if (audioPcmLog) std::fclose(audioPcmLog);
+    audioPcmLog = nullptr;
+    if (audioCallbackLog) std::fclose(audioCallbackLog);
+    audioCallbackLog = nullptr;
     micClose();
     micStarted = false;
 
@@ -178,7 +216,8 @@ void EmuInstance::audioCallback(void* data, Uint8* stream, int len)
     SDL_CondSignal(inst->audioSyncCond);
     SDL_UnlockMutex(inst->audioSyncLock);
 
-    inst->audioCallbackCount.fetch_add(1, std::memory_order_relaxed);
+    const melonDS::u64 callbackIndex =
+        inst->audioCallbackCount.fetch_add(1, std::memory_order_relaxed) + 1;
     if (num_in < len_in)
     {
         inst->audioUnderrunCount.fetch_add(1, std::memory_order_relaxed);
@@ -187,25 +226,47 @@ void EmuInstance::audioCallback(void* data, Uint8* stream, int len)
             std::memory_order_relaxed);
     }
 
-    if ((num_in < 1) || inst->audioMutedByWindowFocus || inst->audioMutedToggle || inst->audioMutedByFastForward)
+    const bool muted = (num_in < 1) || inst->audioMutedByWindowFocus ||
+        inst->audioMutedToggle || inst->audioMutedByFastForward;
+    if (muted)
     {
         memset(stream, 0, len*sizeof(s16)*2);
-        return;
+    }
+    else
+    {
+        if (inst->audioVolume < 256)
+        {
+            s16* samples = (s16*) stream;
+            for (int i = 0; i < num_in * 2; i++)
+                samples[i] = ((s32) samples[i] * inst->audioVolume) >> 8;
+        }
+
+        if (num_in < len_in)
+        {
+            int last = num_in-1;
+
+            for (int i = num_in; i < len_in; i++)
+                ((u32*)stream)[i] = ((u32*)stream)[last];
+        }
     }
 
-    if (inst->audioVolume < 256)
+    if (inst->audioCaptureEnabled)
     {
-        s16* samples = (s16*) stream;
-        for (int i = 0; i < num_in * 2; i++)
-            samples[i] = ((s32) samples[i] * inst->audioVolume) >> 8;
-    }
-
-    if (num_in < len_in)
-    {
-        int last = num_in-1;
-
-        for (int i = num_in; i < len_in; i++)
-            ((u32*)stream)[i] = ((u32*)stream)[last];
+        if (inst->audioPcmLog)
+            std::fwrite(stream, sizeof(s16) * 2, static_cast<std::size_t>(len),
+                inst->audioPcmLog);
+        if (inst->audioCallbackLog)
+        {
+            const int underrunSamples = std::max(0, len_in - num_in);
+            std::fprintf(inst->audioCallbackLog,
+                "%llu,%llu,%llu,%d,%d,%d,%d,%d\n",
+                static_cast<unsigned long long>(callbackIndex),
+                static_cast<unsigned long long>(
+                    inst->audioCaptureFrame.load(std::memory_order_relaxed)),
+                static_cast<unsigned long long>(inst->audioCaptureSampleOffset),
+                len, len_in, num_in, underrunSamples, muted ? 1 : 0);
+        }
+        inst->audioCaptureSampleOffset += static_cast<melonDS::u64>(len);
     }
 }
 

@@ -62,6 +62,10 @@ param(
     [int]$InputRecordEndFrame = 0,
     [string]$LogDir = "",
     [int]$ScreenshotInterval = 0,
+    [int]$ScreenshotStartFrame = 0,
+    [int]$ScreenshotEndFrame = 0,
+    [ValidateRange(1, 1000000)] [int]$HashInterval = 300,
+    [switch]$ScreenHash,
     [string]$RamDumpFrames = "",
     [int]$RamDumpInterval = 0,
     [switch]$GameStateTrace,
@@ -102,6 +106,7 @@ param(
     [int]$CheckVsPipeRespawnVisibilityEndFrame = 0,
     [switch]$PerfBreakdown,
     [switch]$PerformanceLog,
+    [switch]$AudioPcmLog,
     [switch]$ForcePlayerPowerups,
     [int]$ForcePlayerPowerupsStartFrame = 0,
     [int]$ForcePlayerPowerupsEndFrame = 0,
@@ -112,6 +117,11 @@ param(
     [int]$ForcePlayerInventoryPowerupsEndFrame = 0,
     [int]$ForcePlayerInventoryPowerup0 = 0,
     [int]$ForcePlayerInventoryPowerup1 = 0,
+    [switch]$ForcePlayerCoins,
+    [int]$ForcePlayerCoinsStartFrame = 0,
+    [int]$ForcePlayerCoinsEndFrame = 0,
+    [ValidateRange(0, 7)] [int]$ForcePlayerCoins0 = 0,
+    [ValidateRange(0, 7)] [int]$ForcePlayerCoins1 = 0,
     [switch]$ForcePlayerStarCounters,
     [int]$ForcePlayerStarCountersStartFrame = 900,
     [int]$ForcePlayerStarCountersEndFrame = 1500,
@@ -338,7 +348,9 @@ $common = @(
     "-Exe", $Exe,
     "-InputScript", $InputScript,
     "-ScreenshotInterval", "$ScreenshotInterval",
-    "-NoHashLog",
+    "-ScreenshotStartFrame", "$ScreenshotStartFrame",
+    "-ScreenshotEndFrame", "$ScreenshotEndFrame",
+    "-HashInterval", "$HashInterval",
     "-SkipMvlStateCheck",
     "-SkipGameplayActorCheck",
     "-NoLanMP",
@@ -357,6 +369,11 @@ $common = @(
     "-ClearMvlCameraInitHold",
     "-ClearMvlCameraInitHoldStartFrame", "840"
 )
+if ($ScreenHash) {
+    $common += "-ScreenHash"
+} else {
+    $common += "-NoHashLog"
+}
 if ($ClientOnly) {
     $common += @(
         "-NoLocalWait",
@@ -447,6 +464,15 @@ if ($ForcePlayerInventoryPowerups) {
         "-ForcePlayerInventoryPowerupsEndFrame", "$ForcePlayerInventoryPowerupsEndFrame",
         "-ForcePlayerInventoryPowerup0", "$ForcePlayerInventoryPowerup0",
         "-ForcePlayerInventoryPowerup1", "$ForcePlayerInventoryPowerup1"
+    )
+}
+if ($ForcePlayerCoins) {
+    $common += @(
+        "-ForcePlayerCoins",
+        "-ForcePlayerCoinsStartFrame", "$ForcePlayerCoinsStartFrame",
+        "-ForcePlayerCoinsEndFrame", "$ForcePlayerCoinsEndFrame",
+        "-ForcePlayerCoins0", "$ForcePlayerCoins0",
+        "-ForcePlayerCoins1", "$ForcePlayerCoins1"
     )
 }
 if ($ForcePlayerStarCounters) {
@@ -714,7 +740,10 @@ foreach ($name in @(
     "MELONDS_NSML_AI_PLAY_LOG_MAX_OBJECTS",
     "MELONDS_NSML_NEUTRALIZE_POLLED_INPUT",
     "MELONDS_NSML_NEUTRALIZE_POLLED_INPUT_PRESERVE_TOUCH",
-    "MELONDS_NSML_PERFORMANCE_LOG"
+    "MELONDS_NSML_PERFORMANCE_LOG",
+    "MELONDS_NSML_AUDIO_PCM_LOG",
+    "MELONDS_NSML_AUDIO_CALLBACK_LOG",
+    "MELONDS_NSML_SPU_EVENT_LOG"
 )) {
     $oldAIEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
 }
@@ -785,11 +814,25 @@ function Set-PerformanceLogEnv {
     }
 }
 
+function Set-AudioPcmLogEnv {
+    param([string]$RoleLogDir)
+    if ($AudioPcmLog) {
+        $env:MELONDS_NSML_AUDIO_PCM_LOG = Join-Path $RoleLogDir "audio-output.pcm"
+        $env:MELONDS_NSML_AUDIO_CALLBACK_LOG = Join-Path $RoleLogDir "audio-output-callbacks.csv"
+        $env:MELONDS_NSML_SPU_EVENT_LOG = Join-Path $RoleLogDir "spu-channel-starts.csv"
+    } else {
+        Remove-Item Env:\MELONDS_NSML_AUDIO_PCM_LOG -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_AUDIO_CALLBACK_LOG -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_SPU_EVENT_LOG -ErrorAction SilentlyContinue
+    }
+}
+
 $hostProc = $null
 if (-not $ClientOnly) {
     Set-AIPlayLogEnv -Path $HostAIPlayLog -ObservationV3Path $HostAIObservationV3Log
     Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeHostInput)
     Set-PerformanceLogEnv -RoleLogDir $hostLog
+    Set-AudioPcmLogEnv -RoleLogDir $hostLog
     $hostProc = Start-Process -FilePath "powershell.exe" `
         -ArgumentList $hostArgs `
         -WorkingDirectory $repoRoot `
@@ -826,6 +869,7 @@ if (-not $ClientOnly) {
 Set-AIPlayLogEnv -Path $ClientAIPlayLog -ObservationV3Path $ClientAIObservationV3Log
 Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeClientInput)
 Set-PerformanceLogEnv -RoleLogDir $clientLog
+Set-AudioPcmLogEnv -RoleLogDir $clientLog
 $clientProc = Start-Process -FilePath "powershell.exe" `
     -ArgumentList $clientArgs `
     -WorkingDirectory $repoRoot `
@@ -855,7 +899,7 @@ if ($ClientOnly) {
     Write-Host "Use the host melonDS window for Mario and the client melonDS window for Luigi."
 }
 Write-Host "physical input neutralized host=$([bool]$NeutralizeHostInput) client=$([bool]$NeutralizeClientInput)"
-Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead predictionHorizon=$RollbackPredictionHorizonFrames horizonTimeoutMs=$RollbackHorizonTimeoutMs internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames hostSendDelay=$(if ($HostInputSendDelayFrames -ge 0) { $HostInputSendDelayFrames } else { 'common' }) clientSendDelay=$(if ($ClientInputSendDelayFrames -ge 0) { $ClientInputSendDelayFrames } else { 'common' }) jitter=$InputSendJitterFrames dropModulo=$InputDropModulo dropOffset=$InputDropOffset dropRange=$InputDropStartFrame-$InputDropEndFrame networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame startBarrier=$([bool]$WaitForPeerAtNetplayStart) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown) performanceLog=$([bool]$PerformanceLog)"
+Write-Host "input delay=$InputDelayFrames max frame lead=$InputMaxFrameLead predictionHorizon=$RollbackPredictionHorizonFrames horizonTimeoutMs=$RollbackHorizonTimeoutMs internal wait timeout ms=$InternalWaitTimeoutMs stallTimeoutMs=$StallTimeoutMs send delay=$InputSendDelayFrames hostSendDelay=$(if ($HostInputSendDelayFrames -ge 0) { $HostInputSendDelayFrames } else { 'common' }) clientSendDelay=$(if ($ClientInputSendDelayFrames -ge 0) { $ClientInputSendDelayFrames } else { 'common' }) jitter=$InputSendJitterFrames dropModulo=$InputDropModulo dropOffset=$InputDropOffset dropRange=$InputDropStartFrame-$InputDropEndFrame networkPump=$([bool]$NetworkPumpThread) networkPumpSleepUs=$NetworkPumpSleepUs packetBridgeStart=$PacketBridgeStartFrame startBarrier=$([bool]$WaitForPeerAtNetplayStart) renderer=$(if ($SoftwareRenderer) { 'software' } else { 'opengl-compute' }) frameLimit=$(-not $NoFrameLimit) perfBreakdown=$([bool]$PerfBreakdown) performanceLog=$([bool]$PerformanceLog) audioPcmLog=$([bool]$AudioPcmLog)"
 Write-Host "gameplay heartbeat interval=$GameplayHeartbeatInterval"
 if ($HostAIPlayLog -or $ClientAIPlayLog) {
     Write-Host "AI play log host=$(if ($HostAIPlayLog) { $HostAIPlayLog } else { 'off' }) client=$(if ($ClientAIPlayLog) { $ClientAIPlayLog } else { 'off' }) interval=$AIPlayLogInterval flushInterval=$AIPlayLogFlushInterval maxObjects=$AIPlayLogMaxObjects"
