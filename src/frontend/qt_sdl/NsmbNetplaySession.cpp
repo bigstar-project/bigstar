@@ -1,6 +1,7 @@
 #include "NsmbNetplaySession.h"
 
 #include "NsmbInputProtocol.h"
+#include "NsmbTraceOutput.h"
 
 #include <algorithm>
 #include <chrono>
@@ -75,9 +76,9 @@ void StoreRemoteInputLocked(Context context, melonDS::u32 frame,
     if (context.Input.NetplayTrace &&
         context.Inputs.LastTracedReceivedInputFrame != frame) {
       context.Inputs.LastTracedReceivedInputFrame = frame;
-      std::printf("NSMB InputNetplay: ignored old input frame=%u "
-                  "currentStart=%u\n",
-                  frame, context.Connection.SharedLogicalEpoch);
+      TraceOutput::Printf("NSMB InputNetplay: ignored old input frame=%u "
+                          "currentStart=%u\n",
+                          frame, context.Connection.SharedLogicalEpoch);
     }
     return;
   }
@@ -92,7 +93,7 @@ void StoreRemoteInputLocked(Context context, melonDS::u32 frame,
     const auto &confirmation = stored.Confirmation;
     const melonDS::u32 pendingFrame =
         context.Inputs.RollbackInputs.PendingRollbackFrame().value_or(kNoFrame);
-    std::printf(
+    TraceOutput::Printf(
         "NSMB Rollback: prediction mismatch frame=%u predicted={keys=0x%03X "
         "touch=%d x=%u y=%u} actual={keys=0x%03X touch=%d x=%u y=%u} "
         "pending=%u mismatches=%u\n",
@@ -103,10 +104,10 @@ void StoreRemoteInputLocked(Context context, melonDS::u32 frame,
         receivedInput.TouchX, receivedInput.TouchY, pendingFrame,
         context.Inputs.RollbackInputs.MismatchCount());
     if (!confirmation.FrameAlreadySimulated)
-      std::printf("NSMB Rollback: current/future mismatch applied without "
-                  "rollback frame=%u localFrame=%u\n",
-                  frame, localFrame);
-    std::fflush(stdout);
+      TraceOutput::Printf(
+          "NSMB Rollback: current/future mismatch applied without rollback "
+          "frame=%u localFrame=%u\n",
+          frame, localFrame);
   }
 
   const melonDS::u32 previousLastReceived = stored.PreviousLastReceived;
@@ -132,13 +133,12 @@ void StoreRemoteInputLocked(Context context, melonDS::u32 frame,
                    context.Bootstrap.InputTraceInterval) ==
            0)) {
     context.Inputs.LastTracedReceivedInputFrame = frame;
-    std::printf("NSMB MvL Netplay: recv input tUnixMs=%llu frame=%u keys=0x%03X "
-                "remoteQueue=%zu lastSent=%u lead=%d localFrame=%u\n",
-                NowUnixMs(), frame, receivedInput.KeyMask,
-                context.Inputs.RemoteInputs.size(),
-                context.Inputs.LastSentInputFrame,
-                CurrentInputLead(context, frameForLead), localFrame);
-    std::fflush(stdout);
+    TraceOutput::Printf(
+        "NSMB MvL Netplay: recv input tUnixMs=%llu frame=%u keys=0x%03X "
+        "remoteQueue=%zu lastSent=%u lead=%d localFrame=%u\n",
+        NowUnixMs(), frame, receivedInput.KeyMask,
+        context.Inputs.RemoteInputs.size(), context.Inputs.LastSentInputFrame,
+        CurrentInputLead(context, frameForLead), localFrame);
   }
 }
 
@@ -147,9 +147,9 @@ bool IsCurrentGeneration(Context context, melonDS::u32 generation,
   const melonDS::u32 current = context.State.Handshake.Generation();
   if (generation == current)
     return true;
-  std::printf("NSMB InputNetplay: ignored %s generation=%u current=%u\n",
-              packetKind, generation, current);
-  std::fflush(stdout);
+  TraceOutput::Printf(
+      "NSMB InputNetplay: ignored %s generation=%u current=%u\n", packetKind,
+      generation, current);
   return false;
 }
 
@@ -250,8 +250,9 @@ void TraceRemoteInputWaitSpike(Context context, melonDS::u32 targetFrame,
       elapsedUs < static_cast<unsigned long long>(std::min(
                       context.Diagnostics.ActiveFrameSpikeThresholdUs, 10000)))
     return;
-  std::printf("NSMB RemoteInputWaitSpike: frame=%u waitedMs=%.3f loops=%llu\n",
-              targetFrame, static_cast<double>(elapsedUs) / 1000.0, loops);
+  TraceOutput::Printf(
+      "NSMB RemoteInputWaitSpike: frame=%u waitedMs=%.3f loops=%llu\n",
+      targetFrame, static_cast<double>(elapsedUs) / 1000.0, loops);
 }
 
 void NetworkPumpThreadMain(Context context, const Hooks &hooks) {
@@ -500,10 +501,11 @@ void SendInputLocked(Context context, const Hooks &hooks, melonDS::u32 frame,
       context.Inputs.LocalInputs, std::chrono::steady_clock::now());
   if (prepared.Decision.Drop) {
     if (context.Input.NetplayTrace)
-      std::printf("NSMB InputNetplay: dropped local input packet frame=%u "
-                  "modulo=%d offset=%d range=%u-%u\n",
-                  frame, context.Input.DropModulo, context.Input.DropOffset,
-                  context.Input.DropStartFrame, context.Input.DropEndFrame);
+      TraceOutput::Printf(
+          "NSMB InputNetplay: dropped local input packet frame=%u "
+          "modulo=%d offset=%d range=%u-%u\n",
+          frame, context.Input.DropModulo, context.Input.DropOffset,
+          context.Input.DropStartFrame, context.Input.DropEndFrame);
     return;
   }
   if (!prepared.ImmediatePayload.empty())
@@ -518,7 +520,7 @@ void SendInputLocked(Context context, const Hooks &hooks, melonDS::u32 frame,
                    context.Bootstrap.InputTraceInterval) ==
            0)) {
     context.Inputs.LastTracedSentInputFrame = frame;
-    std::printf(
+    TraceOutput::Printf(
         "NSMB MvL Netplay: sent input tUnixMs=%llu frame=%u keys=0x%03X "
         "localQueue=%zu lastRecv=%u lead=%d bundle=%d "
         "delayedFrames=%d peer=%d\n",
@@ -526,7 +528,6 @@ void SendInputLocked(Context context, const Hooks &hooks, melonDS::u32 frame,
         context.Inputs.LastReceivedInputFrame, CurrentInputLead(context, frame),
         prepared.Decision.Bundle ? 1 : 0, prepared.Decision.DelayFrames,
         context.Transport.IsConnected() ? 1 : 0);
-    std::fflush(stdout);
   }
 }
 
@@ -554,7 +555,7 @@ void MaybeResendLatestInputForFrameLeadLocked(Context context, const Hooks &) {
   context.Inputs.LastInputFrameLeadResendAt = now;
   context.Inputs.InputFrameLeadResendCount++;
   if (context.Input.NetplayTrace) {
-    std::printf(
+    TraceOutput::Printf(
         "NSMB InputNetplay: resent latest input tUnixMs=%llu frame=%u count=%d "
         "payloadBytes=%zu bundleHistory=%d lastRecv=%u lead=%d localQueue=%zu "
         "remoteQueue=%zu delayed=%zu peer=%d\n",
@@ -565,7 +566,6 @@ void MaybeResendLatestInputForFrameLeadLocked(Context context, const Hooks &) {
         context.Inputs.LocalInputs.size(), context.Inputs.RemoteInputs.size(),
         context.State.Delivery.PendingCount(),
         context.Transport.IsConnected() ? 1 : 0);
-    std::fflush(stdout);
   }
 }
 
@@ -578,7 +578,7 @@ void PrintInputHealthLocked(Context context, const char *event,
   if (!context.Input.HealthTrace)
     return;
   UpdateHangSnapshotLocked(context, sendFrame);
-  std::printf(
+  TraceOutput::Printf(
       "NSMB InputHealth: tUnixMs=%llu event=%s frame=%u logicalFrame=%u "
       "sendFrame=%u lastSent=%u lastRecv=%u lead=%d localQueue=%zu "
       "remoteQueue=%zu delayed=%zu waitMs=%.3f throttleMs=%.3f "
@@ -600,7 +600,6 @@ void PrintInputHealthLocked(Context context, const char *event,
       context.State.Handshake.LocalReadyFrame().value_or(kNoFrame),
       context.State.Handshake.RemoteReadyFrame().value_or(kNoFrame),
       context.State.Handshake.RemoteReadyAfterLocal() ? 1 : 0);
-  std::fflush(stdout);
 }
 
 int CurrentInputLead(Context context, melonDS::u32 sendFrame) {
@@ -814,11 +813,10 @@ bool TryWaitForRollbackRemoteInputLocked(Context context, const Hooks &hooks,
           static_cast<unsigned long long>(std::max<long long>(0, elapsed)),
           loops);
       if (context.Input.NetplayTrace) {
-        std::printf(
+        TraceOutput::Printf(
             "NSMB Rollback: input wait timeout frame=%u waitedUs=%lld\n",
             targetFrame,
             static_cast<long long>(std::max<long long>(0, elapsed)));
-        std::fflush(stdout);
       }
       return false;
     }
@@ -1080,11 +1078,10 @@ void ThrottleFrameLead(Context context, const Hooks &hooks, melonDS::NDS *nds,
     if (context.Input.NetplayTrace &&
         context.Inputs.LastInputFrameThrottleTraceFrame != frame) {
       context.Inputs.LastInputFrameThrottleTraceFrame = frame;
-      std::printf("NSMB InputNetplay: frame throttle frame=%u sendFrame=%u "
-                  "remoteInputFrame=%u lead=%d maxLead=%d\n",
-                  frame, sendFrame, remoteFrame, lead,
-                  context.Input.MaxFrameLead);
-      std::fflush(stdout);
+      TraceOutput::Printf(
+          "NSMB InputNetplay: frame throttle frame=%u sendFrame=%u "
+          "remoteInputFrame=%u lead=%d maxLead=%d\n",
+          frame, sendFrame, remoteFrame, lead, context.Input.MaxFrameLead);
     }
     if (context.Input.HealthTrace &&
         context.Inputs.LastInputHealthThrottleFrame != frame) {

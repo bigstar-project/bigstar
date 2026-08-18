@@ -2,6 +2,7 @@
 
 #include "NsmbGameStateReader.h"
 #include "NsmbRollbackRuntime.h"
+#include "NsmbTraceOutput.h"
 
 #include "NDS.h"
 
@@ -307,7 +308,7 @@ void RecordActiveFrameTiming(Context context, int instanceID,
   if (!sample.Spike)
     return;
 
-  std::printf(
+  TraceOutput::Printf(
       "NSMB PerfSpike: inst=%d frame=%u frameTimeUs=%llu thresholdUs=%d "
       "rollbackRestores=%u rollbackResims=%u rollbackRestoreDelta=%u "
       "rollbackResimDelta=%u saveMaxUs=%llu restoreMaxUs=%llu "
@@ -562,41 +563,63 @@ void TraceGameplayHeartbeatIfNeeded(Context context, int instanceID,
       GameStateReader::FindPlayerActors(nds);
   const GameStateReader::ObjectLifecycleSummary objects =
       GameStateReader::SummarizeObjectLifecycle(nds);
-  std::printf("NSMB GameplayHeartbeat: role=%s inst=%d frame=%u "
-              "p0=%u/%08X/%08X/%08X/%08X/%08X p1=%u/%08X/%08X/%08X/%08X/%08X "
-              "objects=%u/%u/%u/%u/%u/%u",
-              RoleName(context), instanceID, frame, players.Actor0.Found,
-              players.Actor0.PosX, players.Actor0.PosY, players.Actor0.VelX,
-              players.Actor0.VelY, players.Actor0.Flags, players.Actor1.Found,
-              players.Actor1.PosX, players.Actor1.PosY, players.Actor1.VelX,
-              players.Actor1.VelY, players.Actor1.Flags, objects.Total,
-              objects.Active, objects.Dead, objects.NotCreated,
-              objects.SkipUpdate, objects.SkipRender);
-  std::printf(" activeIds=");
+  std::ostringstream line;
+  const auto appendHex = [&line](melonDS::u32 value, int width) {
+    line << std::hex << std::uppercase << std::setw(width)
+         << std::setfill('0') << value << std::dec;
+  };
+  const auto appendPlayer = [&line, &appendHex](const auto &player) {
+    line << player.Found << '/';
+    appendHex(player.PosX, 8);
+    line << '/';
+    appendHex(player.PosY, 8);
+    line << '/';
+    appendHex(player.VelX, 8);
+    line << '/';
+    appendHex(player.VelY, 8);
+    line << '/';
+    appendHex(player.Flags, 8);
+  };
+  line << "NSMB GameplayHeartbeat: role=" << RoleName(context)
+       << " inst=" << instanceID << " frame=" << frame << " p0=";
+  appendPlayer(players.Actor0);
+  line << " p1=";
+  appendPlayer(players.Actor1);
+  line << " objects=" << objects.Total << '/' << objects.Active << '/'
+       << objects.Dead << '/' << objects.NotCreated << '/'
+       << objects.SkipUpdate << '/' << objects.SkipRender << " activeIds=";
   for (std::size_t i = 0; i < GameStateModel::kObjectTraceSlots; i++) {
     if (i != 0)
-      std::printf(",");
-    std::printf("%03X:%08X", objects.ActiveID[i], objects.ActiveSettings[i]);
+      line << ',';
+    appendHex(objects.ActiveID[i], 3);
+    line << ':';
+    appendHex(objects.ActiveSettings[i], 8);
   }
   const std::vector<GameStateReader::ObjectScanSample> hazards =
       GameStateReader::FindActiveObjectsByIDAndSettings(
           nds, kVsMovingHazardObjectID, kVsMovingHazardSettings);
-  std::printf(" hazards=");
+  line << " hazards=";
   const std::size_t hazardCount =
       std::min(hazards.size(), kTrackedWorldMovingHazardCount);
   for (std::size_t i = 0; i < kTrackedWorldMovingHazardCount; i++) {
     if (i != 0)
-      std::printf(",");
+      line << ',';
     if (i >= hazardCount) {
-      std::printf("-");
+      line << '-';
       continue;
     }
     const GameStateReader::ObjectScanSample &hazard = hazards[i];
-    std::printf("%u:%08X:%08X:%08X:%u:%08X", hazard.GUID, hazard.PosX,
-                hazard.PosY, hazard.VelX, hazard.StateType, hazard.Flags);
+    line << hazard.GUID << ':';
+    appendHex(hazard.PosX, 8);
+    line << ':';
+    appendHex(hazard.PosY, 8);
+    line << ':';
+    appendHex(hazard.VelX, 8);
+    line << ':' << hazard.StateType << ':';
+    appendHex(hazard.Flags, 8);
   }
-  std::printf("\n");
-  std::fflush(stdout);
+  line << '\n';
+  TraceOutput::Write(line.str());
 }
 
 void CaptureScreenshotIfNeeded(Context context, int instanceID,

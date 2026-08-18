@@ -1,5 +1,6 @@
 #include "NsmbNetplayDiagnostics.h"
 #include "NsmbImitationAI.h"
+#include "NsmbTraceOutput.h"
 
 #include <QImage>
 #include <QString>
@@ -1227,7 +1228,7 @@ BeforeHookPhaseTrace::~BeforeHookPhaseTrace() {
   if (totalUs < std::min(ThresholdUs, 10000))
     return;
 
-  std::printf(
+  TraceOutput::Printf(
       "NSMB BeforeHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f startSyncMs=%.3f loadStateMs=%.3f runtimeConfigMs=%.3f probeRestoreMs=%.3f jitPatchMs=%.3f rollbackMs=%.3f bootMs=%.3f patchMs=%.3f packetBridgeSetupMs=%.3f testSnapMs=%.3f setupMs=%.3f actorStateMs=%.3f barrierMs=%.3f checkpointMs=%.3f scratchMs=%.3f networkMs=%.3f gateMs=%.3f remoteWaitMs=%.3f tailMs=%.3f\n",
       InstanceID, Frame, static_cast<double>(totalUs) / 1000.0,
       static_cast<double>(InitUs) / 1000.0,
@@ -1250,7 +1251,6 @@ BeforeHookPhaseTrace::~BeforeHookPhaseTrace() {
       static_cast<double>(GateUs) / 1000.0,
       static_cast<double>(RemoteWaitUs) / 1000.0,
       static_cast<double>(tailUs) / 1000.0);
-  std::fflush(stdout);
 }
 
 void BeforeHookPhaseTrace::SetFrame(melonDS::u32 frame) { Frame = frame; }
@@ -1360,11 +1360,10 @@ bool Runtime::PublishFrameHeartbeat(int instanceID, melonDS::u32 frame,
   }
 
   State->LastFrameHeartbeat[instanceID] = frame;
-  std::printf("NSMB Heartbeat: inst=%d frame=%u\n", instanceID, frame);
+  TraceOutput::Printf("NSMB Heartbeat: inst=%d frame=%u\n", instanceID,
+                      frame);
   if (State->FrameHeartbeat)
     State->PendingFrameHeartbeat.store(frame, std::memory_order_release);
-  else
-    std::fflush(stdout);
   return true;
 }
 

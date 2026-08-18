@@ -4,6 +4,27 @@
 
 ## 2026-08-18 render processを含むROM-loop訂正
 
+### 長時間手動runの同期trace停止
+
+`logs/nsmb-mvl-manual-local-20260818-141625` では、一度の目視上の長時間停止とその後のずれが報告された。outer計測はhost最大`1249.975ms`、client最大`1173.334ms`で、通常のROM-loop transactionの数十ms級とは別の異常だった。
+
+frame 9386-9392を両roleで照合すると、hostは訂正完了traceを含むafter-frame先頭で`221.981ms`、network pump内のinput traceで`410.519ms`を消費した。hostの入力が止まった結果、clientはlead 9でframe-lead throttleへ入り`783.796ms`待ち、clientのbefore-hook全体は`1090.577ms`になった。frame 13200-13201でもgameplay heartbeat、rollback stats、phase traceの同期flushが両roleで`122-533ms`を占めた。`FinalizeNSMLGameRAMRollbackTransaction()`自体はcontrol wordをclearするだけであり、ログなしの通常回は同じ区間が数十µsなので、ROM catch-upや3D破棄の必然的な負荷ではない。
+
+原因は `-InputNetplayTrace` / `-PerfBreakdown` が有効な実運用診断で、emulation threadが `printf` 後に毎回 `fflush(stdout)` していたことだった。redirect先のfile writeが遅い一方のpeerをframe-lead throttleが相手へ伝播し、ローカル2-process全体の停止へ増幅した。手動runのfirst significant object diffはframe 7080で停止frame 9392より前であり、このログだけから停止を恒久ずれの原因とは判断しない。
+
+runtime trace用に`NsmbTraceOutput`を追加した。producerは整形済み1行を最大4MiBのbounded queueへ積むだけで、Windowsではbelow-normal priorityのwriter threadが2ms単位でbatchし、stdout flushを最大1秒間隔に制限する。heartbeat、rollback mismatch/arm/complete/stat/error、input send/recv/throttle、packet bridge詳細、performance phase、60-frame JIT scratch traceを移行し、終了時だけ同期drainする。queue満杯時はemulationを待たせず行をdropして件数を報告する。`MELONDS_NSML_SYNC_TRACE_OUTPUT=1` は同一バイナリA/B用の旧同期経路である。
+
+同一seed `0x111AF455`・同一入力・frame limiterなし5400-frame A/Bは次のとおりで、asyncの平均差は約`0.05ms`（`0.7%`）だった。
+
+| Trace output | Host average/max | Client average/max | State gate |
+| --- | ---: | ---: | --- |
+| synchronous control | `7.564/32.043ms` | `7.562/35.140ms` | 38 heartbeat差分0 |
+| async candidate | `7.614/34.563ms` | `7.613/36.602ms` | 38 heartbeat差分0 |
+
+最終の60fps、software renderer、14000-frame完全入力再生 `logs/codex-async-trace-final-paced-14000-20260818` は、host/client `1027/1029` correctionを全件完了し、cannot-arm、failed/capped correction、trace dropはゼロだった。active outer平均は両role`16.666ms`、最大`38.562/33.851ms`、連続slow frame最大1。旧停止地点9392と13200を越え、秒単位停止は再現しなかった。109共有heartbeat中、frame 3240だけobject生成位相が一標本ずれたが後続で再一致し、継続差は0だった。
+
+この自動gateは同期trace停止の修正を支持するが、ユーザーの物理入力・目視条件を完全には代替しない。現在の最優先確認は同じ手動コマンドで秒単位停止と土管ぶれを再確認すること。初戦が安定した場合に限り、下記の再戦generation timeline rebaseへ進む。
+
 完全記録済み手動入力 `logs/nsmb-mvl-manual-local-20260818-002906/recorded-inputs` とseed `0xC6D26F70` により、手動の恒久差を自動再現した。開始barrier無効化とshared epoch未確定時の入力gateという `main` 統合回帰を先に除去した後も、frame 3487の単発depth 4訂正はframe 3517のmoving hazard生成でlockstepから分岐した。
 
 原因は、中間catch-up tickでNSMBのrender process listを省略していたことだった。これはGPUへの描画だけでなくgame object側のrender callbackも丸ごと省き、tested eventでは将来のmoving hazard/object状態へ副作用を残した。中間tickでもgame render processを実行する診断flagを有効にすると、単発3487訂正と近接3訂正の両方でhost/clientの比較対象game-state fieldがlockstepへ完全一致した。手動launcherではこのflagをROM-loopの既定とする。font updateの中間省略は維持している。
@@ -24,7 +45,7 @@ pipe gate `logs/codex-client-pipe-x-jitter-fast-discard-20260818` はframes 1125
 
 再戦経路はcheckpoint restore、generation 1への更新、start barrierまでは実装済みである。しかしhostの次戦mismatchが旧frame 934等のまま残り、current frame 13051との差をdepth 12117と計算して24回 `cannot arm` になった。再戦ずれは未実装一般ではなく、rollback input timeline/pending mismatchをgeneration境界でreset/rebaseしていない具体的な欠落である。
 
-現在のblockerは再戦timeline rebaseである。pipeの自動再現は通ったが、実手動目視、旧3494/3500 image control、2D OAMだけのちらつきは未確認なので、3D以外を含む全presentation完了とは扱わない。次はgeneration単位のrollback state reset/rebaseと二戦連続gateを実装する。死亡/復帰、土管遷移、item、音声、depth 11超fallbackも未検証として残る。
+現在の最優先blockerは、非同期trace修正後の実手動目視で秒単位停止と土管ぶれが消えることの確認である。pipeの自動再現は通ったが、旧3494/3500 image control、2D OAMだけのちらつきは未確認なので、3D以外を含む全presentation完了とは扱わない。初戦の手動確認が通った後、generation単位のrollback state reset/rebaseと二戦連続gateを実装する。死亡/復帰、土管遷移、item、音声、depth 11超fallbackも未検証として残る。
 
 ## 2026-08-04 Slippi-style game-memory restore
 

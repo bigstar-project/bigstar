@@ -27,6 +27,7 @@
 #include "NsmbGameplayDiagnostics.h"
 #include "NsmbNetplaySession.h"
 #include "NsmbTestStateHarness.h"
+#include "NsmbTraceOutput.h"
 #include "NsmbGameState.h"
 #include "NsmbGameStateSync.h"
 #include "NsmbGameStateReader.h"
@@ -930,7 +931,7 @@ void WritePacketBridgeJitScratchIfNeeded(
             std::min(G.Diagnostics.ActiveFrameSpikeThresholdUs, 10000));
         if (totalUs >= thresholdUs)
         {
-            std::printf(
+            TraceOutput::Printf(
                 "NSMB PacketBridgeScratchSpike: inst=%d frame=%u logicalFrame=%u totalMs=%.3f peerStartWaitMs=%.3f networkMs=%.3f throttleMs=%.3f lockstepRemoteWaitMs=%.3f writeMs=%.3f wrote=%d beforeStart=%d hasRemote=%d predictedRemote=%d\n",
                 instanceID,
                 frame,
@@ -945,7 +946,6 @@ void WritePacketBridgeJitScratchIfNeeded(
                 beforeStart ? 1 : 0,
                 hasRemoteInput ? 1 : 0,
                 predictedRemoteInput ? 1 : 0);
-            std::fflush(stdout);
         }
     }
     if (G.Input.HealthTrace
@@ -1649,9 +1649,9 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         nds->FinalizeNSMLGameRAMRollbackTransaction() &&
         G.Input.NetplayTrace)
     {
-        std::printf("NSMB Rollback: completed ROM-loop correction frame=%u\n",
-                    logFrame);
-        std::fflush(stdout);
+        TraceOutput::Printf(
+            "NSMB Rollback: completed ROM-loop correction frame=%u\n",
+            logFrame);
     }
     const auto afterHeartbeat = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "after-frame", instanceID, logFrame, logFrame, logFrame);
@@ -1730,7 +1730,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             const auto elapsedMs = [](auto start, auto end) {
                 return std::chrono::duration<double, std::milli>(end - start).count();
             };
-            std::printf(
+            TraceOutput::Printf(
                 "NSMB AfterHookPhaseSpike: inst=%d frame=%u totalMs=%.3f initMs=%.3f heartbeatMs=%.3f barrierMs=%.3f bridgeMs=%.3f lifeTraceMs=%.3f diagnosticSnapshotMs=%.3f rollbackTraceMs=%.3f runtimeForceMs=%.3f artifactsMs=%.3f preSnapshotTailMs=%.3f worldTraceMs=%.3f traceMs=%.3f syncGameMs=%.3f\n",
                 instanceID,
                 logFrame,
@@ -1838,6 +1838,7 @@ bool ShouldQuitAfterFrame(int instanceID, melonDS::u32 frame)
                 G.InputRuntime.FrameLeadThrottleMaxUs,
                 G.InputRuntime.FrameLeadThrottleLoops);
         }
+        TraceOutput::Flush();
         std::fflush(nullptr);
         if (G.Enabled && G.Bootstrap.QuitGraceMs > 0)
         {
@@ -1870,6 +1871,7 @@ void Shutdown()
 
     G.GameStateTrace.Close();
     G.AIObservationRuntime.CloseLogs();
+    TraceOutput::Flush();
 }
 
 }

@@ -1,5 +1,7 @@
 #include "NsmbRollbackRuntime.h"
 
+#include "NsmbTraceOutput.h"
+
 #include "NDS.h"
 #include "Savestate.h"
 
@@ -82,11 +84,10 @@ void ConfirmPredictionProbeLocked(Context &context, melonDS::u32 frame) {
     const auto stored = context.Inputs.StoreRemote(
         confirmationFrame, confirmation->second, frame, true, kNoFrame);
     if (context.Input.NetplayTrace && stored.Confirmation.Mismatch) {
-      std::printf(
+      TraceOutput::Printf(
           "NSMB Rollback: prediction probe confirmed frame=%u "
           "current=%u depth=%u\n",
           confirmationFrame, frame, frame - confirmationFrame);
-      std::fflush(stdout);
     }
   }
 }
@@ -416,8 +417,9 @@ void SaveCheckpointIfNeeded(Context context, int instanceID,
                             checkpoint.MainRAMDelta ? deltaBaseMainRAM.data()
                                                     : nullptr)) {
     if (context.Input.NetplayTrace)
-      std::printf("NSMB Rollback: failed to save checkpoint inst=%d frame=%u\n",
-                  instanceID, frame);
+      TraceOutput::Printf(
+          "NSMB Rollback: failed to save checkpoint inst=%d frame=%u\n",
+          instanceID, frame);
     return;
   }
   if (context.Config.Backend == Config::RollbackBackend::CoreDelta &&
@@ -459,9 +461,10 @@ bool RestoreCheckpointForProbeIfNeeded(Context context, int instanceID,
 
     restoreFrame = *pendingFrame;
     if (!context.Store.Copy(restoreFrame, checkpoint)) {
-      std::printf("NSMB Rollback: cannot restore frame=%u at current=%u, "
-                  "checkpoint missing window=%d\n",
-                  restoreFrame, frame, context.Config.Window);
+      TraceOutput::Printf(
+          "NSMB Rollback: cannot restore frame=%u at current=%u, "
+          "checkpoint missing window=%d\n",
+          restoreFrame, frame, context.Config.Window);
       context.Inputs.RollbackInputs.ClearPendingRollbackFrame();
       return false;
     }
@@ -471,9 +474,10 @@ bool RestoreCheckpointForProbeIfNeeded(Context context, int instanceID,
                                                  latestMainRAM)
             : context.Store.BuildRestoreChain(restoreFrame, restoreChain);
     if (!restoreReady) {
-      std::printf("NSMB Rollback: cannot restore delta chain frame=%u base=%u "
-                  "missing\n",
-                  restoreFrame, checkpoint.BaseFrame);
+      TraceOutput::Printf(
+          "NSMB Rollback: cannot restore delta chain frame=%u base=%u "
+          "missing\n",
+          restoreFrame, checkpoint.BaseFrame);
       context.Inputs.RollbackInputs.ClearPendingRollbackFrame();
       return false;
     }
@@ -486,9 +490,10 @@ bool RestoreCheckpointForProbeIfNeeded(Context context, int instanceID,
                                                    reverseStates, latestMainRAM)
                             : RestoreStoredStates(context, nds, restoreChain);
   if (!restored) {
-    std::printf("NSMB Rollback: restore probe failed inst=%d restoreFrame=%u "
-                "current=%u\n",
-                instanceID, restoreFrame, frame);
+    TraceOutput::Printf(
+        "NSMB Rollback: restore probe failed inst=%d restoreFrame=%u "
+        "current=%u\n",
+        instanceID, restoreFrame, frame);
     return false;
   }
   const unsigned long long restoreUs = ElapsedUs(restoreStart);
@@ -498,11 +503,10 @@ bool RestoreCheckpointForProbeIfNeeded(Context context, int instanceID,
     context.Statistics.RecordCheckpointRestore(restoreUs);
     context.Statistics.RecordProbeRestore();
   }
-  std::printf("NSMB Rollback: restore probe loaded frame=%u at current=%u "
-              "bytes=%zu\n",
-              restoreFrame, frame,
-              RollbackStorage::CheckpointBytes(checkpoint));
-  std::fflush(stdout);
+  TraceOutput::Printf("NSMB Rollback: restore probe loaded frame=%u at current=%u "
+                      "bytes=%zu\n",
+                      restoreFrame, frame,
+                      RollbackStorage::CheckpointBytes(checkpoint));
   return true;
 }
 
@@ -535,10 +539,10 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
     mismatchFrame = *pendingFrame;
     if (mismatchFrame == frame) {
       if (context.Input.NetplayTrace) {
-        std::printf("NSMB Rollback: current-frame mismatch consumed without "
-                    "resim frame=%u\n",
-                    frame);
-        std::fflush(stdout);
+        TraceOutput::Printf(
+            "NSMB Rollback: current-frame mismatch consumed without resim "
+            "frame=%u\n",
+            frame);
       }
       context.Inputs.RollbackInputs.ClearPendingRollback();
       return false;
@@ -554,12 +558,11 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
     mismatchFrame = RollbackStorage::ClampResimulationMismatch(
         mismatchFrame, frame, maxResimFrames);
     if (mismatchFrame != originalMismatchFrame && context.Input.NetplayTrace) {
-      std::printf("NSMB Rollback: capping resim window "
-                  "originalMismatch=%u cappedMismatch=%u current=%u "
-                  "maxFrames=%u\n",
-                  originalMismatchFrame, mismatchFrame, frame,
-                  static_cast<melonDS::u32>(maxResimFrames));
-      std::fflush(stdout);
+      TraceOutput::Printf(
+          "NSMB Rollback: capping resim window originalMismatch=%u "
+          "cappedMismatch=%u current=%u maxFrames=%u\n",
+          originalMismatchFrame, mismatchFrame, frame,
+          static_cast<melonDS::u32>(maxResimFrames));
     }
     const auto observedFrame =
         context.Inputs.RollbackInputs.PendingRollbackObservedFrame();
@@ -575,10 +578,11 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
             : context.Store.LatestAtOrBefore(mismatchFrame, restoreFrame,
                                              checkpoint);
     if (!checkpointFound) {
-      std::printf("NSMB Rollback: cannot resimulate mismatch=%u at current=%u, "
-                  "checkpoint missing window=%d interval=%d\n",
-                  mismatchFrame, frame, context.Config.Window,
-                  context.Config.CheckpointInterval);
+      TraceOutput::Printf(
+          "NSMB Rollback: cannot resimulate mismatch=%u at current=%u, "
+          "checkpoint missing window=%d interval=%d\n",
+          mismatchFrame, frame, context.Config.Window,
+          context.Config.CheckpointInterval);
       context.Inputs.RollbackInputs.ClearPendingRollback();
       return false;
     }
@@ -591,9 +595,10 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
                    : context.Store.BuildRestoreChain(restoreFrame,
                                                      restoreChain));
     if (!restoreReady) {
-      std::printf("NSMB Rollback: cannot resimulate mismatch=%u from delta "
-                  "checkpoint=%u, base=%u chain missing\n",
-                  mismatchFrame, restoreFrame, checkpoint.BaseFrame);
+      TraceOutput::Printf(
+          "NSMB Rollback: cannot resimulate mismatch=%u from delta "
+          "checkpoint=%u, base=%u chain missing\n",
+          mismatchFrame, restoreFrame, checkpoint.BaseFrame);
       context.Inputs.RollbackInputs.ClearPendingRollback();
       return false;
     }
@@ -608,12 +613,11 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
         transactionFrames > kRomLoopHistoryCapacity ||
         checkpoint.GameFrame == kNoFrame ||
         nds->ARM9Read32(kRomLoopMagicAddress) != kRomLoopMagic) {
-      std::printf(
+      TraceOutput::Printf(
           "NSMB Rollback: cannot arm ROM-loop correction inst=%d "
           "restoreFrame=%u current=%u depth=%u gameFrame=%u magic=%08X\n",
           instanceID, restoreFrame, frame, frame - restoreFrame,
           checkpoint.GameFrame, nds->ARM9Read32(kRomLoopMagicAddress));
-      std::fflush(stdout);
       return false;
     }
 
@@ -656,10 +660,10 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
 
     if (!nds->ScheduleNSMLGameRAMRestore(std::move(checkpoint.MainRAMCopy),
                                          restoreFrame)) {
-      std::printf("NSMB Rollback: failed to schedule ROM-loop RAM restore "
-                  "inst=%d restoreFrame=%u current=%u\n",
-                  instanceID, restoreFrame, frame);
-      std::fflush(stdout);
+      TraceOutput::Printf(
+          "NSMB Rollback: failed to schedule ROM-loop RAM restore "
+          "inst=%d restoreFrame=%u current=%u\n",
+          instanceID, restoreFrame, frame);
       return false;
     }
     // Checkpoints newer than the restore point contain the prediction that is
@@ -685,14 +689,13 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
     nds->ARM9Write32(0x02001AC0, 0);
 
     if (context.Input.NetplayTrace) {
-      std::printf(
+      TraceOutput::Printf(
           "NSMB Rollback: armed ROM-loop correction checkpoint=%u "
           "mismatch=%u current=%u depth=%u ticks=%u gameFrame=%u "
           "bytes=%u invalidated=%u\n",
           restoreFrame, mismatchFrame, frame, frame - restoreFrame,
           transactionFrames, checkpoint.GameFrame, 0x400000u,
           invalidatedCheckpoints);
-      std::fflush(stdout);
     }
     return true;
   }
@@ -704,9 +707,10 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
                                                    reverseStates, latestMainRAM)
                             : RestoreStoredStates(context, nds, restoreChain);
   if (!restored) {
-    std::printf("NSMB Rollback: resim restore failed inst=%d restoreFrame=%u "
-                "current=%u\n",
-                instanceID, restoreFrame, frame);
+    TraceOutput::Printf(
+        "NSMB Rollback: resim restore failed inst=%d restoreFrame=%u "
+        "current=%u\n",
+        instanceID, restoreFrame, frame);
     return false;
   }
   const unsigned long long restoreUs = ElapsedUs(restoreStart);
@@ -789,9 +793,10 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
     }
 
     if (nds->NumFrames != resimFrame + 1 && context.Input.NetplayTrace)
-      std::printf("NSMB Rollback: resim frame counter drift expected=%u "
-                  "actual=%u\n",
-                  resimFrame + 1, nds->NumFrames);
+      TraceOutput::Printf(
+          "NSMB Rollback: resim frame counter drift expected=%u "
+          "actual=%u\n",
+          resimFrame + 1, nds->NumFrames);
   }
 
   const unsigned long long rollbackTotalUs = ElapsedUs(rollbackStart);
@@ -806,18 +811,16 @@ bool ResimulateIfNeeded(Context context, const ResimulationHooks &hooks,
         resimCheckpointSaveTotalUs, resimCheckpointSaveMaxUs, rollbackTotalUs);
   }
   if (context.Input.NetplayTrace) {
-    std::printf("NSMB Rollback: resimulated from checkpoint=%u mismatch=%u to "
-                "current=%u frames=%u bytes=%zu restoreUs=%llu runUs=%llu "
-                "runMaxUs=%llu checkpointSaveUs=%llu "
-                "checkpointSaveMaxUs=%llu totalUs=%llu "
-                "audioDiscardedSamples=%llu\n",
-                restoreFrame, mismatchFrame, frame, resimulated,
-                RollbackStorage::CheckpointBytes(checkpoint), restoreUs,
-                resimRunFrameTotalUs, resimRunFrameMaxUs,
-                resimCheckpointSaveTotalUs, resimCheckpointSaveMaxUs,
-                rollbackTotalUs,
-                static_cast<unsigned long long>(discardedAudioSamples));
-    std::fflush(stdout);
+    TraceOutput::Printf(
+        "NSMB Rollback: resimulated from checkpoint=%u mismatch=%u to "
+        "current=%u frames=%u bytes=%zu restoreUs=%llu runUs=%llu "
+        "runMaxUs=%llu checkpointSaveUs=%llu checkpointSaveMaxUs=%llu "
+        "totalUs=%llu audioDiscardedSamples=%llu\n",
+        restoreFrame, mismatchFrame, frame, resimulated,
+        RollbackStorage::CheckpointBytes(checkpoint), restoreUs,
+        resimRunFrameTotalUs, resimRunFrameMaxUs,
+        resimCheckpointSaveTotalUs, resimCheckpointSaveMaxUs, rollbackTotalUs,
+        static_cast<unsigned long long>(discardedAudioSamples));
   }
   return true;
 }
@@ -852,7 +855,7 @@ void TraceStatsIfNeeded(Context context, melonDS::u32 frame) {
     }
     mainRAMCopyBytes += stored.MainRAMCopy.size();
   }
-  std::printf(
+  TraceOutput::Printf(
       "NSMB Rollback: frame=%u backend=%s checkpoints=%zu checkpointSaves=%u "
       "bytesLast=%zu bytesMin=%zu bytesMax=%zu bytesAvg=%zu saveAvgUs=%llu "
       "saveMaxUs=%llu restoreOps=%u restoreAvgUs=%llu restoreMaxUs=%llu "
@@ -884,7 +887,6 @@ void TraceStatsIfNeeded(Context context, melonDS::u32 frame) {
       context.Inputs.RollbackInputs.PendingRollbackFrame().value_or(kNoFrame),
       context.Inputs.RollbackInputs.PendingRollbackObservedFrame().value_or(
           kNoFrame));
-  std::fflush(stdout);
 }
 
 } // namespace NsmbMvlNetplay::RollbackRuntime

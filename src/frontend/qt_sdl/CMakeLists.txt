@@ -39,6 +39,8 @@ set(SOURCES_QT_SDL
     NsmbNetplaySession.h
     NsmbNetplayDiagnostics.cpp
     NsmbNetplayDiagnostics.h
+    NsmbTraceOutput.cpp
+    NsmbTraceOutput.h
     NsmbGameplayDiagnostics.cpp
     NsmbGameplayDiagnostics.h
     NsmbNetplayCoordinator.cpp
@@ -390,6 +392,8 @@ if (BUILD_TESTING)
     add_executable(nsmb_netplay_diagnostics_tests
         NsmbNetplayDiagnostics.cpp
         NsmbNetplayDiagnostics.h
+        NsmbTraceOutput.cpp
+        NsmbTraceOutput.h
         ${CMAKE_SOURCE_DIR}/tests/nsmb_netplay_diagnostics_tests.cpp
     )
     target_include_directories(nsmb_netplay_diagnostics_tests PRIVATE

@@ -67,6 +67,7 @@
 #include "EmuInstance.h"
 #include "SaveBootstrap.h"
 #include "NsmbMvlNetplayRuntime.h"
+#include "NsmbTraceOutput.h"
 
 using namespace melonDS;
 
@@ -1097,7 +1098,7 @@ frame_limit_done:
                         + nsmlPhaseDraw
                         + nsmlPhaseAudio
                         + nsmlPhaseLimit;
-                    std::printf(
+                    NsmbMvlNetplay::TraceOutput::Printf(
                         "NSMB PerfPhaseSpike: inst=%d frame=%u totalMs=%.3f mpMs=%.3f inputMs=%.3f beforeHookMs=%.3f runFrameMs=%.3f afterHookMs=%.3f drawMs=%.3f audioMs=%.3f limitMs=%.3f unaccountedMs=%.3f\n",
                         emuInstance->instanceID,
                         emuInstance->nds->NumFrames,
@@ -1159,7 +1160,7 @@ frame_limit_done:
                 if (nsmlPerfFrames >= 300)
                 {
                     const double scale = 1000.0 / static_cast<double>(nsmlPerfFrames);
-                    std::printf(
+                    NsmbMvlNetplay::TraceOutput::Printf(
                         "NSMB Perf: inst=%d frame=%u beforeHookMs=%.3f runFrameMs=%.3f afterHookMs=%.3f drawMs=%.3f audioMs=%.3f limitMs=%.3f\n",
                         emuInstance->instanceID,
                         emuInstance->nds->NumFrames,
@@ -1169,7 +1170,6 @@ frame_limit_done:
                         nsmlPerfDraw * scale,
                         nsmlPerfAudio * scale,
                         nsmlPerfLimit * scale);
-                    std::fflush(stdout);
                     nsmlPerfBeforeHook = 0.0;
                     nsmlPerfRunFrame = 0.0;
                     nsmlPerfAfterHook = 0.0;

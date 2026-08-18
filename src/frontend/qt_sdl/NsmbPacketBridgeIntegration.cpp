@@ -1,5 +1,7 @@
 #include "NsmbPacketBridgeIntegration.h"
 
+#include "NsmbTraceOutput.h"
+
 #include "ARM.h"
 #include "NDS.h"
 #include "NsmbNetplayTransport.h"
@@ -69,11 +71,12 @@ void SendPacketLocked(IntegrationContext context, const IntegrationHooks &hooks,
 
   if (context.Config.TraceEnabled && context.State.ShouldTraceSentTick(tick)) {
     const melonDS::u32 keys = packetBytes[2] | (packetBytes[3] << 8);
-    std::printf("NSMB PacketBridge: send player=%u tick=0x%04X keys=0x%04X "
-                "action=0x%02X b5=0x%02X b6=0x%02X b7=0x%02X bit=0x%02X "
-                "frame=%u\n",
-                player, tick, keys, packetBytes[4], packetBytes[5],
-                packetBytes[6], packetBytes[7], packetBytes[0x29], frame);
+    TraceOutput::Printf(
+        "NSMB PacketBridge: send player=%u tick=0x%04X keys=0x%04X "
+        "action=0x%02X b5=0x%02X b6=0x%02X b7=0x%02X bit=0x%02X "
+        "frame=%u\n",
+        player, tick, keys, packetBytes[4], packetBytes[5], packetBytes[6],
+        packetBytes[7], packetBytes[0x29], frame);
   }
 }
 
@@ -121,13 +124,13 @@ void ReceivePacketLocked(IntegrationContext context, const void *data,
       packet.Player, packet.Tick, packet.Frame);
   if (context.Config.TraceEnabled && newTick) {
     const melonDS::u32 keys = packet.Packet[2] | (packet.Packet[3] << 8);
-    std::printf("NSMB PacketBridge: recv player=%u tick=0x%04X keys=0x%04X "
-                "action=0x%02X b5=0x%02X b6=0x%02X b7=0x%02X bit=0x%02X "
-                "remoteFrame=%u localFrame=%u pending=%zu\n",
-                packet.Player, packet.Tick, keys, packet.Packet[4],
-                packet.Packet[5], packet.Packet[6], packet.Packet[7],
-                packet.Packet[0x29], packet.Frame, localFrame,
-                context.State.PendingPacketCount());
+    TraceOutput::Printf(
+        "NSMB PacketBridge: recv player=%u tick=0x%04X keys=0x%04X "
+        "action=0x%02X b5=0x%02X b6=0x%02X b7=0x%02X bit=0x%02X "
+        "remoteFrame=%u localFrame=%u pending=%zu\n",
+        packet.Player, packet.Tick, keys, packet.Packet[4], packet.Packet[5],
+        packet.Packet[6], packet.Packet[7], packet.Packet[0x29], packet.Frame,
+        localFrame, context.State.PendingPacketCount());
   }
 }
 
@@ -200,8 +203,8 @@ void ForceTickIfNeeded(IntegrationContext context, int instanceID,
                     frame, nds->ARM9Read16(kNetPacketTickAddr));
   nds->ARM9Write16(kNetPacketTickAddr, static_cast<melonDS::u16>(tick));
   if (context.Config.TraceEnabled && (frame % 60) == 0) {
-    std::printf("NSMB PacketBridge: force tick=0x%04X frame=%u\n", tick, frame);
-    std::fflush(stdout);
+    TraceOutput::Printf("NSMB PacketBridge: force tick=0x%04X frame=%u\n", tick,
+                        frame);
   }
 }
 
@@ -246,11 +249,11 @@ void ThrottleFrameLead(IntegrationContext context,
 
     if (context.Config.TraceEnabled &&
         context.State.ShouldTraceFrameThrottle(frame)) {
-      std::printf("NSMB PacketBridge: frame throttle frame=%u remotePlayer=%u "
-                  "remoteFrame=%u lead=%d maxLead=%d remoteTick=0x%04X\n",
-                  frame, remotePlayer, remoteFrame, lead,
-                  context.Config.MaxFrameLead, remoteTick & 0xFFFF);
-      std::fflush(stdout);
+      TraceOutput::Printf(
+          "NSMB PacketBridge: frame throttle frame=%u remotePlayer=%u "
+          "remoteFrame=%u lead=%d maxLead=%d remoteTick=0x%04X\n",
+          frame, remotePlayer, remoteFrame, lead, context.Config.MaxFrameLead,
+          remoteTick & 0xFFFF);
     }
     {
       std::lock_guard<std::mutex> lock(context.Mutex);
@@ -263,11 +266,10 @@ void ThrottleFrameLead(IntegrationContext context,
               .count();
       if (elapsed >= context.Config.ThrottleTimeoutMs) {
         if (context.Config.TraceEnabled) {
-          std::printf("NSMB PacketBridge: frame throttle timeout frame=%u "
-                      "remoteFrame=%u lead=%d waitedMs=%d\n",
-                      frame, remoteFrame, lead,
-                      context.Config.ThrottleTimeoutMs);
-          std::fflush(stdout);
+          TraceOutput::Printf(
+              "NSMB PacketBridge: frame throttle timeout frame=%u "
+              "remoteFrame=%u lead=%d waitedMs=%d\n",
+              frame, remoteFrame, lead, context.Config.ThrottleTimeoutMs);
         }
         return;
       }
@@ -333,13 +335,14 @@ void WriteJitScratchInputs(IntegrationContext context,
     const melonDS::u16 keys0 = nds->ARM9Read16(kPacketBridgeJitScratchKeysAddr);
     const melonDS::u16 keys1 =
         nds->ARM9Read16(kPacketBridgeJitScratchKeysAddr + 2);
-    std::printf("NSMB InputNetplay: inst=%d frame=%u localPlayer=%d "
-                "hasRemote=%d predictedRemote=%d tick=0x%04X action=0x%02X "
-                "keys0=0x%03X keys1=0x%03X\n",
-                instanceID, frame, localPlayer, hasRemoteInput ? 1 : 0,
-                predictedRemoteInput ? 1 : 0, static_cast<unsigned>(tick),
-                static_cast<unsigned>(action), static_cast<unsigned>(keys0),
-                static_cast<unsigned>(keys1));
+    TraceOutput::Printf(
+        "NSMB InputNetplay: inst=%d frame=%u localPlayer=%d hasRemote=%d "
+        "predictedRemote=%d tick=0x%04X action=0x%02X keys0=0x%03X "
+        "keys1=0x%03X\n",
+        instanceID, frame, localPlayer, hasRemoteInput ? 1 : 0,
+        predictedRemoteInput ? 1 : 0, static_cast<unsigned>(tick),
+        static_cast<unsigned>(action), static_cast<unsigned>(keys0),
+        static_cast<unsigned>(keys1));
   }
 }
 

@@ -2,7 +2,12 @@
 
 ## Live Slippi-style ROM-loop rollback milestone - updated 2026-08-18
 
-- **Current conclusion:** 中間catch-up tickでもNSMBのgame render callbackを実行し、そのtickがGPU3Dへ生成したsceneだけをFIFO順序付きbegin/end markerで破棄する境界を実装した。行列、geometry test、FIFO処理、render callbackのMain RAM副作用は通常どおり通し、最終tickだけが頂点・polygonを表示sceneへ残す。自動再生ではLuigi側の土管X重複を消し、state収束と60fps相当を維持した。手動目視での最終確認はまだ必要である。
+- **Current conclusion:** 中間catch-up tickでもNSMBのgame render callbackを実行し、そのtickがGPU3Dへ生成したsceneだけをFIFO順序付きbegin/end markerで破棄する境界を実装した。行列、geometry test、FIFO処理、render callbackのMain RAM副作用は通常どおり通し、最終tickだけが頂点・polygonを表示sceneへ残す。自動再生ではLuigi側の土管X重複を消し、state収束と60fps相当を維持した。加えて長時間手動runの約1.2秒停止は、詳細traceの同期stdout flushがframe-lead throttleへ伝播したことが主因と分かり、runtime traceを低優先度writer threadへ移した。両修正の手動目視による最終確認はまだ必要である。
+- 最新手動run `logs/nsmb-mvl-manual-local-20260818-141625` はactive outer最大がhost `1249.975ms`、client `1173.334ms` だった。frame 9386-9392ではhostの訂正完了行が含まれる区間で`222ms`、network pump内traceで`410ms`を使い、遅れたhostを待つclientのframe-lead throttleが`784ms`まで連鎖した。frame 13200-13201でもgameplay heartbeat／rollback統計の同期flushが`122-533ms`を占めた。renderやROM-loop再実行の計測値ではない。
+- 対策はtraceを消さず、最大4MiBのbounded queueへ完成済み1行を積み、低優先度threadが2ms batch・最大1秒flushでstdoutへ書く。gameplay heartbeat、rollback mismatch/arm/complete/stat/error、input send/recv/throttle、packet bridge詳細、phase spike、60-frame scratch traceを同じ経路へ統一した。終了時だけqueueを同期flushする。queue飽和時はゲームを止めずdrop数を報告し、診断A/B用に `MELONDS_NSML_SYNC_TRACE_OUTPUT=1` で旧同期経路へ戻せる。
+- 同一バイナリ・同一seed `0x111AF455`・同一5400-frame入力の同期/非同期A/Bは、同期が平均 `7.564/7.562ms`、非同期が `7.614/7.613ms` だった。差は約`0.05ms`（`0.7%`）でrun間揺らぎの範囲であり、非同期化による実質的な平均性能低下は検出していない。
+- 最終のframe limiterあり・software renderer・完全記録入力14000-frame run `logs/codex-async-trace-final-paced-14000-20260818` はhost/client `1027/1029` transactionを全件完了し、cannot-arm、failed/capped correction、trace dropはゼロだった。active outerは平均 `16.666/16.666ms`、最大 `38.562/33.851ms`、連続slow frame最大1。旧停止地点9392/13200を通過し、109個の共有heartbeatのうち108個はobject lifecycleも一致、frame 3240の一標本だけ一時的な生成位相差があったが後続標本で再一致した。
+- 手動runの最初のsignificant object差はframe 7080で、約1.2秒停止のframe 9392より前だった。従って「停止が恒久ずれを発生させた」という因果関係は当該ログからは支持されない。停止後にも一時差はあるが後で再一致しており、目視上のずれがcamera、投機中の一時state、未記録fieldのどれかは次の手動確認で分離する。
 - 全3D register/FIFO writeを中間tickで捨てる最初の案は、土管を直した一方で5400-frame stressのframe 3360以降に6回のobject/hazard差を作ったため棄却した。描画命令はgameから完全に分離できず、行列・test・FIFO timingを残す必要がある。
 - 採用案はFIFOへ内部markerを入れ、beginで現在のgeometry builder境界を保存し、endで中間sceneのvertex/polygon countを戻す。中間sceneではFIFOと非geometry commandを実行しつつ、不要になるvertex transform/clip/storeだけを省く。`-RomLoopNoIntermediate3DDiscard` で同一バイナリの診断A/Bへ戻せるが、通常の `-SlippiRollback` では既定有効である。
 - 同一seed・role別完全入力を毎frame保存したpipe gateでは、修正前のframes 1125-1130における右側pipe領域の暗緑連結画素数が `1435,1435,1947,1435,1755,1435` だった。採用案 `logs/codex-client-pipe-x-jitter-fast-discard-20260818` は全6 frameが `1435` となり、訂正完了直後だけ幅35-38pxへ膨らむ二重geometryが消えた。
@@ -14,8 +19,8 @@
 - 解決済みの起動回帰: `logs/nsmb-mvl-manual-local-20260818-131208` は、通信をframe 870までdeferする一方、seed未指定clientが起動前にhost seedを最大10秒待つという順序矛盾を踏んだ。hostは `0x9565A6DA`、clientは未設定の `0x00000000` でstart-readyを作り、strict validationが `seed-mismatch` で両者を終了した。外側の `exitCode=<empty>` / `missing frame limit` はその二次エラーだった。ローカル2-process launcherは未指定時に暗号学的乱数seedを一度生成して両roleへ明示し、`-ClientOnly`だけは従来どおりremote hostから受け取る。修正後の同一コマンド相当1000-frame run `logs/codex-manual-auto-seed-startup-fix` は、両roleが `0x4B302DB5` でframe 870のbarrierを一度でacceptし、wrapper stderrなし、analyzer `status=ok`、active outer max `18.351/19.039ms` だった。
 - 最新手動run `logs/nsmb-mvl-manual-local-20260818-132459` で観測したLuigi側の土管Xぶれは上記pipe gateでは解消した。既存frame 3494/3500 control、2D OAMだけのevent、実際の長時間手動操作は未再確認なので、「すべてのちらつき解消」ではなく「再現した3D pipe二重submitを解消」と限定する。
 - 再戦は未実装ではなく部分実装で、generation 1のcheckpoint restore、sync cache reset、frame 12986のstart barrierまでは両roleが完了した。しかしhostは再戦後のremote mismatchを旧generationのframe `934` 等として扱い、current `13051` に対してdepth `12117` と誤計算した。24件すべてをdepth 11へcapした後 `cannot arm` となっており、これが再戦ずれの具体的原因である。rollback input timeline/pending mismatchのgeneration resetまたはframe rebaseが不足している。
-- **Current blocker:** 再戦timeline rebaseは未解決で、旧generation frameを現行frameから引いてdepth 12117とする問題が残る。未通過event（死亡/復帰、土管遷移、item）、2D OAMちらつき、音声波形、depth 11超fallbackも未検証である。
-- **Next action:** ユーザーの同一手動コマンドで土管ぶれの体感確認を行い、残るならframe番号を採取して3D以外を分離する。自動pipe gateが通る前提では、次にgeneration単位のrollback timeline/pending mismatch reset/rebaseと二戦連続gateを実装する。
+- **Current blocker:** stdout起因の秒単位停止は自動再生で解消したが、ユーザー操作での再確認前なので体感上の停止・ずれを解決済みとはまだ扱わない。再戦timeline rebaseも未解決で、旧generation frameを現行frameから引いてdepth 12117とする問題が残る。未通過event（死亡/復帰、土管遷移、item）、2D OAMちらつき、音声波形、depth 11超fallbackも未検証である。
+- **Next action:** ユーザーの同一手動コマンドで、秒単位停止と土管ぶれの双方を再確認する。初戦が安定した場合はgeneration単位のrollback timeline/pending mismatch reset/rebaseと二戦連続gateへ進む。初戦で目視ずれだけが再発する場合は発生時刻を基にcameraと未記録game fieldを追加採取する。
 
 ## Exact rollback depth and presentation gate - 2026-08-02
 
