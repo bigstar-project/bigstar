@@ -115,6 +115,38 @@ void TestDelayedInputReleaseUsesFrameOrWallClock()
         9, releaseTime, 10, releaseTime));
 }
 
+void TestDelayProgressUsesGenerationLocalInputFrame()
+{
+    using NsmbMvlNetplay::InputDelivery::SelectDelayProgressFrame;
+    constexpr melonDS::u32 noFrame = 0;
+
+    CHECK(SelectDelayProgressFrame(872, 9953, noFrame) == 872);
+    CHECK(SelectDelayProgressFrame(noFrame, 9953, noFrame) == 9953);
+
+    Runtime runtime;
+    std::map<melonDS::u32, NsmbMvlNetplay::InputState> localInputs;
+    NsmbMvlNetplay::InputState input;
+    input.KeyMask = 0xFFE;
+    SendConfig config;
+    config.DelayFrames = 8;
+    const auto now = Runtime::Clock::time_point(std::chrono::seconds(10));
+    runtime.Prepare(1, 872, input, config, localInputs, now);
+
+    std::vector<std::vector<char>> due;
+    const auto collect = [&due](const std::vector<char>& payload) {
+        due.push_back(payload);
+    };
+    runtime.DrainDue(
+        SelectDelayProgressFrame(872, 9953, noFrame), now, collect);
+    CHECK(due.empty());
+    CHECK(runtime.PendingCount() == 1);
+
+    runtime.DrainDue(
+        SelectDelayProgressFrame(880, 9961, noFrame), now, collect);
+    CHECK(due.size() == 1);
+    CHECK(runtime.PendingCount() == 0);
+}
+
 void TestRuntimePreparesWirePayloads()
 {
     Runtime runtime;
@@ -240,6 +272,7 @@ int main()
     TestBundleAndDelayBoundaries();
     TestBundleInputSelection();
     TestDelayedInputReleaseUsesFrameOrWallClock();
+    TestDelayProgressUsesGenerationLocalInputFrame();
     TestRuntimePreparesWirePayloads();
     TestRuntimeOwnsDelayedQueue();
     TestRuntimeDrainsAllForGenerationTransition();

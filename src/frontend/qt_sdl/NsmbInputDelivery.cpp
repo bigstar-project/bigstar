@@ -67,6 +67,16 @@ bool ShouldReleaseDelayedInput(
     return releaseFrame <= currentFrame || now >= releaseTime;
 }
 
+melonDS::u32 SelectDelayProgressFrame(
+    melonDS::u32 lastSentInputFrame,
+    melonDS::u32 fallbackRawFrame,
+    melonDS::u32 noFrame)
+{
+    return lastSentInputFrame == noFrame
+        ? fallbackRawFrame
+        : lastSentInputFrame;
+}
+
 PreparedSend Runtime::Prepare(
     melonDS::u32 generation,
     melonDS::u32 frame,

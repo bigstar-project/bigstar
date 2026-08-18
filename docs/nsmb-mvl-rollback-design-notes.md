@@ -6,7 +6,7 @@
 
 ### 現時点の独立判断
 
-Slippiの制御原則、すなわち「少量の実入力遅延を先に入れる」「訂正可能範囲だけ予測する」「上限を越える前にgame frameを止める」「欠落入力を再送する」を本forkにも採用した。前節の`D=2/P=5/H=12`を先に製品候補とする判断は撤回する。ユーザーの評価順が「Bigstar統合より先に既存scriptでP=7まで実装・試験」へ明確化されたためである。現在のscript試験候補はlocal input delay `D=2`、最大連続投機tick `P=7`、ROM側history容量`H=12`とし、Bigstar GUI起動経路は変更しない。後述の手動runで見つかったP=7 transaction境界競合と、結果画面で旧generationの遅延入力を失う再戦境界を修正した。再戦同期の手動gateは通ったが、再戦後の人工送信遅延が生raw frameとgeneration-local logical frameの混用で無効になる試験系の不具合を新たに確認した。未検証のloss/再順序化、画像、音声、eventを残すため、製品完成とは判定しない。
+Slippiの制御原則、すなわち「少量の実入力遅延を先に入れる」「訂正可能範囲だけ予測する」「上限を越える前にgame frameを止める」「欠落入力を再送する」を本forkにも採用した。前節の`D=2/P=5/H=12`を先に製品候補とする判断は撤回する。ユーザーの評価順が「Bigstar統合より先に既存scriptでP=7まで実装・試験」へ明確化されたためである。現在のscript試験候補はlocal input delay `D=2`、最大連続投機tick `P=7`、ROM側history容量`H=12`とし、Bigstar GUI起動経路は変更しない。後述の手動runで見つかったP=7 transaction境界競合、結果画面で旧generationの遅延入力を失う再戦境界、再戦後の人工送信遅延が生raw frameとgeneration-local logical frameの混用で無効になる試験系の不具合を修正した。未検証のloss/再順序化、画像、音声、eventを残すため、製品完成とは判定しない。
 
 software renderer・60fps制限ありの通常条件 `logs/codex-slippi-horizon7-practical-20260818` は人工送信遅延2-3 frameで、host/client各38訂正、最大log depth `3/2`、最大replay tick `4/3`、active平均`16.664/16.667ms`、最大`28.129/27.640ms`、33ms超0、horizon待機0、26共有heartbeat差0だった。P=7設定そのものによる通常時の性能低下はこのrunでは検出していない。
 
@@ -32,7 +32,9 @@ software renderer・60fps制限ありの通常条件 `logs/codex-slippi-horizon7
 
 修正後のユーザー手動run `logs/manual-slippi-depth7-20260818-200841` は初戦と再戦で状態差を生じず、再戦境界deadlockの目視gateを通った。一方、初戦より2戦目の死亡時黒枠animationが明らかに滑らかだった。区間集計では初戦にhost/client `441/473`件のprediction mismatchと同数のROM-loop訂正、prediction horizon block `1864/2194`件、25ms超outer frame `1154/1800`件があり、33ms超は`204/238`件、最大`66.529/74.112ms`だった。2戦目は両roleともmismatch、訂正、horizon blockがすべて0で、25ms超は各2件、最大`31.722/30.121ms`に急減した。従って滑らかさの差は主観だけではなく、2戦目で人工遅延とrollback負荷が消えた実測差である。
 
-原因は人工遅延queueの時刻軸混用である。input payloadはgeneration-local logical frame `F`に対して`F + 8/9`をrelease frameとして積むが、`PumpLocked()`は`DrainDue()`へ再戦で単調増加するraw frameを渡す。初戦はrawとlogicalがほぼ同じなので8-9 frame遅延するが、再戦後はraw `9953`に対してlogical `870`から再開するため、logical release frameは常にraw current以下となり即時送信される。これは実WANが2戦目だけ低遅延になる証拠ではなく、local人工遅延試験が再戦後を正しく再現できていないという意味である。黒枠中に相手入力が変わる初戦では、後着不一致とP=7 horizon待ちによる25-40ms級outer frameが連続し、animationの提示間隔を乱した可能性が高い。次はdelayed queueのrelease frameとdrain currentを同じlogical軸へ統一し、同一runの初戦・2戦目で遅延、訂正数、黒枠時frame pacingが同等になることを先に確認する。
+原因は人工遅延queueの時刻軸混用である。input payloadはgeneration-local logical frame `F`に対して`F + 8/9`をrelease frameとして積むが、`PumpLocked()`は`DrainDue()`へ再戦で単調増加するraw frameを渡していた。初戦はrawとlogicalがほぼ同じなので8-9 frame遅延するが、再戦後はraw `9953`に対してlogical `870`から再開するため、logical release frameは常にraw current以下となり即時送信されていた。これは実WANが2戦目だけ低遅延になる証拠ではなく、local人工遅延試験が再戦後を正しく再現できていなかったという意味である。黒枠中に相手入力が変わる初戦では、後着不一致とP=7 horizon待ちによる25-40ms級outer frameが連続し、animationの提示間隔を乱した可能性が高い。
+
+修正では`DrainDue()`の進捗をraw frameではなく、payloadを積んだ時刻軸と同じgeneration-local `LastSentInputFrame`へ統一した。まだinputを一件も予定していない起動前だけraw frameへfallbackする。unit testはraw `9953`・logical `872`の再戦条件でdelay 8のpayloadを保持し、logical `880`へ進んだ時だけ解放することを固定した。実ROM再戦 `logs/codex-rematch-delay-timeline-fix-paced-20260818` はsoftware renderer・60fps制限・人工送信遅延8-9 frameで2700 frameを完走した。generation 1開始後にもhost/client `7/13`件のprediction mismatchと同数のROM-loop訂正が発生し、clientはhorizon block 279件を全件再開した。以前の再戦後0件から変わり、人工遅延が2戦目でも有効なことを確認した。cannot-arm、failed/capped resimulation、15共有heartbeatの状態差は0、active平均`16.729/16.727ms`、最大`99.811/95.806ms`は既知のbootstrap restore frameだった。次は同条件の手動操作で、初戦と2戦目の死亡時黒枠animationを改めて比較する。
 
 `logs/codex-slippi-horizon7-timeout-20260818` はtimeoutだけ500msへ短縮し、入力を100 frame遅らせた。両roleとも連続確定frontierから8個目へ進む前に停止し、`500/501ms`でexit 73となった。製品候補の既定値はSlippiと同じ7秒である。
 
@@ -60,9 +62,9 @@ rollback有効時の現行`InputMaxFrameLead`は、future labelである`sendFra
 2. 完了: manual `-SlippiRollback`を`D=2/P=7/H=12`、software renderer、旧`InputMaxFrameLead`無効、7秒timeoutへ揃えた。通常2-3 frame条件、深度7を発生させる8-9 frame条件、短縮timeoutを実ROMで試した。ただし8-9 frameの長時間手動条件では上記競合により失敗した。
 3. 完了: ROM-loop transaction実行中に到着した次の不一致がP=7を越えて老化する競合を、outer-frame末尾の早期finalizeで修正した。古い入力を捨てたりPを名目だけ8へ広げたりせず、unit test、同一入力replay、最大depth 7の5400-frame実ROM stressを通した。
 4. 完了: 結果sceneでnetwork pumpが止まり、人工遅延queueの最終入力をgeneration resetが消すdeadlockを修正した。8-9 frame遅延queueを残した決定的な再戦runで実payload排出、generation 1 handshake、状態差0を確認し、同じ設定の手動再戦も状態差なしで通った。
-5. 現在の最優先: 再戦後に人工送信遅延が無効になるraw/logical frame混用を直す。修正後は一つの手動run内で初戦と2戦目の8-9 frame遅延、prediction mismatch、horizon block、outer frame分布が同等であることを確認し、死亡時黒枠のカクつきを再評価する。現状の滑らかな2戦目を性能合格証拠に使わない。
+5. 完了: 再戦後に人工送信遅延が無効になるraw/logical frame混用を直した。unit testと実ROM再戦でgeneration 1にも8-9 frame遅延、prediction mismatch、ROM-loop訂正が発生し、状態差0で完走した。次は同じ設定の手動操作で初戦と2戦目の死亡時黒枠animationを再評価する。修正前の滑らかな2戦目を性能合格証拠には使わない。
 6. その後、固定12-entry bundleだけでなくcontiguous ACK/未ACK再送をprotocolへ加え、loss・重複・再順序化・短時間断をscriptで試す。`D=0/1/2`も同じnetwork条件でA/Bするが、一つのrun中に動的変更はしない。
-7. P=7の合格条件は、cannot-arm/cap/fatal invariantが0、継続heartbeat差0、通常network条件で対戦中実効`59.5fps`以上、rollback起因の33ms超連続frameが0、訂正区間後のpipe/player/OAM画像差が0、死亡・復帰・土管・item・再戦を通過、停止後の復帰または理由付き終了とする。単発最大値、訂正深度分布、audio underrunも別々に記録する。今回のscript runは境界安全性と通常条件の状態・平均性能を通ったが、画像・音声・eventは未完であり、再戦後の人工遅延無効化を直すまでは複数試合の性能gateを有効と扱わない。
+7. P=7の合格条件は、cannot-arm/cap/fatal invariantが0、継続heartbeat差0、通常network条件で対戦中実効`59.5fps`以上、rollback起因の33ms超連続frameが0、訂正区間後のpipe/player/OAM画像差が0、死亡・復帰・土管・item・再戦を通過、停止後の復帰または理由付き終了とする。単発最大値、訂正深度分布、audio underrunも別々に記録する。今回のscript runは再戦後の人工遅延継続、境界安全性、状態・平均性能を通ったが、画像・音声・eventと手動黒枠gateは未完である。
 8. ユーザー指示により、Bigstarの現行`coredelta`起動設定とGUIはこの段階では変更しない。P=7のscript検証を先に続ける。
 
 ## 2026-08-18 Slippi/Tangoの遅延・深度制御再確認

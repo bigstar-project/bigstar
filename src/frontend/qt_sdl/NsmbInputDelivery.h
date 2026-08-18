@@ -46,6 +46,10 @@ bool ShouldReleaseDelayedInput(
     std::chrono::steady_clock::time_point now,
     melonDS::u32 releaseFrame,
     std::chrono::steady_clock::time_point releaseTime);
+melonDS::u32 SelectDelayProgressFrame(
+    melonDS::u32 lastSentInputFrame,
+    melonDS::u32 fallbackRawFrame,
+    melonDS::u32 noFrame);
 
 struct PreparedSend
 {

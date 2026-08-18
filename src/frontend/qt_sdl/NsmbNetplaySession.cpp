@@ -59,12 +59,18 @@ void FlushDelayedInputsLocked(Context context, melonDS::u32 frame) {
   if (!context.Transport.IsConnected() ||
       context.State.Delivery.PendingCount() == 0)
     return;
-  context.State.Delivery.DrainDue(frame, std::chrono::steady_clock::now(),
-                                  [context](const std::vector<char> &payload) {
-                                    SendInputPayloadNowLocked(
-                                        context, payload.data(), payload.size(),
-                                        ENET_PACKET_FLAG_RELIABLE);
-                                  });
+  // Delayed payload release frames use the generation-local input timeline.
+  // A raw emulator frame keeps increasing after a rematch while the input
+  // timeline restarts at the shared epoch, so comparing the two would make
+  // every delayed payload in later games immediately due.
+  const melonDS::u32 progressFrame = InputDelivery::SelectDelayProgressFrame(
+      context.Inputs.LastSentInputFrame, frame, kNoFrame);
+  context.State.Delivery.DrainDue(
+      progressFrame, std::chrono::steady_clock::now(),
+      [context](const std::vector<char> &payload) {
+        SendInputPayloadNowLocked(context, payload.data(), payload.size(),
+                                  ENET_PACKET_FLAG_RELIABLE);
+      });
 }
 
 void StoreRemoteInputLocked(Context context, melonDS::u32 frame,
