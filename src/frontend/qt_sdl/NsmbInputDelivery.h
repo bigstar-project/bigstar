@@ -69,6 +69,8 @@ public:
         melonDS::u32 currentFrame,
         Clock::time_point now,
         const std::function<void(const std::vector<char>&)>& send);
+    void DrainAll(
+        const std::function<void(const std::vector<char>&)>& send);
     std::vector<char> BuildPayload(
         melonDS::u32 generation,
         melonDS::u32 frame,

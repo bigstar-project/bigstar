@@ -458,15 +458,22 @@ bool RestartAfterResultIfNeeded(Context context, int instanceID,
 
 bool ShouldPauseInputForRestart(Context context, int instanceID,
                                 melonDS::NDS *nds) {
-  if (!context.Input.NetplayOnly || !context.Mvl.AutoRestartAfterResult ||
-      context.Mvl.TargetWins <= 1 || !nds || instanceID < 0 ||
-      instanceID >= 16 ||
-      nds->ARM9Read16(kSceneCurrentSceneIDAddr) != kResultsScene)
+  if (!ShouldServiceNetworkForResult(context, instanceID, nds) ||
+      context.Mvl.TargetWins <= 1)
     return false;
   const MvlRuntime::InstanceState &restart =
       context.Runtime.Instances[instanceID];
-  return restart.InResult &&
-         std::max(restart.Wins[0], restart.Wins[1]) < context.Mvl.TargetWins;
+  return std::max(restart.Wins[0], restart.Wins[1]) < context.Mvl.TargetWins;
+}
+
+bool ShouldServiceNetworkForResult(Context context, int instanceID,
+                                   melonDS::NDS *nds) {
+  if (!context.Input.NetplayOnly || !context.Mvl.AutoRestartAfterResult ||
+      context.Mvl.TargetWins < 1 || !nds || instanceID < 0 ||
+      instanceID >= 16 ||
+      nds->ARM9Read16(kSceneCurrentSceneIDAddr) != kResultsScene)
+    return false;
+  return context.Runtime.Instances[instanceID].InResult;
 }
 
 void SaveGameplayCheckpointIfNeeded(Context context, const Hooks &hooks,

@@ -2,11 +2,11 @@
 
 > 現在の判断は直下の2026-08-18節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
 
-## 2026-08-18 Slippi型を実用化するための制御方針、P=7実測と境界競合
+## 2026-08-18 Slippi型を実用化するための制御方針、P=7実測と再戦境界
 
 ### 現時点の独立判断
 
-Slippiの制御原則、すなわち「少量の実入力遅延を先に入れる」「訂正可能範囲だけ予測する」「上限を越える前にgame frameを止める」「欠落入力を再送する」を本forkにも採用した。前節の`D=2/P=5/H=12`を先に製品候補とする判断は撤回する。ユーザーの評価順が「Bigstar統合より先に既存scriptでP=7まで実装・試験」へ明確化されたためである。現在のscript試験候補はlocal input delay `D=2`、最大連続投機tick `P=7`、ROM側history容量`H=12`とし、Bigstar GUI起動経路は変更しない。後述の手動runで見つかったP=7境界競合は修正し、5400-frameの実ROM stressまで通した。未検証のloss/再順序化、画像、音声、event、長時間手動playを残すため、製品完成とは判定しない。
+Slippiの制御原則、すなわち「少量の実入力遅延を先に入れる」「訂正可能範囲だけ予測する」「上限を越える前にgame frameを止める」「欠落入力を再送する」を本forkにも採用した。前節の`D=2/P=5/H=12`を先に製品候補とする判断は撤回する。ユーザーの評価順が「Bigstar統合より先に既存scriptでP=7まで実装・試験」へ明確化されたためである。現在のscript試験候補はlocal input delay `D=2`、最大連続投機tick `P=7`、ROM側history容量`H=12`とし、Bigstar GUI起動経路は変更しない。後述の手動runで見つかったP=7 transaction境界競合と、結果画面で旧generationの遅延入力を失う再戦境界を修正した。未検証のloss/再順序化、画像、音声、event、修正後の長時間手動playを残すため、製品完成とは判定しない。
 
 software renderer・60fps制限ありの通常条件 `logs/codex-slippi-horizon7-practical-20260818` は人工送信遅延2-3 frameで、host/client各38訂正、最大log depth `3/2`、最大replay tick `4/3`、active平均`16.664/16.667ms`、最大`28.129/27.640ms`、33ms超0、horizon待機0、26共有heartbeat差0だった。P=7設定そのものによる通常時の性能低下はこのrunでは検出していない。
 
@@ -21,6 +21,14 @@ software renderer・60fps制限ありの通常条件 `logs/codex-slippi-horizon7
 修正後の同入力・同seed再生 `logs/codex-depth7-atomic-finalize-replay-20260818` は3200 frameを完走し、訂正はhost/client `89/97`、cannot-arm、fatal、19共有heartbeat差は0だった。completeは全件`current + 1`になり、問題の空白frameを除去できた。長時間境界stress `logs/codex-depth7-atomic-finalize-stress-5400-20260818` は人工送信遅延8-9 frameでhost/client `102/95`訂正、最大mismatch depth `7/7`、horizon block/resume `1123/1047`件、cannot-arm、fatal、76共有heartbeat差は0だった。active平均`16.737/16.739ms`、最大`57.092/66.242ms`、33ms超`72/71`であり、安全性は通るがこのping 270-300ms相当条件を快適とは判定しない。
 
 通常性能gate `logs/codex-depth7-atomic-finalize-practical-3600-20260818` は人工送信遅延2-3 frameでhost/client各79訂正、最大mismatch depth `2/1`、cannot-arm、fatal、46共有heartbeat差は0だった。active平均は両role `16.667ms`、最大`34.548/30.463ms`、33ms超`1/0`、連続slow frame `1/0`である。hostの単発最大は次の訂正をarmする前のframe 1631で、持続的な60fps低下はない。初回gameplay correction付近のrun-frameは別に`33-36ms`あり、完全無停止とは扱わないが、今回のfinalize変更による持続性能悪化は検出していない。
+
+次のユーザー手動run `logs/manual-slippi-depth7-20260818-194536` は初戦中の状態差やOS例外ではなく、再戦入口で世代が片側だけ進む停止だった。clientはframe 6600で結果を確定し、frame 6719でbootstrap checkpointを復元してgeneration 1へ進んだ。一方hostはraw frame 6598、contiguous remote 6590でP=7上限に止まり、generation 0のframe 6591以降を待った。clientがframe 6600まで作ったinput bundleは人工送信遅延8-9 frameのqueueに残っていたが、結果画面ではinput scratch経路を止めるためnetwork pumpも呼ばれず、generation reset時の`Delivery.Clear()`で破棄された。その後clientはhostのgeneration 0 bundleを捨て、hostは7秒後にexit 73、client wrapperは進捗停止として終了した。これは「再戦時にmelonDSがクラッシュした」のではなく、旧世代最終入力の未排出によるprotocol deadlockである。
+
+修正後は、結果sceneへ入った最初のframeで旧generationの遅延input payloadを順序どおりreliable送信してqueueを空にし、結果timer中もENet serviceを継続する。処理は次試合がある結果だけでなく最終結果にも適用し、通常gameplay frameの経路は増やしていない。unit testはrelease予定が120 frame先のpayload 2件もgeneration transition時に順序を保ってdrainできることを固定した。
+
+決定的な再戦再現 `logs/codex-rematch-delay-flush-forced-paced-20260818` はsoftware renderer・60fps制限・人工送信遅延8-9 frameで、結果入口に残っていたhost/client `8/10` payloadを実際に排出した。両roleともframe 1838で同じ勝敗、1957でgeneration 1 reset、2133でstart-ready交換を完了し、2500 frameまでtimeout、旧generation拒否loop、cannot-arm、状態差なしで完走した。active平均は`16.793/16.788ms`で、flush frame自体に25ms超spikeはない。最大`119.499/113.930ms`はframe 1958のbootstrap restore/JIT再初期化であり、今回の送信排出ではなく既知の再戦checkpoint hitchである。従ってdeadlock修正は性能gateを悪化させていないが、再戦を完全無停止にしたとは判定しない。
+
+人間操作記録の等速再生 `logs/codex-rematch-delay-flush-replay-paced-20260818` は7200 frameを`59.32/59.51fps`、53共有heartbeat差0、fatal 0で完走したが、元runの勝敗scene自体を再現しなかった。packet timingでprediction列が変わるため、これは通常play継続と性能の補助証拠に留め、再戦修正の合格根拠には上の決定的再現を使う。
 
 `logs/codex-slippi-horizon7-timeout-20260818` はtimeoutだけ500msへ短縮し、入力を100 frame遅らせた。両roleとも連続確定frontierから8個目へ進む前に停止し、`500/501ms`でexit 73となった。製品候補の既定値はSlippiと同じ7秒である。
 
@@ -38,7 +46,7 @@ rollback有効時の現行`InputMaxFrameLead`は、future labelである`sendFra
 2. logical frame `F`を実行する直前に `F - contiguousFrontier <= P` を検査する。範囲内だけstale-repeat予測を許し、`P+1`個目へ入る前はemulation、描画、audio timelineを進めずnetwork pumpと再送だけを行う。入力到着後は同じframeから再開する。
 3. 予測値は「packet到着順で最後に確認した入力」ではなく、対象frameより前で最も新しい確定入力から選ぶ。現行`PredictionRuntime::Confirm()`は再順序化した古いpacketでも`LastConfirmedInput_`を上書きするため、real-WAN gateより前にframe順の探索へ直す。
 4. horizon gateが正しければ、後着不一致は必ず保持history内にある。現行のdepth 11超 `ClampResimulationMismatch()`は古い不一致を捨てて最近のframeだけ直すため削除し、範囲外不一致やcheckpoint欠落は同期継続不能の明示的なfatal invariant errorとする。無言でplayを続けない。
-5. script経路は`InputBundleHistory=11`、すなわちcurrentを含む最大12 entryへ増やし、stall中は最新bundleを50ms間隔でreliable resendする。これで今回のdelay試験は回復したが、Slippi同様の明示的なcontiguous ACKと未ACK列はまだwire protocolへ入れておらず、packet loss試験より前の残作業である。新しいgame inputを生成してhorizonを押し広げることはしない。
+5. script経路は`InputBundleHistory=11`、すなわちcurrentを含む最大12 entryへ増やし、stall中は最新bundleを50ms間隔でreliable resendする。結果sceneへ入るときは人工遅延queueに残る旧generation payloadを先に全送信し、結果timer中もnetwork pumpを継続してからgeneration resetする。これで今回のdelay試験と再戦境界は回復したが、Slippi同様の明示的なcontiguous ACKと未ACK列はまだwire protocolへ入れておらず、packet loss試験より前の残作業である。新しいgame inputを生成してhorizonを押し広げることはしない。
 6. horizonでの連続停止は7秒でexit 73にする。通常の`RollbackInputWaitUs`は0を既定にし、毎frameの短い待ちと安全上限でのhard waitを混同しない。GUI表示はBigstar統合を再開するときの別作業とする。
 7. `D/P`、protocol version、ROM-loop backend/history契約を開始handshakeとruntime identityへ含め、peer間不一致は対戦開始前に拒否する。再戦generation resetではcontiguous frontier、ACK、prediction、pending rollbackを同時に初期化する。
 
@@ -47,9 +55,10 @@ rollback有効時の現行`InputMaxFrameLead`は、future labelである`sendFra
 1. 完了: ROM不要testで、連続frontier、穴あき・逆順packet、generation reset、P=7と8個目の区別を固定した。arrival-order依存のstale predictionをframe順探索へ変更し、P有効時のROM-loop事後clampをfatal invariantへ置き換えた。
 2. 完了: manual `-SlippiRollback`を`D=2/P=7/H=12`、software renderer、旧`InputMaxFrameLead`無効、7秒timeoutへ揃えた。通常2-3 frame条件、深度7を発生させる8-9 frame条件、短縮timeoutを実ROMで試した。ただし8-9 frameの長時間手動条件では上記競合により失敗した。
 3. 完了: ROM-loop transaction実行中に到着した次の不一致がP=7を越えて老化する競合を、outer-frame末尾の早期finalizeで修正した。古い入力を捨てたりPを名目だけ8へ広げたりせず、unit test、同一入力replay、最大depth 7の5400-frame実ROM stressを通した。
-4. 次は固定12-entry bundleだけでなくcontiguous ACK/未ACK再送をprotocolへ加え、loss・重複・再順序化・短時間断をscriptで試す。`D=0/1/2`も同じnetwork条件でA/Bするが、一つのrun中に動的変更はしない。
-5. P=7の合格条件は、cannot-arm/cap/fatal invariantが0、継続heartbeat差0、通常network条件で対戦中実効`59.5fps`以上、rollback起因の33ms超連続frameが0、訂正区間後のpipe/player/OAM画像差が0、死亡・復帰・土管・item・再戦を通過、停止後の復帰または理由付き終了とする。単発最大値、訂正深度分布、audio underrunも別々に記録する。今回のscript runは境界安全性と通常条件の状態・平均性能を通ったが、画像・音声・event・長時間手動gateは未完である。
-6. ユーザー指示により、Bigstarの現行`coredelta`起動設定とGUIはこの段階では変更しない。P=7のscript検証を先に続ける。
+4. 完了: 結果sceneでnetwork pumpが止まり、人工遅延queueの最終入力をgeneration resetが消すdeadlockを修正した。8-9 frame遅延queueを残した決定的な再戦runで、実payload排出、generation 1 handshake、状態差0まで確認した。次は同じ設定の長時間手動再戦で目視gateを取る。
+5. その後、固定12-entry bundleだけでなくcontiguous ACK/未ACK再送をprotocolへ加え、loss・重複・再順序化・短時間断をscriptで試す。`D=0/1/2`も同じnetwork条件でA/Bするが、一つのrun中に動的変更はしない。
+6. P=7の合格条件は、cannot-arm/cap/fatal invariantが0、継続heartbeat差0、通常network条件で対戦中実効`59.5fps`以上、rollback起因の33ms超連続frameが0、訂正区間後のpipe/player/OAM画像差が0、死亡・復帰・土管・item・再戦を通過、停止後の復帰または理由付き終了とする。単発最大値、訂正深度分布、audio underrunも別々に記録する。今回のscript runは境界安全性と通常条件の状態・平均性能を通ったが、画像・音声・event・修正後の長時間手動gateは未完である。
+7. ユーザー指示により、Bigstarの現行`coredelta`起動設定とGUIはこの段階では変更しない。P=7のscript検証を先に続ける。
 
 ## 2026-08-18 Slippi/Tangoの遅延・深度制御再確認
 

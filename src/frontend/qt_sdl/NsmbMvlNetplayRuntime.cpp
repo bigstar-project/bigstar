@@ -1310,6 +1310,25 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     RunBeforeFrameBootPhase(instanceID, inputFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Boot);
 
+    const bool serviceNetworkForResult = G.Enabled
+        && MvlLifecycle::ShouldServiceNetworkForResult(
+            MvlLifecycleContext(), instanceID, nds);
+    if (serviceNetworkForResult)
+    {
+        // The result scene no longer writes input scratch, but a simulated WAN
+        // delay can still own the last gameplay packets.  Flush those packets
+        // before either peer advances its generation, and keep servicing ENet
+        // while the result timer runs so the other peer can reach the same
+        // deterministic result frame.
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        NetplaySession::FlushPendingInputsLocked(NetplaySessionContext());
+        NetplaySession::PumpLocked(
+            NetplaySessionContext(), NetplaySessionHooks(), nds, inputFrame);
+    }
+    const bool pauseInputNetplayForRestart = serviceNetworkForResult
+        && MvlLifecycle::ShouldPauseInputForRestart(
+            MvlLifecycleContext(), instanceID, nds);
+
     RunBeforeFramePatchPhase(instanceID, inputFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Patch);
 
@@ -1376,9 +1395,6 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             RollbackContext(), instanceID, rollbackFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Checkpoint);
 
-    const bool pauseInputNetplayForRestart = G.Enabled
-        && MvlLifecycle::ShouldPauseInputForRestart(
-            MvlLifecycleContext(), instanceID, nds);
     if (!pauseInputNetplayForRestart
         && (G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         WritePacketBridgeJitScratchIfNeeded(instanceID, syncFrame, nds, testInput);

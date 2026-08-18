@@ -198,6 +198,39 @@ void TestRuntimeOwnsDelayedQueue()
     CHECK(runtime.PendingCount() == 0);
 }
 
+void TestRuntimeDrainsAllForGenerationTransition()
+{
+    Runtime runtime;
+    std::map<melonDS::u32, NsmbMvlNetplay::InputState> localInputs;
+    NsmbMvlNetplay::InputState first;
+    first.KeyMask = 0xFFE;
+    NsmbMvlNetplay::InputState second;
+    second.KeyMask = 0xFFD;
+    SendConfig config;
+    config.DelayFrames = 120;
+    const auto now = Runtime::Clock::time_point(std::chrono::seconds(10));
+
+    runtime.Prepare(4, 20, first, config, localInputs, now);
+    runtime.Prepare(4, 21, second, config, localInputs, now);
+    CHECK(runtime.PendingCount() == 2);
+
+    std::vector<std::vector<char>> drained;
+    runtime.DrainAll([&drained](const std::vector<char>& payload) {
+        drained.push_back(payload);
+    });
+    CHECK(runtime.PendingCount() == 0);
+    CHECK(drained.size() == 2);
+
+    NsmbMvlNetplay::InputProtocol::FramedInput decoded;
+    CHECK(NsmbMvlNetplay::InputProtocol::DecodeInput(
+        drained[0].data(), drained[0].size(), decoded));
+    CHECK(decoded.Generation == 4);
+    CHECK(decoded.Frame == 20 && decoded.Input.KeyMask == 0xFFE);
+    CHECK(NsmbMvlNetplay::InputProtocol::DecodeInput(
+        drained[1].data(), drained[1].size(), decoded));
+    CHECK(decoded.Frame == 21 && decoded.Input.KeyMask == 0xFFD);
+}
+
 }
 
 int main()
@@ -209,6 +242,7 @@ int main()
     TestDelayedInputReleaseUsesFrameOrWallClock();
     TestRuntimePreparesWirePayloads();
     TestRuntimeOwnsDelayedQueue();
+    TestRuntimeDrainsAllForGenerationTransition();
 
     if (Failures != 0)
     {

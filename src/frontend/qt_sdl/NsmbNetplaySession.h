@@ -64,6 +64,7 @@ struct Hooks {
 
 void PumpLocked(Context context, const Hooks &hooks,
                 melonDS::NDS *nds = nullptr, melonDS::u32 localFrame = 0);
+void FlushPendingInputsLocked(Context context);
 void StartNetworkPumpThreadIfNeeded(Context context, const Hooks &hooks);
 void StopNetworkPumpThread(Context context);
 

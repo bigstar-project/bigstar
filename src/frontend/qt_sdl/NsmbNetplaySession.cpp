@@ -376,6 +376,24 @@ void PumpLocked(Context context, const Hooks &hooks, melonDS::NDS *nds,
                  localFrame);
 }
 
+void FlushPendingInputsLocked(Context context) {
+  if (!context.Transport.IsConnected() ||
+      context.State.Delivery.PendingCount() == 0)
+    return;
+  const std::size_t pendingCount = context.State.Delivery.PendingCount();
+  context.State.Delivery.DrainAll(
+      [context](const std::vector<char> &payload) {
+        SendInputPayloadNowLocked(context, payload.data(), payload.size(),
+                                  ENET_PACKET_FLAG_RELIABLE);
+      });
+  context.Transport.Flush();
+  TraceOutput::Printf(
+      "NSMB InputNetplay: flushed delayed inputs for result transition "
+      "generation=%u count=%zu lastSent=%u\n",
+      context.State.Handshake.Generation(), pendingCount,
+      context.Inputs.LastSentInputFrame);
+}
+
 void StartNetworkPumpThreadIfNeeded(Context context, const Hooks &hooks) {
   if (!context.Harness.NetworkPumpThreadEnabled ||
       context.State.NetworkPumpThreadStarted)

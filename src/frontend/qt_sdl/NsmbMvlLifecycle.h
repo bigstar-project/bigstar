@@ -56,6 +56,8 @@ void SaveBootstrapCheckpointIfNeeded(Context context, int instanceID,
                                      melonDS::u32 frame, melonDS::NDS *nds);
 bool RestartAfterResultIfNeeded(Context context, int instanceID,
                                 melonDS::u32 frame, melonDS::NDS *nds);
+bool ShouldServiceNetworkForResult(Context context, int instanceID,
+                                   melonDS::NDS *nds);
 bool ShouldPauseInputForRestart(Context context, int instanceID,
                                 melonDS::NDS *nds);
 void SaveGameplayCheckpointIfNeeded(Context context, const Hooks &hooks,

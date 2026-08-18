@@ -121,6 +121,14 @@ void Runtime::DrainDue(
     }
 }
 
+void Runtime::DrainAll(
+    const std::function<void(const std::vector<char>&)>& send)
+{
+    for (const PendingPayload& pending : Pending_)
+        send(pending.Payload);
+    Pending_.clear();
+}
+
 std::vector<char> Runtime::BuildPayload(
     melonDS::u32 generation,
     melonDS::u32 frame,
