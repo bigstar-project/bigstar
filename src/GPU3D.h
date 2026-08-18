@@ -110,6 +110,8 @@ public:
     [[nodiscard]] u16 GetRenderXPos() const noexcept { return RenderXPos; }
 
     void WriteToGXFIFO(u32 val) noexcept;
+    void BeginNSMLDiscardedGeometryBatch() noexcept;
+    void EndNSMLDiscardedGeometryBatch() noexcept;
 
     u8 Read8(u32 addr) noexcept;
     u16 Read16(u32 addr) noexcept;
@@ -317,6 +319,19 @@ public:
 
     u32 FlushRequest = 0;
     u32 FlushAttributes = 0;
+
+    struct NSMLDiscardedGeometryState
+    {
+        bool Valid = false;
+        u32 VertexNum = 0;
+        u32 VertexNumInPoly = 0;
+        u32 NumConsecutivePolygons = 0;
+        Polygon* LastStripPolygon = nullptr;
+        u32 NumOpaquePolygons = 0;
+        Vertex TempVertexBuffer[4] {};
+        u32 NumVertices = 0;
+        u32 NumPolygons = 0;
+    } NSMLDiscardedGeometry;
 };
 
 class Renderer3D

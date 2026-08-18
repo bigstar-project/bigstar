@@ -291,6 +291,10 @@ public: // TODO: Encapsulate the rest of these members
     // Diagnostic-only presentation experiment: keep required CPU/peripheral
     // events running while postponing LCD scanline events during ROM catch-up.
     bool NSMLGameTickProbeDeferLCD = false;
+    // Tracks the GPU3D discard batch opened around an intermediate ROM-loop
+    // replay render callback.  The callback and its FIFO commands still run;
+    // only the generated scene is discarded before the final replay tick.
+    bool NSMLGameTickProbeIntermediate3DBatch = false;
     // Slippi-style ROM-loop rollback.  The RAM image is applied at the ROM
     // input gate, where ARM9 reaches the same guest control-flow point every
     // game tick, rather than at an arbitrary emulator frame boundary.

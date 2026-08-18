@@ -22,6 +22,7 @@ param(
     [switch]$RomLoopStageTrace,
     [switch]$RomLoopNoDeferLCD,
     [switch]$RomLoopReplayRender = $true,
+    [switch]$RomLoopNoIntermediate3DDiscard,
     [switch]$Rollback,
     [string]$RollbackBackend = "",
     [string]$RollbackTinyCoreFlags = "",
@@ -487,8 +488,14 @@ if ($isRomLoopRollback) {
     }
     if ($RomLoopReplayRender) {
         $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_REPLAY_RENDER = "1"
+        if ($RomLoopNoIntermediate3DDiscard) {
+            Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_DISCARD_INTERMEDIATE_3D -ErrorAction SilentlyContinue
+        } else {
+            $env:MELONDS_NSML_ROM_GAME_TICK_PROBE_DISCARD_INTERMEDIATE_3D = "1"
+        }
     } else {
         Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_REPLAY_RENDER -ErrorAction SilentlyContinue
+        Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_DISCARD_INTERMEDIATE_3D -ErrorAction SilentlyContinue
     }
     $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN = "1"
     $env:MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE = "1"
@@ -499,6 +506,7 @@ if ($isRomLoopRollback) {
     Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_STAGE_TRACE -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_DIR -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_REPLAY_RENDER -ErrorAction SilentlyContinue
+    Remove-Item Env:\MELONDS_NSML_ROM_GAME_TICK_PROBE_DISCARD_INTERMEDIATE_3D -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE -ErrorAction SilentlyContinue
     Remove-Item Env:\MELONDS_NSML_JIT_SELF_LOOP_FAST_PATH -ErrorAction SilentlyContinue

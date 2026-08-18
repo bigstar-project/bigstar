@@ -14,11 +14,17 @@
 
 開始barrierを既定化した際、ローカル手動launcherのseed自動受信と `DeferNetworkUntilStart` が矛盾した。clientはゲーム起動前にseedを10秒待つが、hostはframe 870までnetworkをpumpしないため受信できず、clientがzero seedのまま開始状態を構築して `seed-mismatch` になった。ローカル2-process起動ではlauncherが共通seedを生成して両roleへ事前設定する。外部hostと組み合わせる `ClientOnly` では受信方式を維持する。`logs/codex-manual-auto-seed-startup-fix` のframe-limitあり・software renderer・seed未指定試験はframe 870で開始同期を承認し、1000 framesを正常終了した。
 
-`logs/nsmb-mvl-manual-local-20260818-132459` の初戦は目視上の恒久ずれを再発しなかったが、character・地形、とくにLuigi側で土管のX座標が周期的にぶれた。同一seed・完全入力を毎frame保存した `logs/codex-client-pipe-x-jitter-replay-20260818` でこの形を再現した。Luigi画面の右端pipeは1126=`213..243`（30px）、訂正完了直後1127=`211..249`（38px）、1128=`208..238`（30px）、次の訂正完了直後1129=`206..241`（35px）、1130=`203..233`（30px）だった。左端はcameraに従い毎frame `-2/-3px` で動くのに、訂正直後だけ右端が逆へ伸びるためcamera jitterではない。異なるreplay tickのpipe geometryを同じdisplay frameへ重複submitしている。別のdepth 4 A/Bでも訂正完了3493直後の3494はROM-loop画像だけ緑の土管を先行表示し、lockstep controlには存在せず、3500で全画素一致した。clientはdepth 5/6訂正146件、hostは15件で、Luigi側ほど多tickの重複が強く見えたこととも整合する。通常のrollbackでremote characterが巻き戻ることとは分け、3D FIFO/OAM presentation境界の実装bugとして扱う。
+`logs/nsmb-mvl-manual-local-20260818-132459` の初戦は目視上の恒久ずれを再発しなかったが、character・地形、とくにLuigi側で土管のX座標が周期的にぶれた。同一seed・完全入力を毎frame保存した `logs/codex-client-pipe-x-jitter-replay-20260818` でこの形を再現した。Luigi画面の右側pipe領域は通常frameの暗緑連結画素数1435に対し、訂正直後1127が1947、1129が1755へ増えた。左端はcameraに従い毎frame `-2/-3px` で動くのに、訂正直後だけ右端が逆へ伸びるためcamera jitterではなく、異なるreplay tickのpipe geometryを同じdisplay frameへ重複submitしていた。
+
+最初に中間render callback中の全3D register/FIFO writeを捨てる案を試した。pipe領域は全frame 1435へ戻ったが、完全入力5400-frame stressでframe 3360以降に6回のobject/hazard差を生んだ。render callbackだけでなく、行列、geometry test、FIFO timingまで消すためであり、state correctness条件に反するので棄却した。
+
+採用案は、guest callbackと全FIFO entryを通常どおり実行しながら、中間sceneだけをFIFO順序付き内部markerで囲む。begin marker実行時にgeometry builder境界を保存し、end markerでvertex/polygon countを戻す。中間sceneは表示されないためvertex transform、clip、polygon RAM storeだけを省略するが、matrix/test/FIFO commandとpipeline timingは維持する。最終replay tickはmarkerで囲まず、通常sceneだけがVBlankで提示される。手動launcherでは `-SlippiRollback` / `-RomLoopRollback` の既定で有効とし、診断用 `-RomLoopNoIntermediate3DDiscard` で無効化できる。
+
+pipe gate `logs/codex-client-pipe-x-jitter-fast-discard-20260818` はframes 1125-1130の暗緑連結画素数がすべて1435で、二重geometryを消した。完全入力stress `logs/codex-intermediate-fast-discard-stress-20260818` はhost/client 354/333 transaction、cannot-arm・failed/capped resimulationゼロ、38個の共有heartbeat標本でobject差ゼロだった。同一現行バイナリのframe limiterなしA/Bは、採用案が平均 `6.793/6.798ms`、最大 `31.372/28.961ms`、無効対照が平均 `7.866/7.878ms`、最大 `45.876/35.671ms` であり、表示修正は約1.08ms/frameの性能改善にもなった。paced 5400-frame runは平均 `16.665ms`、最大 `34.596/35.254ms`、連続slow frame最大1、object差ゼロである。単発 `33ms`超はhost 3/client 1なので完全な無hitchは未達だが、持続的60fps低下は検出していない。
 
 再戦経路はcheckpoint restore、generation 1への更新、start barrierまでは実装済みである。しかしhostの次戦mismatchが旧frame 934等のまま残り、current frame 13051との差をdepth 12117と計算して24回 `cannot arm` になった。再戦ずれは未実装一般ではなく、rollback input timeline/pending mismatchをgeneration境界でreset/rebaseしていない具体的な欠落である。
 
-現在のblockerは、訂正中に必要なgame render callbackを残しながら中間tickの3D FIFO/OAM submissionを表示queueへ蓄積しない境界と、再戦timeline rebaseである。まずframe 1126-1130のpipe幅と3494/3500の画像gateでX重複・先行表示を消し、完全入力stressで恒久stateが戻らないことを同時に確認する。次にgeneration単位のrollback state reset/rebaseと二戦連続gateを実装する。死亡/復帰、土管遷移、item、音声、depth 11超fallbackはその後も未検証として残る。
+現在のblockerは再戦timeline rebaseである。pipeの自動再現は通ったが、実手動目視、旧3494/3500 image control、2D OAMだけのちらつきは未確認なので、3D以外を含む全presentation完了とは扱わない。次はgeneration単位のrollback state reset/rebaseと二戦連続gateを実装する。死亡/復帰、土管遷移、item、音声、depth 11超fallbackも未検証として残る。
 
 ## 2026-08-04 Slippi-style game-memory restore
 

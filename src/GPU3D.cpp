@@ -139,6 +139,10 @@ const u8 CmdNumParams[256] =
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
 
+constexpr u8 NSMLDiscardedGeometryCommand = 0xFE;
+constexpr u32 NSMLDiscardedGeometryBegin = 0x4E534D42;
+constexpr u32 NSMLDiscardedGeometryEnd = 0x4E534D45;
+
 void MatrixLoadIdentity(s32* m);
 
 GPU3D::GPU3D(melonDS::GPU& gpu) noexcept :
@@ -298,6 +302,7 @@ void GPU3D::Reset() noexcept
     FlushAttributes = 0;
 
     RenderXPos = 0;
+    NSMLDiscardedGeometry = {};
 }
 
 void GPU3D::DoSavestate(Savestate* file) noexcept
@@ -1475,6 +1480,65 @@ void GPU3D::SubmitPolygon() noexcept
 
 void GPU3D::SubmitVertex() noexcept
 {
+    if (NSMLDiscardedGeometry.Valid)
+    {
+        // The FIFO entry and all non-geometry commands still execute so guest
+        // timing, matrices and geometry-test results retain their normal path.
+        // This replay scene will be discarded at the ordered end marker, so
+        // avoid the expensive transform/clip/store work and only preserve the
+        // vertex/polygon pipeline timing state needed by following commands.
+        VertexNum++;
+        VertexNumInPoly++;
+
+        bool polygonCompleted = false;
+        switch (PolygonMode)
+        {
+        case 0:
+            if (VertexNumInPoly == 3)
+            {
+                VertexNumInPoly = 0;
+                polygonCompleted = true;
+            }
+            break;
+        case 1:
+            if (VertexNumInPoly == 4)
+            {
+                VertexNumInPoly = 0;
+                polygonCompleted = true;
+            }
+            break;
+        case 2:
+            if ((NumConsecutivePolygons & 1) || VertexNumInPoly == 3)
+            {
+                VertexNumInPoly = 2;
+                polygonCompleted = true;
+            }
+            break;
+        case 3:
+            if (VertexNumInPoly == 4)
+            {
+                VertexNumInPoly = 2;
+                polygonCompleted = true;
+            }
+            break;
+        }
+
+        if (polygonCompleted)
+        {
+            NumConsecutivePolygons++;
+            PolygonPipeline = (PolygonMode & 1) ? 35 : 26;
+            VertexSlotCounter = 1;
+            if (PolygonMode & 1)
+                VertexSlotsFree = (PolygonMode & 2) ? 0b11100 : 0b11110;
+            else
+                VertexSlotsFree = (PolygonMode & 2) ? 0b1000 : 0b1110;
+        }
+
+        VertexPipeline = 7;
+        AddCycles(3);
+        return;
+    }
+
     s64 vertex[4] = {(s64)CurVertex[0], (s64)CurVertex[1], (s64)CurVertex[2], 0x1000};
     Vertex* vertextrans = &TempVertexBuffer[VertexNumInPoly];
 
@@ -1870,6 +1934,39 @@ GPU3D::CmdFIFOEntry GPU3D::CmdFIFORead() noexcept
 void GPU3D::ExecuteCommand() noexcept
 {
     CmdFIFOEntry entry = CmdFIFORead();
+
+    if (entry.Command == NSMLDiscardedGeometryCommand)
+    {
+        if (entry.Param == NSMLDiscardedGeometryBegin)
+        {
+            NSMLDiscardedGeometry.Valid = true;
+            NSMLDiscardedGeometry.VertexNum = VertexNum;
+            NSMLDiscardedGeometry.VertexNumInPoly = VertexNumInPoly;
+            NSMLDiscardedGeometry.NumConsecutivePolygons = NumConsecutivePolygons;
+            NSMLDiscardedGeometry.LastStripPolygon = LastStripPolygon;
+            NSMLDiscardedGeometry.NumOpaquePolygons = NumOpaquePolygons;
+            std::copy(std::begin(TempVertexBuffer), std::end(TempVertexBuffer),
+                std::begin(NSMLDiscardedGeometry.TempVertexBuffer));
+            NSMLDiscardedGeometry.NumVertices = NumVertices;
+            NSMLDiscardedGeometry.NumPolygons = NumPolygons;
+        }
+        else if (entry.Param == NSMLDiscardedGeometryEnd && NSMLDiscardedGeometry.Valid)
+        {
+            VertexNum = NSMLDiscardedGeometry.VertexNum;
+            VertexNumInPoly = NSMLDiscardedGeometry.VertexNumInPoly;
+            NumConsecutivePolygons = NSMLDiscardedGeometry.NumConsecutivePolygons;
+            LastStripPolygon = NSMLDiscardedGeometry.LastStripPolygon;
+            NumOpaquePolygons = NSMLDiscardedGeometry.NumOpaquePolygons;
+            std::copy(std::begin(NSMLDiscardedGeometry.TempVertexBuffer),
+                std::end(NSMLDiscardedGeometry.TempVertexBuffer),
+                std::begin(TempVertexBuffer));
+            NumVertices = NSMLDiscardedGeometry.NumVertices;
+            NumPolygons = NSMLDiscardedGeometry.NumPolygons;
+            NSMLDiscardedGeometry.Valid = false;
+        }
+        AddCycles(1);
+        return;
+    }
 
     //printf("FIFO: processing %02X %08X. Levels: FIFO=%d, PIPE=%d\n", entry.Command, entry.Param, CmdFIFO->Level(), CmdPIPE->Level());
 
@@ -2680,6 +2777,22 @@ void GPU3D::WriteToGXFIFO(u32 val) noexcept
         if (ParamCount < TotalParams)
             break;
     }
+}
+
+void GPU3D::BeginNSMLDiscardedGeometryBatch() noexcept
+{
+    CmdFIFOEntry entry {};
+    entry.Command = NSMLDiscardedGeometryCommand;
+    entry.Param = NSMLDiscardedGeometryBegin;
+    CmdFIFOWrite(entry);
+}
+
+void GPU3D::EndNSMLDiscardedGeometryBatch() noexcept
+{
+    CmdFIFOEntry entry {};
+    entry.Command = NSMLDiscardedGeometryCommand;
+    entry.Param = NSMLDiscardedGeometryEnd;
+    CmdFIFOWrite(entry);
 }
 
 

@@ -1514,6 +1514,7 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
         bool JitRenderProfileEnabled = false;
         bool JitRenderStateDumpEnabled = false;
         bool DeferLCD = false;
+        bool DiscardIntermediate3D = false;
         std::string Role = "local";
         std::string OutputDir;
         FILE* LogFile = nullptr;
@@ -1537,7 +1538,10 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
         cfg.JitRenderProfileEnabled = getenv("MELONDS_NSML_JIT_RENDER_EXECUTION_PROFILE") != nullptr;
         cfg.JitRenderStateDumpEnabled = getenv("MELONDS_NSML_JIT_RENDER_STATE_DUMP") != nullptr;
         cfg.DeferLCD = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_DEFER_LCD") != nullptr;
-        cfg.Enabled = cfg.StageEnabled || cfg.JitProfileEnabled || cfg.DeferLCD;
+        cfg.DiscardIntermediate3D =
+            getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_DISCARD_INTERMEDIATE_3D") != nullptr;
+        cfg.Enabled = cfg.StageEnabled || cfg.JitProfileEnabled || cfg.DeferLCD ||
+            cfg.DiscardIntermediate3D;
         if (const char* role = getenv("MELONDS_NSML_ROLE"))
             cfg.Role = role;
         if (const char* outputDir = getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_DIR"))
@@ -1581,11 +1585,37 @@ static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
     }
     if (!cfg.Enabled || !nds)
         return;
+    // A transaction may be cancelled after render_begin without reaching its
+    // matching marker.  Close the ordered GPU batch before the next frame.
+    if (cfg.DiscardIntermediate3D && marker == frameBeginMarker &&
+        nds->NSMLGameTickProbeIntermediate3DBatch)
+    {
+        nds->GPU.GPU3D.EndNSMLDiscardedGeometryBatch();
+        nds->NSMLGameTickProbeIntermediate3DBatch = false;
+    }
     const u32 historyEnabled = nds->ARM9Read32(historyEnabledAddr);
     if (!historyEnabled)
         return;
     const u32 historyIndex = nds->ARM9Read32(historyIndexAddr);
     const u32 historyCount = nds->ARM9Read32(historyCountAddr);
+    if (cfg.DiscardIntermediate3D)
+    {
+        if (marker == 4)
+        {
+            const bool isRollbackTarget = nds->ARM9Read32(historyTargetAddr) != 0;
+            if (isRollbackTarget && historyIndex < historyCount)
+            {
+                nds->GPU.GPU3D.BeginNSMLDiscardedGeometryBatch();
+                nds->NSMLGameTickProbeIntermediate3DBatch = true;
+            }
+        }
+        else if ((marker == 5 || marker == 6) &&
+            nds->NSMLGameTickProbeIntermediate3DBatch)
+        {
+            nds->GPU.GPU3D.EndNSMLDiscardedGeometryBatch();
+            nds->NSMLGameTickProbeIntermediate3DBatch = false;
+        }
+    }
     if (cfg.DeferLCD && nds->ARM9Read32(historyTargetAddr) != 0)
     {
         if (marker == 1 && historyIndex == 0 && !state.LCDDeferred)
