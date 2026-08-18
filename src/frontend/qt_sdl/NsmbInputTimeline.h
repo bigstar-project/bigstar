@@ -68,6 +68,7 @@ public:
         melonDS::u32 window,
         const InputMap& confirmedInputs);
     void ClearPredictions();
+    void ResetForRestart();
     std::optional<InputState> TakePredictionProbeConfirmation(
         melonDS::u32 frame);
     std::optional<std::pair<melonDS::u32, InputState>>

@@ -1350,9 +1350,19 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             NetplaySessionContext(), NetplaySessionHooks(), instanceID, nds,
             syncFrame);
 
+    // A restored bootstrap checkpoint rewinds the emulated NDS frame while
+    // the test/manual harness frame remains monotonic.  Input packets and the
+    // ROM checkpoint ring use the generation-local logical frame, so passing
+    // the outer harness frame here turns an ordinary rematch correction into
+    // a many-thousand-frame rollback.
+    const melonDS::u32 rollbackFrame =
+        G.Enabled && G.Input.NetplayOnly
+        ? NetplaySession::LogicalFrame(NetplaySessionContext(), syncFrame)
+        : syncFrame;
+
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         RollbackRuntime::SaveCheckpointIfNeeded(
-            RollbackContext(), instanceID, syncFrame, nds);
+            RollbackContext(), instanceID, rollbackFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Checkpoint);
 
     const bool pauseInputNetplayForRestart = G.Enabled
@@ -1363,7 +1373,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         WritePacketBridgeJitScratchIfNeeded(instanceID, syncFrame, nds, testInput);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds
         && G.Rollback.Backend == Config::RollbackBackend::RomLoop)
-        RollbackResimulateIfNeeded(instanceID, syncFrame, nds);
+        RollbackResimulateIfNeeded(instanceID, rollbackFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Scratch);
 
     if (G.Enabled && G.Input.NetplayOnly)

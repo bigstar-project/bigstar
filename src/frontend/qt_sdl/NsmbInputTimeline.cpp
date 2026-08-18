@@ -334,6 +334,13 @@ void PredictionRuntime::ClearPredictions()
     PredictionProbeConfirmations_.clear();
 }
 
+void PredictionRuntime::ResetForRestart()
+{
+    ClearPredictions();
+    LastConfirmedInput_.reset();
+    ClearPendingRollback();
+}
+
 std::optional<InputState> PredictionRuntime::TakePredictionProbeConfirmation(
     melonDS::u32 frame)
 {
@@ -405,7 +412,7 @@ void Runtime::ResetForRestart(melonDS::u32 noFrameLimit)
 {
     LocalInputs.clear();
     RemoteInputs.clear();
-    RollbackInputs.ClearPredictions();
+    RollbackInputs.ResetForRestart();
     LastReceivedInputFrame = noFrameLimit;
     LastSentInputFrame = noFrameLimit;
     LastTracedSentInputFrame = noFrameLimit;

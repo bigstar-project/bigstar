@@ -4,6 +4,18 @@
 
 ## 2026-08-18 render processを含むROM-loop訂正
 
+### 再戦generation timelineの修正
+
+再戦ずれについて、旧「旧generationのframe 934がprediction timelineへ残った」という判断はログとframe変換経路の再確認により撤回する。bootstrap checkpointを復元するとNDS/inputの論理時刻はframe 934付近へ戻る一方、manual/test harnessの外側frameは13051付近まで単調増加する。packet JIT scratchは既に `NetplaySession::LogicalFrame()` で前者へ変換していたため、再戦後のmismatch 934は新generationで正しい値だった。ROM-loopのcheckpoint保存・訂正だけが外側current 13051を受け取り、異なる座標系を引いてdepth 12117にしていたことが直接原因である。
+
+`BeforeRunFrame()` でROM-loopへ渡すframeをgeneration-local logical frameへ統一した。generation resetでは予測mapだけでなく、pending rollback frame、pending observed frame、前generationのlast confirmed inputも消去する。統計counterは長時間runの診断に必要なので累積のまま保持する。unit testではreset後にpendingがなく、最初の未確認remote inputが前試合の最終入力ではなくneutralから予測される契約を固定した。
+
+frame limiterなし10000-frame run `logs/codex-rematch-logical-frame-fix-20260818` は2回の再戦を行って3試合目まで進み、host/client `38/52` correction、cannot-arm・failed/capped correctionゼロ、152共有heartbeat差ゼロだった。logical checkpoint offsetはgenerationごとに `0:241,1:235,2:238` でそれぞれ一定である。offsetがgeneration間で異なるのはrestore後の起動境界差で正常なため、解析器もgeneration resetを読み、同一generation内のdriftだけをrollback failureにする。
+
+software renderer・frame limiterありの対応run `logs/codex-rematch-logical-frame-fix-paced-20260818` も同じ2再戦と152共有heartbeat差ゼロを再現した。host/client correctionは`81/10`、cannot-arm・failed/capped correctionゼロ、active平均`16.722/16.726ms`、実効`59.80/59.79fps`だった。外側最大`155.527/153.515ms`は最初の再戦checkpoint復元frameであり、2回目は`127.530/133.447ms`だった。stage actorが有効になった直後にも両role同じframeで`40-53ms`級のJIT/scene初期化hitchがある。論理時刻の修正自体に持続的な性能低下は検出していないが、再戦を無停止にできたとは扱わない。
+
+再戦timelineは自動correctness gateを通過した。次はユーザー手動で2回以上の再戦を目視し、位置・勝敗・stage選択が一致することを確認する。その後も同期が維持される場合に限り、約0.15秒のcheckpoint復元とstage開始直後hitchを別のperformance blockerとして削減する。死亡/復帰、土管遷移、item、2D OAM、音声、depth 11超fallbackは引き続き未検証である。
+
 ### 長時間手動runの同期trace停止
 
 `logs/nsmb-mvl-manual-local-20260818-141625` では、一度の目視上の長時間停止とその後のずれが報告された。outer計測はhost最大`1249.975ms`、client最大`1173.334ms`で、通常のROM-loop transactionの数十ms級とは別の異常だった。
@@ -23,7 +35,7 @@ runtime trace用に`NsmbTraceOutput`を追加した。producerは整形済み1�
 
 最終の60fps、software renderer、14000-frame完全入力再生 `logs/codex-async-trace-final-paced-14000-20260818` は、host/client `1027/1029` correctionを全件完了し、cannot-arm、failed/capped correction、trace dropはゼロだった。active outer平均は両role`16.666ms`、最大`38.562/33.851ms`、連続slow frame最大1。旧停止地点9392と13200を越え、秒単位停止は再現しなかった。109共有heartbeat中、frame 3240だけobject生成位相が一標本ずれたが後続で再一致し、継続差は0だった。
 
-この自動gate後、ユーザーは同じ手動経路を2回実行した。`logs/nsmb-mvl-manual-local-20260818-151515` はframe 7560までhost/client訂正`573/579`件、共有heartbeat 56標本差ゼロ、outer最大`33.285/34.941ms`だった。長い `logs/nsmb-mvl-manual-local-20260818-151729` はframe 20280まで訂正`1686/1690`件、共有heartbeat 162標本のsignificant object差とactive count差がともにゼロ、cannot-arm・failed/capped correction・trace dropもゼロだった。outer最大は`36.281/31.526ms`、連続slow frame最大`1/0`で、秒単位停止は再発せず、ユーザー目視でもずれなしだった。解析器の`status=failed`は手動終了でframe limit行がないためで、emulation abortではない。これにより初戦同期と同期trace停止修正は手動gateを通過した。土管Xぶれの消失自体は今回の報告で明示されていないため、presentationの確認項目として残す。次は下記の再戦generation timeline rebaseへ進む。
+この自動gate後、ユーザーは同じ手動経路を2回実行した。`logs/nsmb-mvl-manual-local-20260818-151515` はframe 7560までhost/client訂正`573/579`件、共有heartbeat 56標本差ゼロ、outer最大`33.285/34.941ms`だった。長い `logs/nsmb-mvl-manual-local-20260818-151729` はframe 20280まで訂正`1686/1690`件、共有heartbeat 162標本のsignificant object差とactive count差がともにゼロ、cannot-arm・failed/capped correction・trace dropもゼロだった。outer最大は`36.281/31.526ms`、連続slow frame最大`1/0`で、秒単位停止は再発せず、ユーザー目視でもずれなしだった。解析器の`status=failed`は手動終了でframe limit行がないためで、emulation abortではない。これにより初戦同期と同期trace停止修正は手動gateを通過した。土管Xぶれの消失自体は今回の報告で明示されていないため、presentationの確認項目として残す。再戦generation timelineは上の節に記した自動2遷移gateまで完了している。
 
 完全記録済み手動入力 `logs/nsmb-mvl-manual-local-20260818-002906/recorded-inputs` とseed `0xC6D26F70` により、手動の恒久差を自動再現した。開始barrier無効化とshared epoch未確定時の入力gateという `main` 統合回帰を先に除去した後も、frame 3487の単発depth 4訂正はframe 3517のmoving hazard生成でlockstepから分岐した。
 
@@ -43,9 +55,7 @@ runtime trace用に`NsmbTraceOutput`を追加した。producerは整形済み1�
 
 pipe gate `logs/codex-client-pipe-x-jitter-fast-discard-20260818` はframes 1125-1130の暗緑連結画素数がすべて1435で、二重geometryを消した。完全入力stress `logs/codex-intermediate-fast-discard-stress-20260818` はhost/client 354/333 transaction、cannot-arm・failed/capped resimulationゼロ、38個の共有heartbeat標本でobject差ゼロだった。同一現行バイナリのframe limiterなしA/Bは、採用案が平均 `6.793/6.798ms`、最大 `31.372/28.961ms`、無効対照が平均 `7.866/7.878ms`、最大 `45.876/35.671ms` であり、表示修正は約1.08ms/frameの性能改善にもなった。paced 5400-frame runは平均 `16.665ms`、最大 `34.596/35.254ms`、連続slow frame最大1、object差ゼロである。単発 `33ms`超はhost 3/client 1なので完全な無hitchは未達だが、持続的60fps低下は検出していない。
 
-再戦経路はcheckpoint restore、generation 1への更新、start barrierまでは実装済みである。しかしhostの次戦mismatchが旧frame 934等のまま残り、current frame 13051との差をdepth 12117と計算して24回 `cannot arm` になった。再戦ずれは未実装一般ではなく、rollback input timeline/pending mismatchをgeneration境界でreset/rebaseしていない具体的な欠落である。
-
-現在の最優先blockerは再戦timeline rebaseである。初戦の同期と秒単位停止は修正後の実手動目視・内部heartbeatの双方で通った。pipeの自動再現も通ったが、今回の手動報告は土管Xぶれの消失を明示しておらず、旧3494/3500 image control、2D OAMだけのちらつきも未確認なので、3D以外を含む全presentation完了とは扱わない。次にgeneration単位のrollback state reset/rebaseと二戦連続gateを実装する。死亡/復帰、土管遷移、item、音声、depth 11超fallbackも未検証として残る。
+再戦経路の旧depth 12117問題は、上のgeneration timeline修正で解消した。旧frame 934は残留値ではなく新generationの正しいlogical frameだったため、この段落にあった旧診断は現行判断から除外する。初戦の同期と秒単位停止は実手動目視・内部heartbeatの双方で通り、再戦は自動2遷移gateを通ったが手動目視はまだである。pipeの自動再現も通った一方、今回までの手動報告は土管Xぶれの消失を明示しておらず、旧3494/3500 image control、2D OAMだけのちらつきも未確認なので、3D以外を含む全presentation完了とは扱わない。死亡/復帰、土管遷移、item、音声、depth 11超fallbackも未検証として残る。
 
 ## 2026-08-04 Slippi-style game-memory restore
 

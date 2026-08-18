@@ -304,7 +304,8 @@ void TestRuntimeRestartContractAndStatistics()
     CHECK(runtime.LocalInputs.empty());
     CHECK(runtime.RemoteInputs.empty());
     CHECK(runtime.RollbackInputs.Predictions().empty());
-    CHECK(runtime.RollbackInputs.PendingRollbackFrame() == 10);
+    CHECK(!runtime.RollbackInputs.PendingRollbackFrame());
+    CHECK(!runtime.RollbackInputs.PendingRollbackObservedFrame());
     CHECK(runtime.RollbackInputs.MismatchCount() == 1);
     CHECK(runtime.LastSentInputFrame == noFrameLimit);
     CHECK(runtime.LastReceivedInputFrame == noFrameLimit);
@@ -322,7 +323,8 @@ void TestRuntimeRestartContractAndStatistics()
     CHECK(runtime.FrameLeadThrottleMaxUs == 200);
 
     const auto afterRestart = runtime.RollbackInputs.Resolve(20, runtime.RemoteInputs, neutral, {});
-    CHECK(SameInput(afterRestart.Input, actual));
+    CHECK(SameInput(afterRestart.Input, neutral));
+    CHECK(afterRestart.Predicted);
 }
 
 void TestButtonAndMaskParsing()

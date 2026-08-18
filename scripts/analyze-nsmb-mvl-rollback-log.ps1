@@ -59,7 +59,13 @@ function Get-RomLoopTimelineSummary {
     $cappedResimCount = 0
     $offsetMin = [int]::MaxValue
     $offsetMax = [int]::MinValue
+    $generation = 0
+    $generationOffsets = @{}
     foreach ($line in ($Text -split "`r?`n")) {
+        if ($line -match "NSMB MvL auto restart: reset sync caches .* generation=([0-9]+)") {
+            $generation = [int]$Matches[1]
+            continue
+        }
         if ($line -match "NSMB Rollback: cannot arm ROM-loop correction") {
             $cannotArmCount++
             continue
@@ -84,7 +90,39 @@ function Get-RomLoopTimelineSummary {
         if ($offset -gt $offsetMax) {
             $offsetMax = $offset
         }
+        if (-not $generationOffsets.ContainsKey($generation)) {
+            $generationOffsets[$generation] = [pscustomobject]@{
+                Count = 0
+                Min = [int64]::MaxValue
+                Max = [int64]::MinValue
+            }
+        }
+        $generationOffset = $generationOffsets[$generation]
+        $generationOffset.Count++
+        if ($offset -lt $generationOffset.Min) {
+            $generationOffset.Min = $offset
+        }
+        if ($offset -gt $generationOffset.Max) {
+            $generationOffset.Max = $offset
+        }
     }
+
+    $driftGenerations = @(
+        $generationOffsets.GetEnumerator() |
+            Where-Object { $_.Value.Count -gt 1 -and $_.Value.Min -ne $_.Value.Max } |
+            ForEach-Object { $_.Key }
+    )
+    $generationOffsetSummary = @(
+        $generationOffsets.GetEnumerator() |
+            Sort-Object Key |
+            ForEach-Object {
+                if ($_.Value.Min -eq $_.Value.Max) {
+                    "$($_.Key):$($_.Value.Min)"
+                } else {
+                    "$($_.Key):$($_.Value.Min)-$($_.Value.Max)"
+                }
+            }
+    ) -join ","
 
     return [pscustomobject]@{
         ArmedCount = $armedCount
@@ -93,7 +131,8 @@ function Get-RomLoopTimelineSummary {
         CappedResimCount = $cappedResimCount
         OffsetMin = if ($armedCount -gt 0) { $offsetMin } else { 0 }
         OffsetMax = if ($armedCount -gt 0) { $offsetMax } else { 0 }
-        HasDrift = $armedCount -gt 1 -and $offsetMin -ne $offsetMax
+        GenerationOffsets = $generationOffsetSummary
+        HasDrift = $driftGenerations.Count -gt 0
     }
 }
 
@@ -630,6 +669,7 @@ foreach ($role in @("host", "client")) {
         RomLoopCappedResim = $romLoopTimeline.CappedResimCount
         RomLoopGameFrameOffsetMin = $romLoopTimeline.OffsetMin
         RomLoopGameFrameOffsetMax = $romLoopTimeline.OffsetMax
+        RomLoopGenerationOffsets = $romLoopTimeline.GenerationOffsets
         GameplayPlateauStart = $gameplayPlateau.StartFrame
         GameplayPlateauEnd = $gameplayPlateau.EndFrame
         PlateauPlayer = $maxPlateau.Player
