@@ -12,6 +12,8 @@
 
 現時点の製品候補は、Main RAMのSDK runtime除外、checkpoint suffix無効化・中間再構築、12-entry history、開始barrier、そして全中間game render process実行を組み合わせたROM-loop経路である。SDK runtime全復元はgame loopを停止し、部分復元も反復runで恒久差を直さなかったため採用しない。
 
+開始barrierを既定化した際、ローカル手動launcherのseed自動受信と `DeferNetworkUntilStart` が矛盾した。clientはゲーム起動前にseedを10秒待つが、hostはframe 870までnetworkをpumpしないため受信できず、clientがzero seedのまま開始状態を構築して `seed-mismatch` になった。ローカル2-process起動ではlauncherが共通seedを生成して両roleへ事前設定する。外部hostと組み合わせる `ClientOnly` では受信方式を維持する。`logs/codex-manual-auto-seed-startup-fix` のframe-limitあり・software renderer・seed未指定試験はframe 870で開始同期を承認し、1000 framesを正常終了した。
+
 現在のblockerは、ユーザー実操作での再確認、未通過event（死亡/復帰、土管、item、result/restart）、音声、depth 11超fallbackである。次は既定設定の手動runを行い、差が残れば保存済み完全入力から最初の非収束eventを制御probe化する。correctnessを維持できる場合に限り、中間renderのGPU出力を表示へ残さない方法とframe spikeを最適化する。
 
 ## 2026-08-04 Slippi-style game-memory restore

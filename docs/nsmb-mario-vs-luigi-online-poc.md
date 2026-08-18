@@ -9,6 +9,7 @@
 - frame limiterなし・software rendererの5400-frame stressは平均 `4.937/4.945ms`、最大 `26.241/25.595ms`、`33ms`超ゼロだった。`16ms`超はhost 44件、client 25件なので、平均60fps余裕は大きい一方、訂正時に単発の小さなhitchが見える可能性は残る。制御3訂正runの最大は `16.045/17.013ms` だった。
 - SDK runtimeを全復元するとgame loopが停止し、`0x020942A0..0x02094600`だけ復元する案も反復runで恒久差を再発した。SDK除外範囲の単純変更は解ではなく、診断用変更は最終コードへ残さない。
 - 手動launcherは開始barrierとsoftware rendererを既定有効にし、shared epoch確定前はlocal startup epochを使って開始前入力をrollback対象外にする。完全再現用に `HostInputScript` / `ClientInputScript`、RAM dump指定、期限超過したprediction probe confirmationの一括処理も追加した。ROM-loopでは中間game renderを既定有効とする。
+- 解決済みの起動回帰: `logs/nsmb-mvl-manual-local-20260818-131208` は、通信をframe 870までdeferする一方、seed未指定clientが起動前にhost seedを最大10秒待つという順序矛盾を踏んだ。hostは `0x9565A6DA`、clientは未設定の `0x00000000` でstart-readyを作り、strict validationが `seed-mismatch` で両者を終了した。外側の `exitCode=<empty>` / `missing frame limit` はその二次エラーだった。ローカル2-process launcherは未指定時に暗号学的乱数seedを一度生成して両roleへ明示し、`-ClientOnly`だけは従来どおりremote hostから受け取る。修正後の同一コマンド相当1000-frame run `logs/codex-manual-auto-seed-startup-fix` は、両roleが `0x4B302DB5` でframe 870のbarrierを一度でacceptし、wrapper stderrなし、analyzer `status=ok`、active outer max `18.351/19.039ms` だった。
 - **Current blocker:** 自動再生のtested routeは恒久差を解消したが、ユーザーの実操作での再確認、死亡/復帰・土管・アイテム・result/restart、音声波形、depth 11超のstall/fallbackは未検証である。訂正直後に最大約6 display framesの表示収束があるため、体感上許容できるかも手動判定が必要である。
 - **Next action:** 新しい既定設定でユーザーの手動操作を再実行する。まだ恒久差が出る場合は、既定保存されるrole別入力を同じseedで即時再生し、最初の訂正後に再一致しなくなるeventを今回と同じ制御probeへ落とす。correctnessが保たれる範囲でのみ、中間renderのGPU出力抑制や26ms spikeの低減を続ける。
 

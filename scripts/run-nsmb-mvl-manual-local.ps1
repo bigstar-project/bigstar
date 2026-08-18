@@ -203,6 +203,29 @@ if ($LowLatencyRollback -and $isTinyCorePreimageRollback) {
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$generatedMvlMatchSeed = $false
+if (-not $ClientOnly -and [string]::IsNullOrWhiteSpace($MvlMatchSeed)) {
+    # The netplay transport is deferred until the gameplay start frame.  A
+    # client therefore cannot receive the host seed early enough to initialize
+    # an identical pre-game state unless this local two-process launcher gives
+    # both roles the same seed up front.
+    $seedBytes = [byte[]]::new(4)
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($seedBytes)
+    } finally {
+        $rng.Dispose()
+    }
+    $MvlMatchSeed = "0x$('{0:x8}' -f [BitConverter]::ToUInt32($seedBytes, 0))"
+    $generatedMvlMatchSeed = $true
+}
+$mvlMatchSeedOrigin = if ($ClientOnly -and [string]::IsNullOrWhiteSpace($MvlMatchSeed)) {
+    "remote"
+} elseif ($generatedMvlMatchSeed) {
+    "generated"
+} else {
+    "provided"
+}
 if ($LogDir -eq "") {
     $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $LogDir = "logs\nsmb-mvl-manual-local-$timestamp"
@@ -731,7 +754,7 @@ if ($HostAIObservationV3Log -or $ClientAIObservationV3Log) {
 }
 Write-Host "trace gameState=$([bool]$GameStateTrace) interval=$GameStateTraceInterval extended=$([bool]$GameStateTraceExtended) lifeChanges=$([bool]$TracePlayerLifeChanges) defeated=$([bool]$TracePlayerDefeated)"
 Write-Host "recordInput=$([bool]$RecordInput) recordDir=$(if ($RecordInput) { $InputRecordDir } else { 'disabled' }) recordStart=$InputRecordStartFrame recordEnd=$InputRecordEndFrame"
-Write-Host "mvlWins=$MvlWins mvlBigStars=$MvlBigStars mvlLives=$MvlLives mvlStage=$(if ($MvlStage -ge 0) { $MvlStage } else { 'auto/default' }) mvlSceneSettings=$(if ($MvlSceneSettings) { $MvlSceneSettings } else { 'derived' }) mvlCourseMode=$MvlCourseMode generateConfiguredRoms=$($GenerateMvlConfiguredRoms.IsPresent) mvlMatchSeed=$(if ($MvlMatchSeed) { $MvlMatchSeed } else { 'auto' })"
+Write-Host "mvlWins=$MvlWins mvlBigStars=$MvlBigStars mvlLives=$MvlLives mvlStage=$(if ($MvlStage -ge 0) { $MvlStage } else { 'auto/default' }) mvlSceneSettings=$(if ($MvlSceneSettings) { $MvlSceneSettings } else { 'derived' }) mvlCourseMode=$MvlCourseMode generateConfiguredRoms=$($GenerateMvlConfiguredRoms.IsPresent) mvlMatchSeed=$(if ($MvlMatchSeed) { $MvlMatchSeed } else { 'auto' }) seedOrigin=$mvlMatchSeedOrigin"
 if ($Rollback) {
     $backendLabel = if ($RollbackBackend -ne "") { $RollbackBackend } else { "savestate" }
     $tinyLabel = if ($RollbackTinyCoreFlags -ne "") { " tinyCoreFlags=$RollbackTinyCoreFlags" } else { "" }
@@ -781,6 +804,19 @@ function Test-ManualWrapperSuccessMarker {
     return ($hasSuccessMarker -and -not $hasErrorOutput)
 }
 
+function Get-ManualWrapperErrorSummary {
+    param([string]$ErrPath)
+
+    if (-not (Test-Path -LiteralPath $ErrPath)) {
+        return ""
+    }
+
+    $firstLine = Get-Content -LiteralPath $ErrPath -Encoding UTF8 |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -First 1
+    return "$firstLine".Trim()
+}
+
 if ($Wait) {
     $waitProcesses = @(
         [pscustomobject]@{
@@ -811,15 +847,17 @@ if ($Wait) {
         }
 
         $exitCode = Get-ManualWrapperExitCodeOrNull -Process $proc
+        $wrapperError = Get-ManualWrapperErrorSummary -ErrPath $entry.ErrPath
+        $errorDetail = if ($wrapperError) { " error=$wrapperError" } else { "" }
         if ($null -eq $exitCode) {
             if (Test-ManualWrapperSuccessMarker -OutPath $entry.OutPath -ErrPath $entry.ErrPath) {
                 Write-Warning "manual local wrapper exitCode was empty, but $($entry.Role) wrapper success marker was present and stderr was empty. pid=$($proc.Id)"
                 continue
             }
-            throw "manual local wrapper failed. role=$($entry.Role) pid=$($proc.Id) exitCode=<empty>. See $($entry.OutPath) / $($entry.ErrPath)"
+            throw "manual local wrapper failed. role=$($entry.Role) pid=$($proc.Id) exitCode=<empty>.$errorDetail See $($entry.OutPath) / $($entry.ErrPath)"
         }
         if ($exitCode -ne 0) {
-            throw "manual local wrapper failed. role=$($entry.Role) pid=$($proc.Id) exitCode=$exitCode"
+            throw "manual local wrapper failed. role=$($entry.Role) pid=$($proc.Id) exitCode=$exitCode.$errorDetail See $($entry.OutPath) / $($entry.ErrPath)"
         }
     }
     Write-Host "NSMB MvL manual local session exited."
