@@ -14,7 +14,9 @@ frame limiterなし10000-frame run `logs/codex-rematch-logical-frame-fix-2026081
 
 software renderer・frame limiterありの対応run `logs/codex-rematch-logical-frame-fix-paced-20260818` も同じ2再戦と152共有heartbeat差ゼロを再現した。host/client correctionは`81/10`、cannot-arm・failed/capped correctionゼロ、active平均`16.722/16.726ms`、実効`59.80/59.79fps`だった。外側最大`155.527/153.515ms`は最初の再戦checkpoint復元frameであり、2回目は`127.530/133.447ms`だった。stage actorが有効になった直後にも両role同じframeで`40-53ms`級のJIT/scene初期化hitchがある。論理時刻の修正自体に持続的な性能低下は検出していないが、再戦を無停止にできたとは扱わない。
 
-再戦timelineは自動correctness gateを通過した。次はユーザー手動で2回以上の再戦を目視し、位置・勝敗・stage選択が一致することを確認する。その後も同期が維持される場合に限り、約0.15秒のcheckpoint復元とstage開始直後hitchを別のperformance blockerとして削減する。死亡/復帰、土管遷移、item、2D OAM、音声、depth 11超fallbackは引き続き未検証である。
+再戦timelineは自動correctness gateに続いて手動gateも通過した。ユーザー手動run `logs/nsmb-mvl-manual-local-20260818-180655` は2回再戦しても目視上のずれがなく、両roleのgeneration 1・2 resetをログでも確認した。cannot-arm・failed/capped correctionはゼロだった。176共有heartbeat中の2標本に一時差があり、significant object差はframe 14760の1標本だけだったが、次の14880標本では再一致したため継続ずれではない。このrunは両方向の送信を2または3 frame待たせる人工遅延を有効にしている。実WANの輻輳、packet再順序化、帯域制約、切断まで再現した結果ではない。
+
+次は人工送信遅延を段階的に増やし、rollback深度分布、cannot-arm、継続state差、outer frame時間の安全域を測る。約0.15秒のcheckpoint復元とstage開始直後hitchも別のperformance blockerとして削減する。死亡/復帰、土管遷移、item、2D OAM、音声、depth 11超fallbackは引き続き未検証である。
 
 ### 長時間手動runの同期trace停止
 
@@ -55,7 +57,7 @@ runtime trace用に`NsmbTraceOutput`を追加した。producerは整形済み1�
 
 pipe gate `logs/codex-client-pipe-x-jitter-fast-discard-20260818` はframes 1125-1130の暗緑連結画素数がすべて1435で、二重geometryを消した。完全入力stress `logs/codex-intermediate-fast-discard-stress-20260818` はhost/client 354/333 transaction、cannot-arm・failed/capped resimulationゼロ、38個の共有heartbeat標本でobject差ゼロだった。同一現行バイナリのframe limiterなしA/Bは、採用案が平均 `6.793/6.798ms`、最大 `31.372/28.961ms`、無効対照が平均 `7.866/7.878ms`、最大 `45.876/35.671ms` であり、表示修正は約1.08ms/frameの性能改善にもなった。paced 5400-frame runは平均 `16.665ms`、最大 `34.596/35.254ms`、連続slow frame最大1、object差ゼロである。単発 `33ms`超はhost 3/client 1なので完全な無hitchは未達だが、持続的60fps低下は検出していない。
 
-再戦経路の旧depth 12117問題は、上のgeneration timeline修正で解消した。旧frame 934は残留値ではなく新generationの正しいlogical frameだったため、この段落にあった旧診断は現行判断から除外する。初戦の同期と秒単位停止は実手動目視・内部heartbeatの双方で通り、再戦は自動2遷移gateを通ったが手動目視はまだである。pipeの自動再現も通った一方、今回までの手動報告は土管Xぶれの消失を明示しておらず、旧3494/3500 image control、2D OAMだけのちらつきも未確認なので、3D以外を含む全presentation完了とは扱わない。死亡/復帰、土管遷移、item、音声、depth 11超fallbackも未検証として残る。
+再戦経路の旧depth 12117問題は、上のgeneration timeline修正で解消した。旧frame 934は残留値ではなく新generationの正しいlogical frameだったため、この段落にあった旧診断は現行判断から除外する。初戦の同期と秒単位停止は実手動目視・内部heartbeatの双方で通り、再戦も自動2遷移gateと手動2再戦gateを通った。pipeの自動再現も通った一方、今回までの手動報告は土管Xぶれの消失を明示しておらず、旧3494/3500 image control、2D OAMだけのちらつきも未確認なので、3D以外を含む全presentation完了とは扱わない。死亡/復帰、土管遷移、item、音声、depth 11超fallbackも未検証として残る。
 
 ## 2026-08-04 Slippi-style game-memory restore
 
