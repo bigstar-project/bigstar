@@ -23,7 +23,7 @@ runtime trace用に`NsmbTraceOutput`を追加した。producerは整形済み1�
 
 最終の60fps、software renderer、14000-frame完全入力再生 `logs/codex-async-trace-final-paced-14000-20260818` は、host/client `1027/1029` correctionを全件完了し、cannot-arm、failed/capped correction、trace dropはゼロだった。active outer平均は両role`16.666ms`、最大`38.562/33.851ms`、連続slow frame最大1。旧停止地点9392と13200を越え、秒単位停止は再現しなかった。109共有heartbeat中、frame 3240だけobject生成位相が一標本ずれたが後続で再一致し、継続差は0だった。
 
-この自動gateは同期trace停止の修正を支持するが、ユーザーの物理入力・目視条件を完全には代替しない。現在の最優先確認は同じ手動コマンドで秒単位停止と土管ぶれを再確認すること。初戦が安定した場合に限り、下記の再戦generation timeline rebaseへ進む。
+この自動gate後、ユーザーは同じ手動経路を2回実行した。`logs/nsmb-mvl-manual-local-20260818-151515` はframe 7560までhost/client訂正`573/579`件、共有heartbeat 56標本差ゼロ、outer最大`33.285/34.941ms`だった。長い `logs/nsmb-mvl-manual-local-20260818-151729` はframe 20280まで訂正`1686/1690`件、共有heartbeat 162標本のsignificant object差とactive count差がともにゼロ、cannot-arm・failed/capped correction・trace dropもゼロだった。outer最大は`36.281/31.526ms`、連続slow frame最大`1/0`で、秒単位停止は再発せず、ユーザー目視でもずれなしだった。解析器の`status=failed`は手動終了でframe limit行がないためで、emulation abortではない。これにより初戦同期と同期trace停止修正は手動gateを通過した。土管Xぶれの消失自体は今回の報告で明示されていないため、presentationの確認項目として残す。次は下記の再戦generation timeline rebaseへ進む。
 
 完全記録済み手動入力 `logs/nsmb-mvl-manual-local-20260818-002906/recorded-inputs` とseed `0xC6D26F70` により、手動の恒久差を自動再現した。開始barrier無効化とshared epoch未確定時の入力gateという `main` 統合回帰を先に除去した後も、frame 3487の単発depth 4訂正はframe 3517のmoving hazard生成でlockstepから分岐した。
 
@@ -45,7 +45,7 @@ pipe gate `logs/codex-client-pipe-x-jitter-fast-discard-20260818` はframes 1125
 
 再戦経路はcheckpoint restore、generation 1への更新、start barrierまでは実装済みである。しかしhostの次戦mismatchが旧frame 934等のまま残り、current frame 13051との差をdepth 12117と計算して24回 `cannot arm` になった。再戦ずれは未実装一般ではなく、rollback input timeline/pending mismatchをgeneration境界でreset/rebaseしていない具体的な欠落である。
 
-現在の最優先blockerは、非同期trace修正後の実手動目視で秒単位停止と土管ぶれが消えることの確認である。pipeの自動再現は通ったが、旧3494/3500 image control、2D OAMだけのちらつきは未確認なので、3D以外を含む全presentation完了とは扱わない。初戦の手動確認が通った後、generation単位のrollback state reset/rebaseと二戦連続gateを実装する。死亡/復帰、土管遷移、item、音声、depth 11超fallbackも未検証として残る。
+現在の最優先blockerは再戦timeline rebaseである。初戦の同期と秒単位停止は修正後の実手動目視・内部heartbeatの双方で通った。pipeの自動再現も通ったが、今回の手動報告は土管Xぶれの消失を明示しておらず、旧3494/3500 image control、2D OAMだけのちらつきも未確認なので、3D以外を含む全presentation完了とは扱わない。次にgeneration単位のrollback state reset/rebaseと二戦連続gateを実装する。死亡/復帰、土管遷移、item、音声、depth 11超fallbackも未検証として残る。
 
 ## 2026-08-04 Slippi-style game-memory restore
 
