@@ -128,6 +128,9 @@ struct HarnessConfig {
   std::string StateLoadDir;
   std::uint32_t StateLoadFrame = 0;
   bool StateLoadFrameSet = false;
+  std::uint32_t TestEmulationPauseFrame = 0;
+  int TestEmulationPauseDurationMs = 0;
+  std::string TestEmulationPauseRole;
 };
 
 struct PacketBridgeConfig {
@@ -190,6 +193,7 @@ struct RollbackConfig {
   int MaxResimFrames = 0;
   int PredictionHorizonFrames = 0;
   int PredictionHorizonTimeoutMs = 7000;
+  bool PhaseRecoveryEnabled = false;
 };
 
 struct MvlCameraInitHoldConfig {

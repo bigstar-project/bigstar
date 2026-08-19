@@ -21,6 +21,7 @@
 #include "NsmbNetplayCoordinator.h"
 #include "NsmbInputDelivery.h"
 #include "NsmbInputProtocol.h"
+#include "NsmbPhaseRecovery.h"
 #include "NsmbNetplayProtocol.h"
 #include "NsmbNetplayTransport.h"
 #include "NsmbNetplayDiagnostics.h"
@@ -144,6 +145,7 @@ struct State
     PacketBridge::Runtime PacketBridgeRuntime;
     Config::InputConfig Input;
     InputTimeline::Runtime InputRuntime;
+    PhaseRecovery::Runtime PhaseRecovery;
     InputTimeline::Recorder InputRecorder;
     Config::MvlConfig Mvl;
     MvlRuntime::Runtime MvlSeries;
@@ -158,6 +160,7 @@ struct State
     Config::RollbackConfig Rollback;
     RollbackStorage::Store RollbackStore;
     RollbackStorage::Statistics RollbackStats;
+    bool TestEmulationPauseConsumed = false;
     NsmbNetplayTransport::Transport Transport;
     StateSyncRuntime GameSync;
     std::vector<std::pair<melonDS::u32, melonDS::u32>> RamDumpRanges;
@@ -221,6 +224,7 @@ NetplaySession::Context NetplaySessionContext()
         G.Harness,
         G.Mvl,
         G.InputRuntime,
+        G.PhaseRecovery,
         G.Coordinator,
         G.DiagnosticsRuntime,
         G.Transport,
@@ -1017,6 +1021,36 @@ PerformanceCounters GetPerformanceCounters()
     return counters;
 }
 
+FramePacing ConsumeFramePacing(int instanceID, melonDS::u32 frame)
+{
+    InitFromEnvironment();
+    std::lock_guard<std::mutex> lock(G.Mutex);
+    if (!G.Enabled || !G.Ready || instanceID < 0 || instanceID >= 16
+        || !G.Input.NetplayOnly || !G.Rollback.Enabled
+        || !G.Rollback.PhaseRecoveryEnabled)
+    {
+        return {};
+    }
+
+    const melonDS::u32 logicalFrame =
+        NetplaySession::LogicalFrame(NetplaySessionContext(), frame);
+    const PhaseRecovery::PacingDecision decision = G.PhaseRecovery.Consume(
+        logicalFrame, std::chrono::steady_clock::now());
+    if (decision.Evaluated || decision.SkipFrameLimit)
+    {
+        TraceOutput::Printf(
+            "NSMB PhaseRecovery: role=%s frame=%u logicalFrame=%u "
+            "offsetUs=%lld rttUs=%lld speed=%.6f advance=%d "
+            "pending=%d totalAdvance=%llu samples=%zu rttSamples=%zu\n",
+            G.NetRole == Role::Host ? "host" : "client", frame, logicalFrame,
+            decision.OffsetUs, decision.RttUs, decision.SpeedRatio,
+            decision.SkipFrameLimit ? 1 : 0,
+            decision.PendingAdvanceFrames, decision.TotalAdvanceFrames,
+            decision.OffsetSamples, decision.RttSamples);
+    }
+    return {decision.SpeedRatio, decision.SkipFrameLimit};
+}
+
 void InitFromEnvironment()
 {
     if (G.EnvChecked.load(std::memory_order_acquire)) return;
@@ -1093,6 +1127,7 @@ void InitFromEnvironment()
             G.AI.Imitation.ModelPath, imitationModelResult);
     std::fputs(imitationModelReport.c_str(), stdout);
     G.Rollback = Config::LoadRollbackConfig();
+    G.PhaseRecovery.Configure(G.Rollback.PhaseRecoveryEnabled);
 
     if ((G.TestEnabled || G.Enabled) && !G.Diagnostics.GameStateTracePath.empty())
     {
@@ -1391,6 +1426,30 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         G.Enabled && G.Input.NetplayOnly
         ? NetplaySession::LogicalFrame(NetplaySessionContext(), syncFrame)
         : syncFrame;
+
+    const bool testPauseRoleMatches =
+        G.Harness.TestEmulationPauseRole == "both"
+        || (G.Harness.TestEmulationPauseRole == "host"
+            && G.NetRole == Role::Host)
+        || (G.Harness.TestEmulationPauseRole == "client"
+            && G.NetRole == Role::Client);
+    if (!G.TestEmulationPauseConsumed
+        && G.Harness.TestEmulationPauseDurationMs > 0
+        && rollbackFrame == G.Harness.TestEmulationPauseFrame
+        && testPauseRoleMatches)
+    {
+        G.TestEmulationPauseConsumed = true;
+        TraceOutput::Printf(
+            "NSMB PhaseRecoveryTest: pause begin role=%s frame=%u durationMs=%d\n",
+            G.NetRole == Role::Host ? "host" : "client", rollbackFrame,
+            G.Harness.TestEmulationPauseDurationMs);
+        TraceOutput::Flush();
+        std::this_thread::sleep_for(std::chrono::milliseconds(
+            G.Harness.TestEmulationPauseDurationMs));
+        TraceOutput::Printf(
+            "NSMB PhaseRecoveryTest: pause end role=%s frame=%u\n",
+            G.NetRole == Role::Host ? "host" : "client", rollbackFrame);
+    }
 
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         RollbackRuntime::SaveCheckpointIfNeeded(

@@ -434,6 +434,13 @@ HarnessConfig LoadHarnessConfig(const Environment &environment) {
     config.StateLoadFrame = static_cast<std::uint32_t>(std::max(
         0, std::atoi(environment.Get("MELONDS_NSML_STATE_LOAD_FRAME"))));
   }
+  config.TestEmulationPauseFrame = static_cast<std::uint32_t>(std::max(
+      0, ReadInt(environment, "MELONDS_NSML_TEST_EMULATION_PAUSE_FRAME", 0)));
+  config.TestEmulationPauseDurationMs = std::clamp(
+      ReadInt(environment, "MELONDS_NSML_TEST_EMULATION_PAUSE_MS", 0),
+      0, 10000);
+  config.TestEmulationPauseRole = ReadCString(
+      environment, "MELONDS_NSML_TEST_EMULATION_PAUSE_ROLE", "");
   return config;
 }
 
@@ -603,6 +610,8 @@ RollbackConfig LoadRollbackConfig(const Environment &environment) {
   config.PredictionHorizonTimeoutMs = std::clamp(
       ReadInt(environment, "MELONDS_NSML_ROLLBACK_HORIZON_TIMEOUT_MS", 7000),
       100, 60000);
+  config.PhaseRecoveryEnabled =
+      ReadFlag(environment, "MELONDS_NSML_ROLLBACK_PHASE_RECOVERY");
   return config;
 }
 

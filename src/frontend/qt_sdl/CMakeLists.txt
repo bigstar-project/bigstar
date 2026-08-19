@@ -31,6 +31,8 @@ set(SOURCES_QT_SDL
     NsmbInputProtocol.h
     NsmbInputDelivery.cpp
     NsmbInputDelivery.h
+    NsmbPhaseRecovery.cpp
+    NsmbPhaseRecovery.h
     NsmbNetplayProtocol.cpp
     NsmbNetplayProtocol.h
     NsmbNetplayTransport.cpp
@@ -235,6 +237,22 @@ if (BUILD_TESTING)
         AUTORCC OFF
     )
     add_test(NAME nsmb-input-delivery COMMAND nsmb_input_delivery_tests)
+
+    add_executable(nsmb_phase_recovery_tests
+        NsmbPhaseRecovery.cpp
+        NsmbPhaseRecovery.h
+        ${CMAKE_SOURCE_DIR}/tests/nsmb_phase_recovery_tests.cpp
+    )
+    target_include_directories(nsmb_phase_recovery_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src"
+    )
+    set_target_properties(nsmb_phase_recovery_tests PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
+    )
+    add_test(NAME nsmb-phase-recovery COMMAND nsmb_phase_recovery_tests)
 
     add_executable(nsmb_session_protocol_tests
         NsmbNetplayProtocol.cpp

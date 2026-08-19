@@ -168,8 +168,11 @@ void HandleReceivedInputLocked(Context context, const void *data,
                                std::size_t size, melonDS::u32 localFrame) {
   InputProtocol::FramedInput packet;
   if (InputProtocol::DecodeInput(data, size, packet) &&
-      IsCurrentGeneration(context, packet.Generation, "input"))
+      IsCurrentGeneration(context, packet.Generation, "input")) {
     StoreRemoteInputLocked(context, packet.Frame, packet.Input, localFrame);
+    context.PhaseRecovery.ObserveRemoteInput(
+        packet.Generation, packet.Frame, std::chrono::steady_clock::now());
+  }
 }
 
 void HandleReceivedInputBundleLocked(Context context, const void *data,
@@ -183,9 +186,12 @@ void HandleReceivedInputBundleLocked(Context context, const void *data,
       !IsCurrentGeneration(context, entries.front().Generation,
                            "input-bundle"))
     return;
+  const auto receivedAt = std::chrono::steady_clock::now();
   if (ackFrame) {
     const auto update = context.State.Delivery.RecordRemoteAck(
         *ackFrame, context.Inputs.LastSentInputFrame, kNoFrame);
+    if (update == InputDelivery::AckUpdate::Advanced)
+      context.PhaseRecovery.RecordRemoteAck(*ackFrame, receivedAt);
     if (context.Input.NetplayTrace &&
         (update == InputDelivery::AckUpdate::Advanced ||
          update == InputDelivery::AckUpdate::Future)) {
@@ -200,6 +206,16 @@ void HandleReceivedInputBundleLocked(Context context, const void *data,
   }
   for (const InputProtocol::FramedInput &entry : entries)
     StoreRemoteInputLocked(context, entry.Frame, entry.Input, localFrame);
+  if (!entries.empty()) {
+    const auto newest = std::max_element(
+        entries.begin(), entries.end(),
+        [](const InputProtocol::FramedInput &left,
+           const InputProtocol::FramedInput &right) {
+          return left.Frame < right.Frame;
+        });
+    context.PhaseRecovery.ObserveRemoteInput(
+        newest->Generation, newest->Frame, receivedAt);
+  }
 }
 
 void HandleReceivedSessionLocked(Context context, const Hooks &hooks,
@@ -527,6 +543,9 @@ void SendInputLocked(Context context, const Hooks &hooks, melonDS::u32 frame,
 
   const melonDS::u32 previousLastSent = context.Inputs.LastSentInputFrame;
   context.Inputs.LastSentInputFrame = frame;
+  context.PhaseRecovery.RecordLocalInput(
+      context.State.Handshake.Generation(), frame,
+      std::chrono::steady_clock::now());
   UpdateHangSnapshotLocked(context, frame);
   if (context.Input.HealthTrace && previousLastSent != kNoFrame &&
       frame > previousLastSent + 1 &&

@@ -401,6 +401,9 @@ void TestHarnessConfigDefaults() {
   CHECK(config.StateLoadDir.empty());
   CHECK(config.StateLoadFrame == 0u);
   CHECK(!config.StateLoadFrameSet);
+  CHECK(config.TestEmulationPauseFrame == 0u);
+  CHECK(config.TestEmulationPauseDurationMs == 0);
+  CHECK(config.TestEmulationPauseRole.empty());
 }
 
 void TestHarnessConfigReadsClampsAndPreservesPresence() {
@@ -422,6 +425,9 @@ void TestHarnessConfigReadsClampsAndPreservesPresence() {
       {"MELONDS_NSML_STATE_SAVE_FRAME", "-3"},
       {"MELONDS_NSML_STATE_LOAD_DIR", "load-dir"},
       {"MELONDS_NSML_STATE_LOAD_FRAME", "invalid"},
+      {"MELONDS_NSML_TEST_EMULATION_PAUSE_FRAME", "180"},
+      {"MELONDS_NSML_TEST_EMULATION_PAUSE_MS", "99999"},
+      {"MELONDS_NSML_TEST_EMULATION_PAUSE_ROLE", "client"},
   };
 
   auto config = NsmbMvlNetplay::Config::LoadHarnessConfig(environment);
@@ -442,6 +448,9 @@ void TestHarnessConfigReadsClampsAndPreservesPresence() {
   CHECK(config.StateLoadDir == "load-dir");
   CHECK(config.StateLoadFrameSet);
   CHECK(config.StateLoadFrame == 0u);
+  CHECK(config.TestEmulationPauseFrame == 180u);
+  CHECK(config.TestEmulationPauseDurationMs == 10000);
+  CHECK(config.TestEmulationPauseRole == "client");
 
   environment.Values["MELONDS_NSML_NET_PUMP_SLEEP_US"] = "99999";
   environment.Values["MELONDS_NSML_STATE_LOAD_FRAME"] = "84";
@@ -558,6 +567,7 @@ void TestRollbackConfigDefaultsAndBackendAliases() {
   CHECK(config.MainRAMPageSize == 4096);
   CHECK(config.PredictionHorizonFrames == 0);
   CHECK(config.PredictionHorizonTimeoutMs == 7000);
+  CHECK(!config.PhaseRecoveryEnabled);
 
   const std::pair<const char *, RollbackBackend> aliases[] = {
       {"core-lite", RollbackBackend::CoreLite},
@@ -613,6 +623,7 @@ void TestRollbackConfigReadsClampsAndDependencies() {
       {"MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES", "-1"},
       {"MELONDS_NSML_ROLLBACK_PREDICTION_HORIZON_FRAMES", "99"},
       {"MELONDS_NSML_ROLLBACK_HORIZON_TIMEOUT_MS", "1"},
+      {"MELONDS_NSML_ROLLBACK_PHASE_RECOVERY", "1"},
   };
 
   const auto config = NsmbMvlNetplay::Config::LoadRollbackConfig(environment);
@@ -640,6 +651,7 @@ void TestRollbackConfigReadsClampsAndDependencies() {
   CHECK(config.MaxResimFrames == 0);
   CHECK(config.PredictionHorizonFrames == 11);
   CHECK(config.PredictionHorizonTimeoutMs == 100);
+  CHECK(config.PhaseRecoveryEnabled);
 }
 
 void TestMvlConfigDefaults() {

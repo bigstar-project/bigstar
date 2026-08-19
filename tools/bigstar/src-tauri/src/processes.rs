@@ -756,6 +756,7 @@ pub(crate) fn melon_env(
             "MELONDS_NSML_ROLLBACK_HORIZON_TIMEOUT_MS".into(),
             ROM_LOOP_HORIZON_TIMEOUT_MS.to_string(),
         );
+        env.insert("MELONDS_NSML_ROLLBACK_PHASE_RECOVERY".into(), "1".into());
         env.insert(
             "MELONDS_NSML_ROLLBACK_DELTA_KEYFRAME_INTERVAL".into(),
             "30".into(),

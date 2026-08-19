@@ -8,6 +8,7 @@
 #include "NsmbNetplayDiagnostics.h"
 #include "NsmbNetplayProtocol.h"
 #include "NsmbNetplayTransport.h"
+#include "NsmbPhaseRecovery.h"
 
 #include <condition_variable>
 #include <cstddef>
@@ -40,6 +41,7 @@ struct Context {
   const Config::HarnessConfig &Harness;
   Config::MvlConfig &Mvl;
   InputTimeline::Runtime &Inputs;
+  PhaseRecovery::Runtime &PhaseRecovery;
   Coordination::Runtime &Coordinator;
   Diagnostics::Runtime &DiagnosticsRuntime;
   NsmbNetplayTransport::Transport &Transport;

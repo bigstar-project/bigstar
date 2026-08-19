@@ -604,6 +604,7 @@ fn melon_env_carries_rollback_settings_when_enabled() {
     assert_eq!(env["MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES"], "7");
     assert_eq!(env["MELONDS_NSML_ROLLBACK_PREDICTION_HORIZON_FRAMES"], "7");
     assert_eq!(env["MELONDS_NSML_ROLLBACK_HORIZON_TIMEOUT_MS"], "60000");
+    assert_eq!(env["MELONDS_NSML_ROLLBACK_PHASE_RECOVERY"], "1");
     assert_eq!(env["MELONDS_NSML_FIXED_FRAME_SLEEP"], "1");
     assert_eq!(
         env["MELONDS_NSML_ROM_GAME_TICK_PROBE_GAME_RAM_ROLLBACK"],

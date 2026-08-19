@@ -40,8 +40,15 @@ struct PerformanceCounters
     int InputLead = 0;
 };
 
+struct FramePacing
+{
+    double SpeedRatio = 1.0;
+    bool SkipFrameLimit = false;
+};
+
 bool IsEnabled();
 PerformanceCounters GetPerformanceCounters();
+FramePacing ConsumeFramePacing(int instanceID, melonDS::u32 frame);
 void InitFromEnvironment();
 InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds, const InputState& polledInput);
 void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds);

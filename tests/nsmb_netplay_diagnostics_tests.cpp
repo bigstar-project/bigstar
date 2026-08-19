@@ -744,6 +744,7 @@ void TestStartupReportFormattingContract() {
   rollback.Enabled = true;
   rollback.Backend = Config::RollbackBackend::CorePreimage;
   rollback.Window = 32;
+  rollback.PhaseRecoveryEnabled = true;
   const std::string netplayReport = Diagnostics::FormatNetplayStartupReport(
       987654321, "client", connection, harness, packetBridge, input, rollback,
       "corepreimage", mvl, 3, 0x11223344);
@@ -755,10 +756,11 @@ void TestStartupReportFormattingContract() {
         std::string::npos);
   CHECK(netplayReport.find("matchSeed=0x10203040 seedConfigured=1") !=
         std::string::npos);
+  CHECK(netplayReport.find("rollbackPhaseRecovery=1") != std::string::npos);
   CHECK(!netplayReport.empty() && netplayReport.back() == '\n');
 
   CHECK(Fnv1a64(testReport) == 16774390328572156944ull);
-  CHECK(Fnv1a64(netplayReport) == 13083541385306128846ull);
+  CHECK(Fnv1a64(netplayReport) == 7934605205972426028ull);
 }
 
 void TestAIStartupReportFormattingContract() {

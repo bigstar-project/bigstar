@@ -857,6 +857,7 @@ void EmuThread::run()
 
             // emulate
             u32 nlines;
+            NsmbMvlNetplay::FramePacing nsmlFramePacing;
             if (emuInstance->nds->GPU.GetRenderer().NeedsShaderCompile())
             {
                 compileShaders();
@@ -882,6 +883,9 @@ void EmuThread::run()
                     emuInstance->instanceID,
                     frameBeforeRun,
                     emuInstance->nds);
+                nsmlFramePacing = NsmbMvlNetplay::ConsumeFramePacing(
+                    emuInstance->instanceID,
+                    frameBeforeRun);
                 if (emuInstance->audioCaptureEnabled)
                     emuInstance->audioCaptureFrame.store(
                         emuInstance->nds->NumFrames, std::memory_order_relaxed);
@@ -959,6 +963,9 @@ void EmuThread::run()
             else if (fastforward) emuInstance->curFPS = emuInstance->fastForwardFPS;
             else if (!emuInstance->doLimitFPS && !emuInstance->doAudioSync) emuInstance->curFPS = 1000.0;
             else emuInstance->curFPS = emuInstance->targetFPS;
+            const bool nsmlApplyFramePacing = !fastforward && !slowmo;
+            if (nsmlApplyFramePacing)
+                emuInstance->curFPS *= nsmlFramePacing.SpeedRatio;
 
             if (emuInstance->audioDSiVolumeSync && emuInstance->nds->ConsoleType == 1)
             {
@@ -978,7 +985,8 @@ void EmuThread::run()
                 : 0.0;
             if (nsmlPerformanceLogEnabled)
                 nsmlAudioQueueBefore = emuInstance->nds->SPU.GetOutputSize();
-            if (emuInstance->doAudioSync && !(fastforward || slowmo))
+            if (emuInstance->doAudioSync && !(fastforward || slowmo)
+                && !nsmlFramePacing.SkipFrameLimit)
                 emuInstance->audioSync();
             if (nsmlPerformanceLogEnabled)
                 nsmlAudioQueueAfter = emuInstance->nds->SPU.GetOutputSize();
@@ -1014,7 +1022,8 @@ void EmuThread::run()
 
             if (frametimeStep < 0.001) frametimeStep = 0.001;
 
-            if (emuInstance->doLimitFPS)
+            if (emuInstance->doLimitFPS
+                && !(nsmlApplyFramePacing && nsmlFramePacing.SkipFrameLimit))
             {
                 const double nsmlLimitStart = nsmlPerfPhaseTiming
                     ? SDL_GetPerformanceCounter() * perfCountsSec
