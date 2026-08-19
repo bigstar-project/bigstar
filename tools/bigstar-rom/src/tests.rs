@@ -1,8 +1,8 @@
 use super::{
-    big_star_selector, build_direct_loadlevel_stub,
+    big_star_selector, build_direct_loadlevel_stub, build_eight_coin_reward_positional_sfx_stub,
     build_is_out_of_view_vertical_camera_fallback_stub, encode_cmp_imm, encode_ldr_imm,
     encode_load_imm, encode_mov_imm, encode_str_imm, encode_strb_imm, initial_lives,
-    life_mode_selector, stage_scene_settings, with_cond, DirectMvlConfig,
+    life_mode_selector, stage_scene_settings, with_cond, DirectMvlConfig, EIGHT_COIN_SFX_ID,
     GAME_PLAYER_INVENTORY_POWERUP_ADDR, MVL_NATIVE_COURSE_SELECTOR_ADDR,
     MVL_RUNTIME_CONFIG_STAGE_OFFSET, PLAYER_POWERUP_MEGA,
 };
@@ -150,6 +150,24 @@ fn direct_loadlevel_clears_initial_inventory_powerups() {
             .any(|window| window == [clear_value, clear_player0, clear_player1]),
         "stub must clear Mario and Luigi initial stock items after direct MvL load"
     );
+}
+
+#[test]
+fn eight_coin_reward_sfx_uses_reward_player_world_position() {
+    let start_addr = 0x020c_5300;
+    let get_player_addr = 0x0202_0608;
+    let play_sfx_addr = 0x0201_2398;
+    let stub =
+        build_eight_coin_reward_positional_sfx_stub(start_addr, get_player_addr, play_sfx_addr)
+            .expect("build positional 8-coin SFX stub");
+
+    assert_eq!(stub.len(), 8);
+    assert_eq!(stub[1], 0xE1A0_0005, "reward player ID must come from r5");
+    assert_eq!(
+        stub[3], 0xE280_105C,
+        "SFX position must be player actor world Vec3 at +0x5c"
+    );
+    assert_eq!(stub[7], EIGHT_COIN_SFX_ID);
 }
 
 #[test]

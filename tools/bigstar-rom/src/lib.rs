@@ -44,6 +44,9 @@ const GAME_TICK_PROBE_JIT_SCRATCH_TICK_ADDR: u32 = 0x023C_1200;
 const GAME_TICK_PROBE_GAME_FRAME_ADDR: u32 = 0x0208_B668;
 const GAME_TICK_PROBE_STAGE_MARKER_ADDR: u32 = 0x04FF_FA28;
 const GAME_TICK_PROBE_REPLAY_RENDER_ADDR: u32 = 0x04FF_FA2C;
+const EIGHT_COIN_SFX_HOOK_ADDR: u32 = 0x020B_F370;
+const EIGHT_COIN_SFX_STUB_ADDR: u32 = 0x020C_5300;
+const EIGHT_COIN_SFX_ID: u32 = 0x017E;
 
 #[derive(Debug, Clone)]
 pub struct StableRomOptions {
@@ -573,12 +576,68 @@ fn patch_direct_mvl_entry(
     patch_overlay_words(rom, 0x0215_2E64, &[encode_mov_imm(1, 0)?])?;
     patch_mvl_load_thread_entrance_ids(rom)?;
     patch_is_out_of_view_vertical_camera_fallback(rom)?;
+    patch_eight_coin_reward_positional_sfx(rom, symbols)?;
     patch_camera_focus_loop_count(rom, 2)?;
     // Disabled pending a focused lifecycle proof. The original session found this
     // hook targeted 0x0209B040, while the missing-Goomba path used 0x0209B320.
     // patch_stage_object_activation_player_id(rom, 0)?;
     patch_player_stage_lock_vsmode_noop(rom)?;
     patch_player_powerup_state_allows_movement_mvl(rom)?;
+    Ok(())
+}
+
+fn build_eight_coin_reward_positional_sfx_stub(
+    start_addr: u32,
+    get_player_addr: u32,
+    play_sfx_addr: u32,
+) -> Result<Vec<u32>> {
+    let literal_addr = start_addr + 0x1c;
+    Ok(vec![
+        encode_push((1 << 4) | (1 << 14)), // push {r4, lr}; preserve stack alignment
+        encode_mov_reg(0, 5),              // mov r0, r5; reward player ID
+        encode_bl(start_addr + 0x08, get_player_addr)?,
+        encode_add_imm(1, 0, 0x5c)?, // add r1, r0, #0x5c; player world Vec3
+        encode_ldr_pc_literal(0, start_addr + 0x10, literal_addr, 0xE)?,
+        encode_bl(start_addr + 0x14, play_sfx_addr)?,
+        POP_PC | (1 << 4),
+        EIGHT_COIN_SFX_ID,
+    ])
+}
+
+fn patch_eight_coin_reward_positional_sfx(
+    rom: &mut RomImage,
+    symbols: &BTreeMap<String, u32>,
+) -> Result<()> {
+    let get_player_addr = symbol(symbols, "_ZN4Game9getPlayerEl")?;
+    let play_sfx_addr = symbol(symbols, "_ZN3SND7playSFXElPK4Vec3")?;
+    let stub = build_eight_coin_reward_positional_sfx_stub(
+        EIGHT_COIN_SFX_STUB_ADDR,
+        get_player_addr,
+        play_sfx_addr,
+    )?;
+    ensure_zero_overlay_words(rom, 0, EIGHT_COIN_SFX_STUB_ADDR, stub.len())?;
+    patch_overlay_words_by_id(rom, 0, EIGHT_COIN_SFX_STUB_ADDR, &stub)?;
+
+    let expected = [
+        0xE59F_0050, // ldr r0, [pc, #0x50]; SFX ID 0x17e
+        encode_mov_imm(1, 0)?,
+        encode_bl(EIGHT_COIN_SFX_HOOK_ADDR + 0x08, play_sfx_addr)?,
+    ];
+    let replacement = [
+        encode_bl(EIGHT_COIN_SFX_HOOK_ADDR, EIGHT_COIN_SFX_STUB_ADDR)?,
+        NOP,
+        NOP,
+    ];
+    let old = patch_overlay_words_by_id(rom, 0, EIGHT_COIN_SFX_HOOK_ADDR, &replacement)?;
+    let old_words = old
+        .chunks_exact(4)
+        .map(|word| u32::from_le_bytes(word.try_into().expect("four-byte ARM word")))
+        .collect::<Vec<_>>();
+    if old_words != expected {
+        bail!(
+            "8-coin SFX hook @ 0x{EIGHT_COIN_SFX_HOOK_ADDR:08x} expected {expected:08x?}, got {old_words:08x?}"
+        );
+    }
     Ok(())
 }
 
