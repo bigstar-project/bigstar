@@ -1,6 +1,39 @@
 # NSMB Mario vs Luigi Rollback Design Notes
 
-> 現在の判断は直下の2026-08-19節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
+> 現在の判断は直下の2026-08-20節を正とする。それ以降は、判断変更の根拠を残すための履歴であり、古い「current」「next action」を現行方針として扱わない。
+
+## 2026-08-20 片側ローカル停止後に最大深度rollbackが固定される問題
+
+### 現時点の独立判断
+
+修正版Bigstarを1 PCの独立2プロセスで操作した `bigstar-1787162501949-37192-0`（host/Mario）と `bigstar-1787162501980-40744-0`（client/Luigi）では、Luigi側の入力設定中に生じた片側停止を契機に、hostがprediction horizon `P=7`の端へ張り付いた。設定中ずっとhostだけが進んだのではない。hostは7個の未確定game frameまで進んで停止し、client再開後は両方が同じ60 fpsへ戻ったため、その7-frame位相差を縮める機構がなく、以後Luigiの入力変化がhostへ最大深度7で届き続けた。これは前節のcheckpoint frame-domain欠陥とは別問題であり、訂正自体とcritical state同期は全件成功している。
+
+- **Observed pauses:** hostのhealth traceには約`5.450秒`と`7.859秒`の離散的な停止区間があり、対応してclient側にも約`5.606秒`と`7.859秒`のframe進捗停止がある。ログだけでは2回とも入力設定dialogだったか、別の停止操作を含むかは確定できない。最初の停止後、hostの`lastSent-lastRecv`は`+9`、clientは`-8`で安定した。入力delay `D=2`を除くとhostはremote確定入力よりちょうど7 gameplay frame先にいる。
+- **Pause implementation:** `MainWindow::onOpenInputConfig()`はlocal `EmuThread`をpauseし、dialog終了時にunpauseする。別Bigstarプロセスのpeerへpauseは伝播しない。rollbackのnetwork pumpは`BeforeRunFrame()`内にあり、このrunは専用pump thread無効なので、local emulation pause中はsession側pumpも止まる。unpause後のframe limiterは経過時間をcatch-upせず現在時刻へ基準を戻すため、遅れた側が60 fpsを超えて追いつくこともない。
+- **Horizon behavior:** `WaitForRollbackPredictionHorizon()`は未確定remote frameが7個を超える直前だけleaderを止め、8個から7個へ減った時点で即座に再開する。low-water mark、frame位相のhysteresis、remote実行frameの追跡がないため、再開後に両peerが60 fpsなら差は自然には減らない。最初の長いpauseではhostがlogical `1291`、2回目は`1564`で上限待機に入り、それぞれremote確定が1 frame進むと再開した。
+- **Rollback/presentation result:** hostはprediction mismatch `229`件を検出し、ROM-loop arm/completeも各`229`件で全件成功した。すべてdepth `7`、replay `8` tickだった。client側の訂正は0件である。これは「毎frame rollback」ではなく、hostが毎frameLuigi入力を7 frame予測し、遅れて届いた実入力がhold-last予測と異なる入力変化のたびに訂正したという意味である。頻繁な最大深度訂正により、host上のLuigi spriteが予測軌道から正解軌道へ繰り返し跳び、ユーザーには強いカクつきとして見えた。
+- **Not a transport/FPS failure:** bridgeはdirect WebRTC接続を維持し、packet drop、peer disconnect、local-target dropはいずれも0だった。2回目の再開後も両roleは実効60 fpsを維持し、33ms超outer frameは0、25ms超も各1件だけだった。従って主症状は描画cadence低下ではなく、訂正済みplayer位置のpresentation snapである。153件のstate比較はすべて`playerGlobal=1 wifiCandidate=1 renderCandidate=1`で、role-local `Basic`だけの既知noiseだった。checkpoint missing、cannot-arm、resimulation failure、critical mismatchは0である。
+- **Ordinary-play risk:** 通常のpacket遅延だけで必ず同じ状態になるわけではない。両emulator clockが進み続け、両方向が対称に詰まれば双方がほぼ同時にhorizon待機し、恒久的な片側frame差は作りにくい。一方、片側だけのwindow/dialog pause、OS suspend、scheduler stall、debugger、長い処理hitch、または強い非対称通信で一方だけがhorizon待機した場合は通常プレイ中にも再現し得る。短い停止は小さい位相差、約8 frame以上の停止は現設定の最大7-frame差へ到達し得る。
+- **Recommended control design:** immediate guardとしてonline match中はlocal-only pauseを伴う入力・emulation・camera設定と手動pauseを禁止するか、logical frame境界で両peerを止め、network pumpを継続したまま同時再開するpause protocolが必要である。根本対策はremote executed logical frameを交換し、frame advantageを観測してleaderをlow-water markまで待たせるか、laggerを限定的にcatch-upさせるpacing/hysteresisを入れること。単にhorizon上限を増やす案は訂正深度と見た目を悪化させるため採らない。
+- **Verification status:** 今回の実runは旧frame-domain障害が解消し、訂正安全性を維持したことを確認した一方、片側停止後のpresentation品質とframe位相回復gateは不合格である。
+- **Current blocker:** 片側停止後にframe advantageを通常目標へ戻す制御と、online中の設定dialogに対するpause policyが未実装である。
+- **Next action:** まずclientだけを5～8秒停止できる2-process E2E test knobを追加し、leaderがP=7へ達した後、再開から有限時間内にframe advantageが目標値へ戻ること、訂正深度が7へ張り付かないこと、horizon edgeの細かなblock/resumeが収束すること、critical state一致と60 fpsを維持することを回帰gateにする。その上で明示的frame-phase pacingと協調pauseを実装する。
+
+## 2026-08-20 実WAN Bigstar初回runの即時同期エラーと修正
+
+### 現時点の独立判断
+
+`C:\Users\Sugiyama\AppData\Roaming\Bigstar Insiders\logs\bigstar-1787155993298-35768-3` のGUI同期エラーは、ROM-loop checkpointのraw/logical frame-domain不一致により訂正が一度も実行できず、`playerGlobal`まで分岐した実同期障害だった。frame 900から出ていた`Basic`だけの不一致はrole-local fieldによる既知の診断noiseで、Bigstar GUIは表示対象から除外済みである。frame-domain不一致は修正し、同じ欠陥を踏むoffset 26と実prediction mismatchを組み合わせた2-process WebRTC E2Eまで通した。修正版を含むInsiders MSI/NSISも生成済みだが、ユーザー環境の実GUI/WAN再試行はまだ行っていないため、配布版の最終合格とは分ける。
+
+- **表示判定の再確認:** 最初のstate比較frame 900は`basic=0 playerGlobal=1 wifiCandidate=1 renderCandidate=1`だった。`ComputeBasicGameStateHash()`はroleごとに異なる`LocalPlayerID`とraw network fieldsを含むため、cross-role比較では正常同期中でも`Basic`が一致しない。ただし`should_show_game_state_mismatch_in_gui()`は`playerGlobal/wifiCandidate/renderCandidate`のいずれかがfalseの場合だけ表示し、`Basic`単独不一致を無視するunit testもある。従って前回の「画面へ早期表示された偽陽性」という判断を撤回する。GUI表示はframe 1200以降の実分岐を正しく報告した。
+- **実同期障害:** start-readyはraw `localFrame=860`に成立し、共有logical epochは`840`だったため、対戦中は一貫して`raw = logical + 20`だった。ROM-loopの通常checkpointは`NDS::NumFrames`（raw）を`DisplayFrame`として16件だけ保持する一方、`RollbackResimulateIfNeeded()`はgeneration-local logical frameで`CopyNSMLGameRAMCheckpointAtOrBefore()`を検索した。最初のlate inputはlogical mismatch `955`、訂正current `956`、raw local frame `976`であり、ring内のraw checkpointはすべて検索値955より未来なので取得不能だった。
+- **実測結果:** 240 prediction中19件がactual inputと不一致になったが、19件すべて`checkpoint missing window=16 interval=1`で訂正を破棄した。`restores=0 resims=0`のまま、frame 1140までは`playerGlobal=1`、frame 1200から`playerGlobal=0`となって実game stateが恒久分岐した。bridgeはdata channel openを維持し、drop counterも0だったため、STUN 487やWebRTC切断を直接原因とはしない。process crashでもなく、sessionはユーザー停止で終了した。
+- **既存gateが見逃した理由:** Bigstar sidecar E2Eはすでに1 PC上のhost/client別melonDS 2プロセス、client-first 1500ms差、WebRTCを使っていた。実ログでもraw ready `866`、logical epoch `840`のoffset 26があり、障害を再現できる起動条件は揃っていた。しかし送信遅延・jitterは0で、predictionはhost/client `14/68`回発生しても後着actualと値が同じだったため、prediction mismatch、ROM-loop arm、completeが全て0件のままpassした。assertionもbackend設定、接続、start-ready、frame limit、失敗文字列の不在だけを要求し、「1回以上の不一致を実際に訂正した」ことを要求しなかった。対して訂正を多数通したlocal/manual gateはraw startとlogical epochがともに870でoffset 0だった。つまり「offsetあり・訂正なし」と「offsetなし・訂正あり」を別々に試し、両条件の交差を試していなかった。
+- **実装修正:** outer before-frameで得たgeneration-local logical frameを、ROM-loop backendではcheckpoint intervalにかかわらず毎frame NDSへ設定する。通常game-loop gateは`NDS::NumFrames`を直接labelにせず、このlogical frameを使う。最初のlogical frame設定時にはstart-ready前のraw checkpointを無効化し、logical frameが後退した世代切替時にも旧ringを無効化する。訂正中のring再構築は従来どおり`ReplayDisplayStartFrame + historyIndex`、検索・suffix破棄もlogical frameなので、全経路が同一domainになった。ring容量拡大で症状を隠す案は採用していない。
+- **回帰gate修正:** `scripts/test-bigstar-sidecar-e2e.ps1 -RomLoopRollback`は専用のpost-gameplay input edge、両方向2-frame送信遅延、raw/logical offset最小17を既定化した。両peer合計でprediction mismatch 1件以上を要求し、各peerでは発生したmismatch、arm、completeの件数一致を必須にする。`checkpoint missing`、critical state mismatch、frame limit未達は従来どおり失敗する。unit testは初回logical activation、単調進行、同frame再入、後退generation、resetを固定した。
+- **Verification status:** Release `melonDS` buildとCTest 16/16がpassした。`logs/codex-bigstar-romloop-frame-timeline-fix-e2e-pass-20260820`はclient-first 1500ms差、WebRTC、offset `26/26`、送信遅延2でhost/client各2件のprediction mismatchを作り、各2件のarm/complete、checkpoint missing 0、critical state mismatch 0のまま両role 1200 frameへ到達した。Bigstar `corepack pnpm run ci`もtypecheck、Biome、edition 15件、unit 37件、browser 69件、Playwright 2件を全てpassし、修正版melonDS SHA-256 `49753915...`を含むInsiders MSI/NSIS bundleを生成した。staged distributionの`bigstar.exe --preflight`と内包melonDS hash再照合もpassした。
+- **Current blocker:** このframe-domain欠陥の実装・自動検証blockerは解消した。残るのは生成した修正版を実際のBigstar GUIへ入れ、ユーザーが踏んだ実WAN操作で同期エラーが再発しないことを確認するrelease validationである。既知のROM-loop音声取り消し不能は別blockerとして残る。
+- **Next action:** 修正版Insidersを実GUIでhost/clientに適用し、初戦と再戦を操作する。合格条件はGUI同期エラーなし、prediction mismatch発生時のarm/complete全件一致、checkpoint missing 0、`playerGlobal/wifiCandidate/renderCandidate`継続一致である。
 
 ## 2026-08-19 Slippi型を実用化するための制御方針、P=7実測と出力・event gate
 

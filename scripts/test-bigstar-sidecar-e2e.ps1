@@ -5,6 +5,7 @@ param(
     [int]$InputDelayFrames = 4,
     [int]$InputMaxFrameLead = 4,
     [int]$InputBundleHistory = 8,
+    [string]$InputScript = "",
     [switch]$RomLoopRollback,
     [int]$MvlStage = 4,
     [ValidateSet(1, 2, 3)] [int]$MvlWins = 3,
@@ -17,7 +18,11 @@ param(
     [string]$SignalUrl = "wss://bigstar-signaling-insiders-signaling-prod.uniunitaro.workers.dev/session",
     [ValidateSet("HostFirst", "ClientFirst")]
     [string]$MelonLaunchOrder = "ClientFirst",
-    [int]$MelonLaunchGapMs = 1500
+    [int]$MelonLaunchGapMs = 1500,
+    [int]$HostInputSendDelayFrames = 0,
+    [int]$ClientInputSendDelayFrames = 0,
+    [int]$MinimumRawLogicalOffset = 0,
+    [int]$MinimumRomLoopCorrections = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -88,7 +93,8 @@ function Assert-MelonLogPassed {
         [string]$Role,
         [string]$Text,
         [int]$ExpectedFrames,
-        [bool]$ExpectRomLoopRollback
+        [bool]$ExpectRomLoopRollback,
+        [int]$RequiredRawLogicalOffset
     )
     $forbidden = @(
         "input frame throttle timeout",
@@ -127,12 +133,86 @@ function Assert-MelonLogPassed {
          !$Text.Contains("rollbackHorizonTimeoutMs=60000"))) {
         throw "$Role melonDS log does not match the ROM-loop launch contract"
     }
+    $predictionMismatches = 0
+    if ($ExpectRomLoopRollback) {
+        $readyMatches = [regex]::Matches(
+            $Text,
+            "NSMB InputNetplay: remote gameplay start ready accepted remoteFrame=(\d+) localFrame=(\d+) logicalStart=(\d+)"
+        )
+        if ($readyMatches.Count -eq 0) {
+            throw "$Role melonDS log does not expose the raw/logical start offset"
+        }
+        $ready = $readyMatches[0]
+        $localFrame = [long]$ready.Groups[2].Value
+        $logicalStart = [long]$ready.Groups[3].Value
+        $rawLogicalOffset = $localFrame - $logicalStart
+        if ($rawLogicalOffset -lt $RequiredRawLogicalOffset) {
+            throw "$Role raw/logical start offset $rawLogicalOffset is below required $RequiredRawLogicalOffset"
+        }
+
+        $predictionMismatches = [regex]::Matches(
+            $Text,
+            "NSMB Rollback: prediction mismatch"
+        ).Count
+        $armedCorrections = [regex]::Matches(
+            $Text,
+            "NSMB Rollback: armed ROM-loop correction"
+        ).Count
+        $completedCorrections = [regex]::Matches(
+            $Text,
+            "NSMB Rollback: completed ROM-loop correction"
+        ).Count
+        if ($predictionMismatches -ne $armedCorrections -or
+            $armedCorrections -ne $completedCorrections) {
+            throw "$Role ROM-loop correction counts disagree: mismatches=$predictionMismatches armed=$armedCorrections completed=$completedCorrections"
+        }
+    }
+    return $predictionMismatches
+}
+
+function Assert-PeerLogsPassed {
+    param(
+        [string]$HostText,
+        [string]$ClientText,
+        [int]$ExpectedFrames,
+        [bool]$ExpectRomLoopRollback,
+        [int]$RequiredRawLogicalOffset,
+        [int]$RequiredRomLoopCorrections
+    )
+    $hostCorrections = Assert-MelonLogPassed `
+        -Role "host" `
+        -Text $HostText `
+        -ExpectedFrames $ExpectedFrames `
+        -ExpectRomLoopRollback $ExpectRomLoopRollback `
+        -RequiredRawLogicalOffset $RequiredRawLogicalOffset
+    $clientCorrections = Assert-MelonLogPassed `
+        -Role "client" `
+        -Text $ClientText `
+        -ExpectedFrames $ExpectedFrames `
+        -ExpectRomLoopRollback $ExpectRomLoopRollback `
+        -RequiredRawLogicalOffset $RequiredRawLogicalOffset
+    $totalCorrections = $hostCorrections + $clientCorrections
+    if ($ExpectRomLoopRollback -and
+        $totalCorrections -lt $RequiredRomLoopCorrections) {
+        throw "ROM-loop prediction mismatch count $totalCorrections is below required $RequiredRomLoopCorrections across both peers"
+    }
 }
 
 if ($RomLoopRollback) {
     if (!$PSBoundParameters.ContainsKey('InputDelayFrames')) { $InputDelayFrames = 2 }
     if (!$PSBoundParameters.ContainsKey('InputMaxFrameLead')) { $InputMaxFrameLead = -1 }
     if (!$PSBoundParameters.ContainsKey('InputBundleHistory')) { $InputBundleHistory = 11 }
+    if (!$PSBoundParameters.ContainsKey('HostInputSendDelayFrames')) { $HostInputSendDelayFrames = 2 }
+    if (!$PSBoundParameters.ContainsKey('ClientInputSendDelayFrames')) { $ClientInputSendDelayFrames = 2 }
+    if (!$PSBoundParameters.ContainsKey('MinimumRawLogicalOffset')) { $MinimumRawLogicalOffset = 17 }
+    if (!$PSBoundParameters.ContainsKey('MinimumRomLoopCorrections')) { $MinimumRomLoopCorrections = 1 }
+}
+if ($InputScript -eq "") {
+    $InputScript = if ($RomLoopRollback) {
+        "tests\nsmb_us_direct_mvl_romloop_smoke.inputs"
+    } else {
+        "tests\nsmb_us_direct_mvl_minimal_bootstrap.inputs"
+    }
 }
 
 if ($LogDir -eq "") {
@@ -151,6 +231,7 @@ try {
         -InputDelayFrames $InputDelayFrames `
         -InputMaxFrameLead $InputMaxFrameLead `
         -InputBundleHistory $InputBundleHistory `
+        -InputScript $InputScript `
         -RomLoopRollback:$RomLoopRollback `
         -LogDir $resolvedLogDir `
         -MvlStage $MvlStage `
@@ -161,6 +242,8 @@ try {
         -MvlMatchSeed $MvlMatchSeed `
         -MelonLaunchOrder $MelonLaunchOrder `
         -MelonLaunchGapMs $MelonLaunchGapMs `
+        -HostInputSendDelayFrames $HostInputSendDelayFrames `
+        -ClientInputSendDelayFrames $ClientInputSendDelayFrames `
         -SkipRomEnsure:$(-not $RomLoopRollback.IsPresent) `
         -Exe (Resolve-RepoPath $Exe -MustExist) `
         -BridgeExe (Resolve-RepoPath $BridgeExe -MustExist)
@@ -173,13 +256,11 @@ try {
         $clientText = Read-TextIfExists $clientLog
         $failurePattern = "input frame throttle timeout|remote start ready wait timeout|peer disconnected|prediction horizon timeout|cannot arm ROM-loop correction|cannot resimulate|failed to schedule ROM-loop|capping resim window"
         if ($hostText -match $failurePattern -or $clientText -match $failurePattern) {
-            Assert-MelonLogPassed -Role "host" -Text $hostText -ExpectedFrames $Frames -ExpectRomLoopRollback $RomLoopRollback.IsPresent
-            Assert-MelonLogPassed -Role "client" -Text $clientText -ExpectedFrames $Frames -ExpectRomLoopRollback $RomLoopRollback.IsPresent
+            Assert-PeerLogsPassed -HostText $hostText -ClientText $clientText -ExpectedFrames $Frames -ExpectRomLoopRollback $RomLoopRollback.IsPresent -RequiredRawLogicalOffset $MinimumRawLogicalOffset -RequiredRomLoopCorrections $MinimumRomLoopCorrections
         }
         if ($hostText.Contains("NSMB Test: frame limit reached at frame=$Frames") -and
             $clientText.Contains("NSMB Test: frame limit reached at frame=$Frames")) {
-            Assert-MelonLogPassed -Role "host" -Text $hostText -ExpectedFrames $Frames -ExpectRomLoopRollback $RomLoopRollback.IsPresent
-            Assert-MelonLogPassed -Role "client" -Text $clientText -ExpectedFrames $Frames -ExpectRomLoopRollback $RomLoopRollback.IsPresent
+            Assert-PeerLogsPassed -HostText $hostText -ClientText $clientText -ExpectedFrames $Frames -ExpectRomLoopRollback $RomLoopRollback.IsPresent -RequiredRawLogicalOffset $MinimumRawLogicalOffset -RequiredRomLoopCorrections $MinimumRomLoopCorrections
             Write-Host "NSMB MvL GUI sidecar e2e passed: frames=$Frames log=$resolvedLogDir"
             exit 0
         }

@@ -381,18 +381,26 @@ void SaveCheckpointIfNeeded(Context context, int instanceID,
   if (!context.Config.Enabled || !context.Input.NetplayOnly || !nds ||
       instanceID < 0 || instanceID >= 16 ||
       (context.NetplayStartFrame != 0 && frame < context.NetplayStartFrame) ||
-      context.Config.Window <= 0 ||
-      !RollbackStorage::ShouldSaveCheckpoint(
-          frame, context.Config.CheckpointInterval, context.NetplayStartFrame))
+      context.Config.Window <= 0)
     return;
 
   if (context.Config.Backend == Config::RollbackBackend::RomLoop) {
+    // The gate captures RAM every game tick, so keep its label current even
+    // when the configured full-state checkpoint interval would skip a frame.
+    nds->SetNSMLGameRAMCheckpointFrame(frame);
+    if (!RollbackStorage::ShouldSaveCheckpoint(
+            frame, context.Config.CheckpointInterval,
+            context.NetplayStartFrame))
+      return;
     std::lock_guard<std::mutex> lock(context.Mutex);
     context.Inputs.RollbackInputs.Prune(
         frame, static_cast<melonDS::u32>(context.Config.Window),
         context.Inputs.RemoteInputs);
     return;
   }
+  if (!RollbackStorage::ShouldSaveCheckpoint(
+          frame, context.Config.CheckpointInterval, context.NetplayStartFrame))
+    return;
   StoredState checkpoint;
   std::vector<melonDS::u8> deltaBaseMainRAM;
   const auto saveStart = std::chrono::steady_clock::now();

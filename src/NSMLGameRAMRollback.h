@@ -6,6 +6,33 @@
 namespace melonDS::NSMLGameRAMRollback
 {
 
+class CheckpointFrameTimeline
+{
+public:
+    void Reset()
+    {
+        Active = false;
+        LogicalFrame = 0;
+    }
+
+    bool SetLogicalFrame(u32 frame)
+    {
+        const bool invalidatesCheckpoints = !Active || frame < LogicalFrame;
+        Active = true;
+        LogicalFrame = frame;
+        return invalidatesCheckpoints;
+    }
+
+    u32 CaptureFrame(u32 rawFrame) const
+    {
+        return Active ? LogicalFrame : rawFrame;
+    }
+
+private:
+    bool Active = false;
+    u32 LogicalFrame = 0;
+};
+
 constexpr bool CanFinalizeTransaction(
     bool restorePending,
     bool historyReachedExitGate,

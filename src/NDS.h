@@ -45,6 +45,7 @@
 #include "CRC32.h"
 #include "DMA.h"
 #include "FreeBIOS.h"
+#include "NSMLGameRAMRollback.h"
 
 // when touching the main loop/timing code, pls test a lot of shit
 // with this enabled, to make sure it doesn't desync
@@ -316,6 +317,8 @@ public: // TODO: Encapsulate the rest of these members
     };
     std::vector<NSMLGameRAMCheckpoint> NSMLGameRAMCheckpoints;
     u32 NSMLNextGameRAMCheckpoint = 0;
+    NSMLGameRAMRollback::CheckpointFrameTimeline NSMLGameRAMCheckpointTimeline;
+    void SetNSMLGameRAMCheckpointFrame(u32 logicalFrame);
     void CaptureNSMLGameRAMCheckpointAtGate(u32 displayFrame);
     bool CopyNSMLGameRAMCheckpointAtOrBefore(
         u32 frame, u32& checkpointFrame, u32& gameFrame, std::vector<u8>& image) const;

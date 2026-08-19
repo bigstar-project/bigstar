@@ -18,6 +18,7 @@ using NsmbMvlNetplay::RollbackStorage::Store;
 using NsmbMvlNetplay::RollbackStorage::StoredState;
 using NsmbMvlNetplay::RollbackStorage::Statistics;
 using melonDS::NSMLGameRAMRollback::CanFinalizeTransaction;
+using melonDS::NSMLGameRAMRollback::CheckpointFrameTimeline;
 
 void Require(bool condition, const std::string &message) {
   if (condition)
@@ -112,6 +113,25 @@ void TestRomLoopTransactionCompletionPolicy() {
           "empty history cannot finalize");
   Require(!CanFinalizeTransaction(false, false, true, 8, 8, 2, 0xFFFFFFFE),
           "wrapped game-frame interval cannot finalize");
+}
+
+void TestRomLoopCheckpointFrameTimeline() {
+  CheckpointFrameTimeline timeline;
+  Require(timeline.CaptureFrame(866) == 866,
+          "pre-handshake checkpoint labels fall back to raw frames");
+  Require(timeline.SetLogicalFrame(840),
+          "the first logical frame invalidates raw-frame checkpoints");
+  Require(timeline.CaptureFrame(866) == 840,
+          "checkpoint labels use the generation-local logical frame");
+  Require(!timeline.SetLogicalFrame(841) && timeline.CaptureFrame(867) == 841,
+          "monotonic logical frames preserve the current checkpoint ring");
+  Require(!timeline.SetLogicalFrame(841),
+          "repeated before-frame hooks do not invalidate checkpoints");
+  Require(timeline.SetLogicalFrame(840),
+          "a backwards logical frame invalidates the previous generation");
+  timeline.Reset();
+  Require(timeline.CaptureFrame(12) == 12,
+          "reset restores raw-frame fallback until the next handshake");
 }
 
 void TestRestoreChain() {
@@ -293,6 +313,7 @@ int main() {
   TestCheckpointBytes();
   TestRollbackPolicies();
   TestRomLoopTransactionCompletionPolicy();
+  TestRomLoopCheckpointFrameTimeline();
   TestRestoreChain();
   TestPrepareSaveModes();
   TestPreimageRestoreAndPrune();

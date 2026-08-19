@@ -711,6 +711,7 @@ void NDS::Reset()
     NSMLGameRAMReplayDisplayStartFrame = 0xFFFFFFFF;
     NSMLGameRAMCheckpoints.clear();
     NSMLNextGameRAMCheckpoint = 0;
+    NSMLGameRAMCheckpointTimeline.Reset();
     NSMLGameRAMRestoreUs = 0;
     NSMLGameRAMRestoreBytes = 0;
     LagFrameFlag = false;
@@ -2488,7 +2489,8 @@ void NDS::ApplyNSMLPendingGameRAMRestore()
             return;
         }
         if (!NSMLGameRAMHistoryReachedExitGate)
-            CaptureNSMLGameRAMCheckpointAtGate(NumFrames);
+            CaptureNSMLGameRAMCheckpointAtGate(
+                NSMLGameRAMCheckpointTimeline.CaptureFrame(NumFrames));
         return;
     }
     if (!MainRAM)
@@ -2570,6 +2572,19 @@ void NDS::ApplyNSMLPendingGameRAMRestore()
     NSMLGameRAMRestoreData = nullptr;
     NSMLGameRAMRestoreLength = 0;
     NSMLGameRAMRestoreOwnedBuffer.clear();
+}
+
+void NDS::SetNSMLGameRAMCheckpointFrame(u32 logicalFrame)
+{
+    if (!NSMLGameRAMCheckpointTimeline.SetLogicalFrame(logicalFrame))
+        return;
+
+    // Checkpoints captured while the start-ready handshake was still using
+    // raw emulator frames do not belong to the generation-local logical
+    // timeline. A backwards logical frame likewise marks a new generation.
+    for (auto& checkpoint : NSMLGameRAMCheckpoints)
+        checkpoint.Valid = false;
+    NSMLNextGameRAMCheckpoint = 0;
 }
 
 void NDS::CaptureNSMLGameRAMCheckpointAtGate(u32 displayFrame)
