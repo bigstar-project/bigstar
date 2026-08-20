@@ -35,8 +35,13 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const BRIDGE_CONNECT_TIMEOUT: Duration = Duration::from_secs(45);
 const BRIDGE_CONNECT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const AI_OBSERVATION_V3_LOG: &str = "ai-observations-v3.jsonl";
-const AI_OBSERVATION_V3_GZIP_LOG: &str = "ai-observations-v3.jsonl.gz";
-const AI_OBSERVATION_V3_GZIP_TEMP: &str = "ai-observations-v3.jsonl.gz.tmp";
+const DETAILED_TEXT_LOGS: &[&str] = &[
+    "melonds-events.jsonl",
+    "melonds-phase-events.jsonl",
+    "bridge-events.jsonl",
+    "melonds-watchdog.jsonl",
+    "melonds-game-state.csv",
+];
 
 pub(crate) struct LaunchPaths {
     pub(crate) log_dir: PathBuf,
@@ -227,7 +232,7 @@ fn stop_existing_inner(state: &AppState, report_unresolved: bool) -> Result<(), 
         );
         terminate_child(&mut session.melon);
         terminate_child(&mut session.bridge);
-        let compression_result = finalize_ai_observation_v3_log(&session.log_dir);
+        let compression_result = finalize_completed_session_logs(&session.log_dir);
         #[cfg(feature = "insiders-edition")]
         {
             let mvl_results = read_mvl_results(&session.log_dir);
@@ -327,9 +332,9 @@ fn refresh_session_processes(
     );
 
     let compression_result = if melon != "running" {
-        finalize_ai_observation_v3_log(&session.log_dir)
+        finalize_completed_session_logs(&session.log_dir)
     } else {
-        Ok(false)
+        Ok(())
     };
     let mvl_results = read_mvl_results(&session.log_dir);
     #[cfg(feature = "insiders-edition")]
@@ -365,37 +370,53 @@ fn record_process_state_change(log_dir: &Path, source: &str, previous: &mut Stri
 
 pub(crate) fn finalize_ai_observation_v3_log(log_dir: &Path) -> Result<bool, String> {
     let source_path = log_dir.join(AI_OBSERVATION_V3_LOG);
+    finalize_complete_line_log(&source_path, "AI observation v3 log")
+}
+
+pub(crate) fn finalize_detailed_text_logs(log_dir: &Path) -> Result<usize, String> {
+    let mut compressed = 0;
+    for file_name in DETAILED_TEXT_LOGS {
+        if finalize_complete_line_log(&log_dir.join(file_name), file_name)? {
+            compressed += 1;
+        }
+    }
+    Ok(compressed)
+}
+
+fn finalize_completed_session_logs(log_dir: &Path) -> Result<(), String> {
+    finalize_ai_observation_v3_log(log_dir)?;
+    finalize_detailed_text_logs(log_dir)?;
+    Ok(())
+}
+
+fn finalize_complete_line_log(source_path: &Path, log_name: &str) -> Result<bool, String> {
     if !source_path.exists() {
         return Ok(false);
     }
     if !source_path.is_file() {
         return Err(format!(
-            "AI observation v3 log がファイルではありません: {}",
+            "{log_name} がファイルではありません: {}",
             source_path.display()
         ));
     }
 
-    let gzip_path = log_dir.join(AI_OBSERVATION_V3_GZIP_LOG);
-    let temp_path = log_dir.join(AI_OBSERVATION_V3_GZIP_TEMP);
+    let gzip_path = path_with_suffix(source_path, ".gz");
+    let temp_path = path_with_suffix(source_path, ".gz.tmp");
     if temp_path.exists() {
         fs::remove_file(&temp_path).map_err(|err| {
             format!(
-                "古いAIログ圧縮一時ファイルを削除できません: {}: {err}",
+                "古い{log_name}圧縮一時ファイルを削除できません: {}: {err}",
                 temp_path.display()
             )
         })?;
     }
 
     let result = (|| -> Result<(), String> {
-        let input = File::open(&source_path).map_err(|err| {
-            format!(
-                "AI observation v3 log を開けません: {}: {err}",
-                source_path.display()
-            )
-        })?;
+        let input = File::open(source_path)
+            .map_err(|err| format!("{log_name} を開けません: {}: {err}", source_path.display()))?;
         let output = File::create(&temp_path).map_err(|err| {
             format!(
-                "AI observation v3 gzip一時ファイルを作成できません: {}: {err}",
+                "{log_name} gzip一時ファイルを作成できません: {}: {err}",
                 temp_path.display()
             )
         })?;
@@ -406,7 +427,7 @@ pub(crate) fn finalize_ai_observation_v3_log(log_dir: &Path) -> Result<bool, Str
             line.clear();
             let bytes_read = reader
                 .read_until(b'\n', &mut line)
-                .map_err(|err| format!("AI observation v3 log を読み込めません: {err}"))?;
+                .map_err(|err| format!("{log_name} を読み込めません: {err}"))?;
             if bytes_read == 0 {
                 break;
             }
@@ -415,32 +436,32 @@ pub(crate) fn finalize_ai_observation_v3_log(log_dir: &Path) -> Result<bool, Str
             }
             encoder
                 .write_all(&line)
-                .map_err(|err| format!("AI observation v3 log をgzip圧縮できません: {err}"))?;
+                .map_err(|err| format!("{log_name} をgzip圧縮できません: {err}"))?;
         }
         let output = encoder
             .finish()
-            .map_err(|err| format!("AI observation v3 gzipを完了できません: {err}"))?;
+            .map_err(|err| format!("{log_name} gzipを完了できません: {err}"))?;
         output
             .sync_all()
-            .map_err(|err| format!("AI observation v3 gzipを同期できません: {err}"))?;
+            .map_err(|err| format!("{log_name} gzipを同期できません: {err}"))?;
 
         if gzip_path.exists() {
             fs::remove_file(&gzip_path).map_err(|err| {
                 format!(
-                    "既存のAI observation v3 gzipを置換できません: {}: {err}",
+                    "既存の{log_name} gzipを置換できません: {}: {err}",
                     gzip_path.display()
                 )
             })?;
         }
         fs::rename(&temp_path, &gzip_path).map_err(|err| {
             format!(
-                "AI observation v3 gzipを確定できません: {}: {err}",
+                "{log_name} gzipを確定できません: {}: {err}",
                 gzip_path.display()
             )
         })?;
-        fs::remove_file(&source_path).map_err(|err| {
+        fs::remove_file(source_path).map_err(|err| {
             format!(
-                "圧縮済みAI observation v3元ログを削除できません: {}: {err}",
+                "圧縮済み{log_name}元ログを削除できません: {}: {err}",
                 source_path.display()
             )
         })?;
@@ -451,6 +472,12 @@ pub(crate) fn finalize_ai_observation_v3_log(log_dir: &Path) -> Result<bool, Str
         let _ = fs::remove_file(&temp_path);
     }
     result.map(|()| true)
+}
+
+fn path_with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut value = path.as_os_str().to_os_string();
+    value.push(suffix);
+    PathBuf::from(value)
 }
 
 pub(crate) fn should_show_game_state_mismatch_in_gui(mismatch: &GameStateMismatch) -> bool {

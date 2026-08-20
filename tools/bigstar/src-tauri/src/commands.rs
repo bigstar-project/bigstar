@@ -50,13 +50,18 @@ const MAX_LOG_ARCHIVE_BYTES: u64 = 10 * 1024 * 1024;
 const LOG_ARCHIVE_UPLOAD_PART_BYTES: usize = 5 * 1024 * 1024;
 const DETAILED_LOG_FILES: &[&str] = &[
     "bridge-events.jsonl",
+    "bridge-events.jsonl.gz",
     "melonds-events.jsonl",
+    "melonds-events.jsonl.gz",
     "melonds-game-state.csv",
+    "melonds-game-state.csv.gz",
     "melonds-hang.dmp",
     "melonds-performance.jsonl",
     "melonds-phase-events.jsonl",
+    "melonds-phase-events.jsonl.gz",
     "melonds.stdout.txt",
     "melonds-watchdog.jsonl",
+    "melonds-watchdog.jsonl.gz",
 ];
 const DETAILED_LOG_DIRS: &[&str] = &["screens"];
 

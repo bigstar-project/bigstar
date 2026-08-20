@@ -1,7 +1,9 @@
+use std::collections::VecDeque;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
+use flate2::read::GzDecoder;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
@@ -602,12 +604,11 @@ fn add_sanitized_text_file<W: Write + std::io::Seek>(
     sensitive_values: &[String],
     included_files: &mut Vec<String>,
 ) -> Result<(), String> {
-    let content = fs::read(source).unwrap_or_default();
+    let content = read_text_log_tail(source, max_bytes)?;
     if content.is_empty() {
         return Ok(());
     }
-    let start = content.len().saturating_sub(max_bytes);
-    let text = String::from_utf8_lossy(&content[start..]);
+    let text = String::from_utf8_lossy(&content);
     let sanitized = sanitize_feedback_text(&text, max_bytes, sensitive_values);
     add_bytes(
         zip,
@@ -616,6 +617,60 @@ fn add_sanitized_text_file<W: Write + std::io::Seek>(
         sanitized.as_bytes(),
         included_files,
     )
+}
+
+fn read_text_log_tail(source: &Path, max_bytes: usize) -> Result<Vec<u8>, String> {
+    let reader: Box<dyn Read> = if source.is_file() {
+        Box::new(
+            File::open(source)
+                .map_err(|err| format!("ログを開けません {}: {err}", source.display()))?,
+        )
+    } else {
+        let gzip_path = path_with_suffix(source, ".gz");
+        if !gzip_path.is_file() {
+            return Ok(Vec::new());
+        }
+        let file = File::open(&gzip_path)
+            .map_err(|err| format!("gzipログを開けません {}: {err}", gzip_path.display()))?;
+        Box::new(GzDecoder::new(file))
+    };
+    read_tail(reader, max_bytes)
+        .map_err(|err| format!("ログ末尾を読み込めません {}: {err}", source.display()))
+}
+
+fn read_tail(mut reader: impl Read, max_bytes: usize) -> std::io::Result<Vec<u8>> {
+    if max_bytes == 0 {
+        return Ok(Vec::new());
+    }
+    let mut tail = VecDeque::with_capacity(max_bytes);
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        let chunk = &buffer[..read];
+        if chunk.len() >= max_bytes {
+            tail.clear();
+            tail.extend(&chunk[chunk.len() - max_bytes..]);
+            continue;
+        }
+        let overflow = tail
+            .len()
+            .saturating_add(chunk.len())
+            .saturating_sub(max_bytes);
+        if overflow > 0 {
+            tail.drain(..overflow);
+        }
+        tail.extend(chunk);
+    }
+    Ok(tail.make_contiguous().to_vec())
+}
+
+fn path_with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut value = path.as_os_str().to_os_string();
+    value.push(suffix);
+    PathBuf::from(value)
 }
 
 fn add_detailed_diagnostics<W: Write + std::io::Seek>(

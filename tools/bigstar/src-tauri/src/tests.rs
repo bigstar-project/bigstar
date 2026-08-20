@@ -20,10 +20,10 @@ use crate::paths::{
 };
 use crate::processes::{
     build_bridge_command, build_melon_command, capture_log_rotation_limit,
-    finalize_ai_observation_v3_log, melon_env, read_bridge_diagnostics, read_melon_diagnostics,
-    read_mvl_results, remove_inherited_melonds_env_keys, run_bridge_signaling_smoke,
-    session_status_inner, should_show_game_state_mismatch_in_gui, start_match_resolved,
-    stop_existing, LaunchPaths,
+    finalize_ai_observation_v3_log, finalize_detailed_text_logs, melon_env,
+    read_bridge_diagnostics, read_melon_diagnostics, read_mvl_results,
+    remove_inherited_melonds_env_keys, run_bridge_signaling_smoke, session_status_inner,
+    should_show_game_state_mismatch_in_gui, start_match_resolved, stop_existing, LaunchPaths,
 };
 use crate::roms::{
     reusable_rom_is_current, reusable_rom_marker_path, validate_rom_save, write_reusable_rom_marker,
@@ -232,6 +232,48 @@ fn failed_ai_observation_v3_compression_keeps_source_log() {
     assert!(source.is_file());
     assert!(gzip.is_dir());
     assert!(!dir.join("ai-observations-v3.jsonl.gz.tmp").exists());
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn finalized_detailed_text_logs_are_gzipped_and_incomplete_tails_are_discarded() {
+    let dir = temp_log_dir("detailed-text-gzip");
+    let file_names = [
+        "melonds-events.jsonl",
+        "melonds-phase-events.jsonl",
+        "bridge-events.jsonl",
+        "melonds-watchdog.jsonl",
+        "melonds-game-state.csv",
+    ];
+    let complete = "first\nsecond\n";
+    for file_name in file_names {
+        fs::write(dir.join(file_name), format!("{complete}incomplete"))
+            .expect("write detailed text log");
+    }
+    fs::write(dir.join("melonds-performance.jsonl"), "performance\n")
+        .expect("write retained performance log");
+
+    assert_eq!(
+        finalize_detailed_text_logs(&dir).expect("compress detailed text logs"),
+        file_names.len()
+    );
+    for file_name in file_names {
+        assert!(!dir.join(file_name).exists());
+        let file = fs::File::open(dir.join(format!("{file_name}.gz")))
+            .expect("open gzip detailed text log");
+        let mut decoder = flate2::read::GzDecoder::new(file);
+        let mut decoded = String::new();
+        decoder
+            .read_to_string(&mut decoded)
+            .expect("decode gzip detailed text log");
+        assert_eq!(decoded, complete);
+    }
+    assert!(dir.join("melonds-performance.jsonl").is_file());
+    assert_eq!(
+        finalize_detailed_text_logs(&dir).expect("finalize detailed logs again"),
+        0
+    );
 
     let _ = fs::remove_dir_all(dir);
 }
@@ -1114,6 +1156,13 @@ fn insiders_feedback_archive_includes_sanitized_diagnostics_and_png_screenshots(
     fs::write(dir.join("screens").join("notes.txt"), b"not a screenshot")
         .expect("write non-png file");
 
+    assert_eq!(
+        finalize_detailed_text_logs(&dir).expect("compress detailed diagnostics"),
+        5
+    );
+    assert!(dir.join("melonds-events.jsonl.gz").is_file());
+    assert!(!dir.join("melonds-events.jsonl").exists());
+
     let archive = create_user_log_archive_with_diagnostics(&dir).expect("create insiders archive");
     let file = fs::File::open(&archive).expect("open archive");
     let mut zip = zip::ZipArchive::new(file).expect("read archive");
@@ -1313,6 +1362,10 @@ fn cleanup_detailed_logs_removes_only_heavy_detail_files_and_skips_active_log_di
     fs::write(old_run.join("melonds.stdout.txt"), "stdout").expect("write melon stdout");
     fs::write(old_run.join("melonds-performance.jsonl"), "performance")
         .expect("write performance log");
+    fs::write(old_run.join("melonds-phase-events.jsonl.gz"), "phase gzip")
+        .expect("write compressed phase log");
+    fs::write(old_run.join("melonds-game-state.csv.gz"), "state gzip")
+        .expect("write compressed game state log");
     fs::write(old_run.join("screens").join("frame.png"), "png").expect("write screenshot");
     fs::write(old_run.join("launcher.json"), "{}").expect("write retained launcher log");
     fs::write(old_run.join("bigstar-logs-existing.zip"), "zip").expect("write retained archive");
@@ -1322,13 +1375,15 @@ fn cleanup_detailed_logs_removes_only_heavy_detail_files_and_skips_active_log_di
 
     assert_eq!(response.scanned_log_dirs, 1);
     assert_eq!(response.skipped_active_log_dirs, 1);
-    assert_eq!(response.deleted_files, 5);
+    assert_eq!(response.deleted_files, 7);
     assert_eq!(response.deleted_dirs, 1);
     assert!(response.freed_bytes > 0);
     assert!(!old_run.join("melonds-events.jsonl").exists());
     assert!(!old_run.join("bridge-events.jsonl").exists());
     assert!(!old_run.join("melonds.stdout.txt").exists());
     assert!(!old_run.join("melonds-performance.jsonl").exists());
+    assert!(!old_run.join("melonds-phase-events.jsonl.gz").exists());
+    assert!(!old_run.join("melonds-game-state.csv.gz").exists());
     assert!(!old_run.join("screens").exists());
     assert!(old_run.join("launcher.json").exists());
     assert!(old_run.join("bigstar-logs-existing.zip").exists());
@@ -1496,7 +1551,9 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
     assert_eq!(launcher["runtime"]["os"], std::env::consts::OS);
 
     let ai_log = dir.join("logs").join("ai-observations-v3.jsonl");
+    let detailed_log = dir.join("logs").join("melonds-events.jsonl");
     fs::write(&ai_log, "{\"frame\":1}\n").expect("write active AI log");
+    fs::write(&detailed_log, "{\"event\":\"active\"}\n").expect("write active detailed log");
     stop_existing(&state).expect("stop fake match");
     let status = session_status_inner(&state).expect("status after stop");
     assert!(!status.active);
@@ -1505,6 +1562,8 @@ fn start_match_resolved_launches_processes_and_stop_clears_session() {
         .join("logs")
         .join("ai-observations-v3.jsonl.gz")
         .is_file());
+    assert!(!detailed_log.exists());
+    assert!(dir.join("logs").join("melonds-events.jsonl.gz").is_file());
 
     let _ = fs::remove_dir_all(dir);
 }
