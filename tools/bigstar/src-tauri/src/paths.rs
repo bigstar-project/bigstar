@@ -43,6 +43,10 @@ fn chrono_like_stamp() -> String {
 static LOG_DIR_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 pub(crate) fn cleanup_log_retention(app: &AppHandle) -> Result<(), String> {
+    if !automatic_log_retention_enabled() {
+        return Ok(());
+    }
+
     const MAX_SESSIONS: usize = 50;
     const MAX_TOTAL_BYTES: u64 = 500 * 1024 * 1024;
     const MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
@@ -82,6 +86,10 @@ pub(crate) fn cleanup_log_retention(app: &AppHandle) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+pub(crate) const fn automatic_log_retention_enabled() -> bool {
+    !cfg!(feature = "insiders-edition")
 }
 
 fn directory_size(path: &Path) -> u64 {

@@ -14,7 +14,10 @@ use crate::crash_report::{
 use crate::models::{
     CourseMode, GameSettings, GameStateMismatch, LaunchRequest, Lives, Role, RomIdentity,
 };
-use crate::paths::{allowed_log_dir, load_match_history_document_content, migrate_legacy_app_data};
+use crate::paths::{
+    allowed_log_dir, automatic_log_retention_enabled, load_match_history_document_content,
+    migrate_legacy_app_data,
+};
 use crate::processes::{
     build_bridge_command, build_melon_command, capture_log_rotation_limit,
     finalize_ai_observation_v3_log, melon_env, read_bridge_diagnostics, read_melon_diagnostics,
@@ -578,6 +581,14 @@ fn child_log_rotation_is_disabled_only_for_insiders() {
     } else {
         assert_eq!(limit, Some(8 * 1024 * 1024));
     }
+}
+
+#[test]
+fn automatic_log_retention_is_disabled_only_for_insiders() {
+    assert_eq!(
+        automatic_log_retention_enabled(),
+        !cfg!(feature = "insiders-edition")
+    );
 }
 
 #[test]
