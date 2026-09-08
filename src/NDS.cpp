@@ -2549,11 +2549,10 @@ void NDS::ApplyNSMLPendingGameRAMRestore()
     const u32 configuredHistoryCount = ARM9Read32(historyCountAddr);
     const u32 historyStartFrame = ARM9Read32(historyStartFrameAddr);
     const u32 preRestoreGameFrame = ARM9Read32(gameFrameAddr);
-    // History count is expressed in the generation-local display timeline and
-    // deliberately includes the input gate after the current logical frame.
-    // Clamping it to the pre-restore game frame drops that final tick. A first
-    // correction can appear to recover, but its rebuilt checkpoint ring then
-    // starts the next correction one game tick behind.
+    // History covers the inclusive restore..current logical input interval.
+    // Its last tick replaces this outer frame's normal game tick. Preserve
+    // that count when restoring RAM; do not add a future tick to prebuild the
+    // next checkpoint or silently truncate the requested input interval.
 
     std::array<u8, controlLength> control {};
     memcpy(control.data(), MainRAM + controlOffset, control.size());

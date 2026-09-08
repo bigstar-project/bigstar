@@ -1,6 +1,7 @@
 #include "NsmbRollbackStore.h"
 #include "NSMLGameRAMRollback.h"
 
+#include <array>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -118,20 +119,68 @@ void TestRomLoopTransactionCompletionPolicy() {
 }
 
 void TestRomLoopHistoryBoundaryPolicy() {
-  Require(RequiredHistoryCount(100, 100) == 2,
-          "same-frame history includes the following logical input gate");
-  Require(RequiredHistoryCount(100, 105) == 7,
-          "history replays from the checkpoint through current plus one");
+  Require(RequiredHistoryCount(100, 100) == 1,
+          "same-frame correction replaces exactly the current game tick");
+  Require(RequiredHistoryCount(100, 105) == 6,
+          "history replays the checkpoint through the current input inclusively");
   Require(RequiredHistoryCount(105, 100) == 0,
           "backwards history range is rejected");
   Require(RequiredHistoryCount(0xFFFFFFFE, 0xFFFFFFFF) == 0,
-          "history range that cannot represent the following frame is rejected");
+          "the no-frame sentinel cannot be a replay endpoint");
   Require(RequiredHistoryCount(0, 0xFFFFFFFE) == 0,
-          "overflowing history count is rejected");
-  Require(MaxRollbackDepthForHistory(12) == 10,
-          "twelve history entries leave room for both inclusive boundaries");
+          "the no-frame sentinel cannot be a history count");
+  Require(RequiredHistoryCount(1, 0xFFFFFFFE) == 0xFFFFFFFE,
+          "the largest representable non-sentinel count is accepted");
+  Require(MaxRollbackDepthForHistory(12) == 11,
+          "twelve entries hold eleven past ticks and the current tick");
+  Require(MaxRollbackDepthForHistory(0) == 0,
+          "empty history cannot accept rollback depth");
   Require(MaxRollbackDepthForHistory(1) == 0,
           "undersized history cannot accept rollback depth");
+}
+
+void TestRomLoopAsymmetricCorrectionsPreserveTimeline() {
+  struct GameState {
+    melonDS::u32 Tick = 675;
+    melonDS::u32 Value = 0;
+  };
+  const auto step = [](GameState &state, melonDS::u32 inputFrame) {
+    ++state.Tick;
+    state.Value = state.Value * 31 + inputFrame;
+  };
+  constexpr melonDS::u32 firstFrame = 895;
+  constexpr size_t frameCount = 80;
+  std::array<std::array<GameState, frameCount>, 2> checkpoints;
+  std::array<GameState, 2> peers;
+  GameState reference;
+  for (size_t index = 0; index < frameCount; ++index) {
+    const auto frame = firstFrame + static_cast<melonDS::u32>(index);
+    step(reference, frame);
+    for (size_t peer = 0; peer < peers.size(); ++peer) {
+      checkpoints[peer][index] = peers[peer];
+      // Different correction schedules exercise recaptured checkpoints and
+      // catch a per-correction extra tick that symmetric runs can conceal.
+      if (index >= 7 && index % (peer == 0 ? 4 : 9) == 0) {
+        const size_t depth = 1 + index % 7;
+        const size_t restoreIndex = index - depth;
+        const auto restoreFrame =
+            firstFrame + static_cast<melonDS::u32>(restoreIndex);
+        peers[peer] = checkpoints[peer][restoreIndex];
+        const auto count = RequiredHistoryCount(restoreFrame, frame);
+        for (melonDS::u32 tick = 0; tick < count; ++tick) {
+          Require(restoreIndex + tick <= index,
+                  "correction must never execute a future logical input");
+          checkpoints[peer][restoreIndex + tick] = peers[peer];
+          step(peers[peer], restoreFrame + tick);
+        }
+      } else {
+        step(peers[peer], frame);
+      }
+      Require(peers[peer].Tick == reference.Tick &&
+                  peers[peer].Value == reference.Value,
+              "asymmetric corrections must match uninterrupted game progress");
+    }
+  }
 }
 
 void TestRomLoopCheckpointFrameTimeline() {
@@ -333,6 +382,7 @@ int main() {
   TestRollbackPolicies();
   TestRomLoopTransactionCompletionPolicy();
   TestRomLoopHistoryBoundaryPolicy();
+  TestRomLoopAsymmetricCorrectionsPreserveTimeline();
   TestRomLoopCheckpointFrameTimeline();
   TestRestoreChain();
   TestPrepareSaveModes();

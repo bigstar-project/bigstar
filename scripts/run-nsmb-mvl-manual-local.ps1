@@ -38,6 +38,15 @@ param(
     [int]$RollbackPredictionHorizonFrames = 0,
     [int]$RollbackHorizonTimeoutMs = 60000,
     [switch]$RollbackResimulate,
+    [ValidateSet("both", "host", "client")]
+    [string]$RollbackPredictionProbeRole = "both",
+    [int]$RollbackPredictionProbeModulo = 0,
+    [int]$RollbackPredictionProbeOffset = 0,
+    [int]$RollbackPredictionProbeLimit = -1,
+    [int]$RollbackPredictionProbeStartFrame = 0,
+    [int]$RollbackPredictionProbeEndFrame = 0,
+    [string]$RollbackPredictionProbeKeyMask = "0x1",
+    [int]$RollbackPredictionProbeConfirmDelayFrames = 0,
     [switch]$WorldStateTraceObjectLifecycles,
     [switch]$WorldStateTraceActorInternals,
     [switch]$WorldStateTraceEffects,
@@ -844,8 +853,30 @@ function Set-IpcSendLogEnv {
     }
 }
 
+function Set-RollbackPredictionProbeEnvForChild {
+    param([string]$Role)
+
+    $enabled = $Rollback -and $RollbackPredictionProbeModulo -gt 0 -and (
+        $RollbackPredictionProbeRole -eq "both" -or $RollbackPredictionProbeRole -eq $Role)
+    $settings = @{
+        MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_MODULO = $RollbackPredictionProbeModulo
+        MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_OFFSET = $RollbackPredictionProbeOffset
+        MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_LIMIT = $RollbackPredictionProbeLimit
+        MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_START_FRAME = $RollbackPredictionProbeStartFrame
+        MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_END_FRAME = $RollbackPredictionProbeEndFrame
+        MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_KEY_MASK = $RollbackPredictionProbeKeyMask
+        MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_DELAY_FRAMES = $RollbackPredictionProbeConfirmDelayFrames
+    }
+    foreach ($entry in $settings.GetEnumerator()) {
+        $value = if ($enabled) { [string]$entry.Value } else { $null }
+        [Environment]::SetEnvironmentVariable($entry.Key, $value, "Process")
+    }
+    Remove-Item Env:\MELONDS_NSML_ROLLBACK_PREDICTION_PROBE_CONFIRM_AFTER_ONE_FRAME -ErrorAction SilentlyContinue
+}
+
 $hostProc = $null
 if (-not $ClientOnly) {
+    Set-RollbackPredictionProbeEnvForChild -Role "host"
     Set-AIPlayLogEnv -Path $HostAIPlayLog -ObservationV3Path $HostAIObservationV3Log
     Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeHostInput)
     Set-PerformanceLogEnv -RoleLogDir $hostLog
@@ -884,6 +915,7 @@ if (-not $ClientOnly) {
     }
 }
 
+Set-RollbackPredictionProbeEnvForChild -Role "client"
 Set-AIPlayLogEnv -Path $ClientAIPlayLog -ObservationV3Path $ClientAIObservationV3Log
 Set-PolledInputNeutralizeEnv -Enabled ([bool]$NeutralizeClientInput)
 Set-PerformanceLogEnv -RoleLogDir $clientLog

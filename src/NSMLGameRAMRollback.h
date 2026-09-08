@@ -8,20 +8,24 @@ namespace melonDS::NSMLGameRAMRollback
 
 constexpr u32 RequiredHistoryCount(u32 restoreFrame, u32 currentFrame)
 {
-    // The restored checkpoint is the state at the start of restoreFrame. The
-    // ROM loop must replay through the input gate after currentFrame so the
-    // corrected checkpoint ring owns the next logical frame as well.
+    // A checkpoint precedes the input/update of restoreFrame. Replaying the
+    // inclusive [restoreFrame, currentFrame] interval replaces the current
+    // outer frame's normal game tick. Executing currentFrame + 1 as well would
+    // advance the game once more on every correction, while input/checkpoint
+    // labels still advance by one outer frame. The next normal gate captures
+    // the checkpoint for currentFrame + 1; it must not be replayed in advance.
     if (currentFrame < restoreFrame || currentFrame == 0xFFFFFFFFu)
         return 0;
     const u32 rollbackDepth = currentFrame - restoreFrame;
+    // Keep the no-frame sentinel out of both the frame and count domains.
     if (rollbackDepth > 0xFFFFFFFDu)
         return 0;
-    return rollbackDepth + 2;
+    return rollbackDepth + 1;
 }
 
 constexpr u32 MaxRollbackDepthForHistory(u32 historyCapacity)
 {
-    return historyCapacity >= 2 ? historyCapacity - 2 : 0;
+    return historyCapacity != 0 ? historyCapacity - 1 : 0;
 }
 
 class CheckpointFrameTimeline
