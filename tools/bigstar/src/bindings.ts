@@ -26,6 +26,9 @@ export const commands = {
 	generateRoms: (request: GenerateRomRequest) => typedError<GenerateRomResponse, string>(__TAURI_INVOKE("generate_roms", { request })),
 	ensureRoms: (request: GenerateRomRequest) => typedError<GenerateRomResponse, string>(__TAURI_INVOKE("ensure_roms", { request })),
 	startMatch: (request: LaunchRequest_Deserialize) => typedError<LaunchResponse, string>(__TAURI_INVOKE("start_match", { request })),
+	startSoloTest: (request: SoloTestRequest) => typedError<SoloTestStatus, string>(__TAURI_INVOKE("start_solo_test", { request })),
+	stopSoloTest: () => typedError<SoloTestStatus, string>(__TAURI_INVOKE("stop_solo_test")),
+	getSoloTestStatus: () => typedError<SoloTestStatus, string>(__TAURI_INVOKE("get_solo_test_status")),
 	stopMatch: () => typedError<null, string>(__TAURI_INVOKE("stop_match")),
 	sessionStatus: () => typedError<SessionStatus, string>(__TAURI_INVOKE("session_status")),
 	upsertMatchHistory: (record: MatchHistoryRecord) => typedError<null, string>(__TAURI_INVOKE("upsert_match_history", { record })),
@@ -466,6 +469,34 @@ export type SessionStatus = {
 export type ShowNewRoomNotificationRequest = {
 	title: string,
 	body: string,
+};
+
+export type SoloControl = "mario" | "luigi" | "both";
+
+export type SoloNetwork = {
+	delay_frames: number,
+	jitter_frames: number,
+	drop_every: number,
+};
+
+export type SoloTestRequest = {
+	stage: number,
+	controlled_player: SoloControl,
+	rollback_enabled: boolean,
+	input_delay_frames: number,
+	match_seed: string,
+	host: SoloNetwork,
+	client: SoloNetwork,
+};
+
+export type SoloTestStatus = {
+	active: boolean,
+	preparing: boolean,
+	log_dir: string | null,
+	host_pid: number | null,
+	client_pid: number | null,
+	error: string | null,
+	config: SoloTestRequest | null,
 };
 
 export type UploadLogArchiveRequest = {

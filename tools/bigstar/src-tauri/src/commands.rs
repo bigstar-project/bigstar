@@ -406,14 +406,12 @@ pub(crate) fn start_match(
     if session_is_active(state.inner())? {
         return Err("対戦中のため新しい対戦準備を開始できません".to_owned());
     }
-    if state
-        .launch_in_progress
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
+    let _launch_guard = state.begin_launch()?;
+    if session_status_inner(state.inner())?.active
+        || crate::solo_test::status_inner(state.inner())?.active
     {
-        return Err("別の対戦準備が進行中です".to_owned());
+        return Err("対戦またはひとり検証が実行中です".to_owned());
     }
-    let _launch_guard = LaunchPreparationGuard(&state.launch_in_progress);
     let settings = load_launcher_settings(&app)?;
     let source_rom = settings.base_rom_path.trim();
     if source_rom.is_empty() {
@@ -503,15 +501,7 @@ fn session_is_active(state: &AppState) -> Result<bool, String> {
     if state.launch_in_progress.load(Ordering::Acquire) {
         return Ok(true);
     }
-    session_status_inner(state).map(|status| status.active)
-}
-
-struct LaunchPreparationGuard<'a>(&'a std::sync::atomic::AtomicBool);
-
-impl Drop for LaunchPreparationGuard<'_> {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
-    }
+    Ok(session_status_inner(state)?.active || crate::solo_test::status_inner(state)?.active)
 }
 
 #[tauri::command]

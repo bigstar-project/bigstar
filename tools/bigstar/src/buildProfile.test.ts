@@ -15,6 +15,7 @@ describe('build profile', () => {
     expect(areAiDevToolsEnabled()).toBe(true);
     expect(currentRuntimeCapabilities()).toEqual({
       aiDevTools: true,
+      soloTest: false,
       automaticUnresolvedSessionReport: true,
       configurableSignalServer: true,
       feedbackSubmission: true,

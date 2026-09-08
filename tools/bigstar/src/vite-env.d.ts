@@ -11,6 +11,7 @@ declare var __BIGSTAR_EDITION_CONFIG__:
 declare var __BIGSTAR_RUNTIME_CAPABILITIES__:
   | {
       aiDevTools: boolean;
+      soloTest: boolean;
       automaticUnresolvedSessionReport: boolean;
       configurableSignalServer: boolean;
       feedbackSubmission: boolean;

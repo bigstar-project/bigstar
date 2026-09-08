@@ -11,6 +11,7 @@ import { HistoryView } from './launcher/HistoryView';
 import { LauncherShell } from './launcher/LauncherShell';
 import { OnboardingGate } from './launcher/OnboardingGate';
 import { SettingsView } from './launcher/SettingsView';
+import { SoloTestView } from './launcher/SoloTestView';
 import { useLauncherController } from './launcher/useLauncherController';
 
 export function App() {
@@ -45,6 +46,7 @@ export function App() {
           connectionStatus={launcher.connectionStatus}
           onCheckForUpdate={() => void launcher.actions.checkForUpdate()}
           onViewChange={launcher.changeView}
+          soloTestEnabled={currentRuntimeCapabilities().soloTest}
           aiDevToolsEnabled={aiDevToolsEnabled}
           romStatus={launcher.romStatus}
           updateBusy={launcher.updateBusy}
@@ -59,6 +61,12 @@ export function App() {
             updateField={launcher.updateField}
           />
           {aiDevToolsEnabled && aiViewerMounted ? <AIReplayViewer /> : null}
+          {currentRuntimeCapabilities().soloTest ? (
+            <SoloTestView
+              controller={launcher.soloTest}
+              blocked={launcher.soloTestBlocked}
+            />
+          ) : null}
           <HistoryView
             onOpenLogDir={launcher.actions.openLogDir}
             onUploadLogArchive={

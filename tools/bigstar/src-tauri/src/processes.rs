@@ -937,7 +937,11 @@ fn with_stdio(mut command: Command, log_dir: &Path, name: &str) -> Result<Comman
     Ok(command)
 }
 
-fn capture_child_stdio(child: &mut Child, log_dir: &Path, name: &str) -> Result<(), String> {
+pub(crate) fn capture_child_stdio(
+    child: &mut Child,
+    log_dir: &Path,
+    name: &str,
+) -> Result<(), String> {
     let stdout = child
         .stdout
         .take()
@@ -1298,14 +1302,14 @@ pub(crate) fn hide_child_console_window(command: &mut Command) {
 #[cfg(not(windows))]
 pub(crate) fn hide_child_console_window(_command: &mut Command) {}
 
-fn terminate_child(child: &mut Child) {
+pub(crate) fn terminate_child(child: &mut Child) {
     if matches!(child.try_wait(), Ok(None)) {
         let _ = child.kill();
     }
     let _ = child.wait();
 }
 
-fn process_state(child: &mut Child) -> Result<String, String> {
+pub(crate) fn process_state(child: &mut Child) -> Result<String, String> {
     match child.try_wait() {
         Ok(Some(status)) => Ok(format!("exited({})", status.code().unwrap_or(-1))),
         Ok(None) => Ok("running".into()),

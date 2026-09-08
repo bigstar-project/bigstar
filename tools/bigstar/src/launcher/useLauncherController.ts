@@ -37,6 +37,7 @@ import {
   updateQueryOptions,
 } from '../queries/launcherQueries';
 import { notifyNewRoomAvailable } from '../roomNotifications';
+import { useSoloTest } from '../soloTest';
 import {
   cleanupDetailedLogs as cleanupDetailedLogsCommand,
   createLogArchive as createLogArchiveCommand,
@@ -288,6 +289,9 @@ function defaultPlayerIds(
 export function useLauncherController() {
   const aiDevToolsEnabled = areAiDevToolsEnabled();
   const runtimeCapabilities = currentRuntimeCapabilities();
+  const soloTest = useSoloTest(runtimeCapabilities.soloTest);
+  const soloBusy =
+    soloTest.busy || soloTest.status.active || soloTest.status.preparing;
   const queryClient = useQueryClient();
   const defaultsQuery = useQuery(defaultsQueryOptions());
   const startupEnabledQuery = useQuery(startupEnabledQueryOptions());
@@ -306,7 +310,13 @@ export function useLauncherController() {
   });
   const [activeView, setActiveView] = useQueryState(
     'view',
-    parseAsStringLiteral(['battle', 'ai', 'history', 'settings'] as const)
+    parseAsStringLiteral([
+      'battle',
+      'ai',
+      'solo-test',
+      'history',
+      'settings',
+    ] as const)
       .withDefault('battle')
       .withOptions({ history: 'push' }),
   );
@@ -371,10 +381,10 @@ export function useLauncherController() {
           ? { phase: 'available', version: updateQuery.data.version }
           : { phase: 'none' };
 
-  const connectionActive = connectionStatus.active;
+  const connectionActive = connectionStatus.active || soloBusy;
   const updateRequired = isUpdateRequired(updateStatus);
   const summary: LauncherSummary = {
-    connectionActive,
+    connectionActive: connectionStatus.active,
     updateRequired,
     updateVersion: updateStatus.version,
   };
@@ -1570,6 +1580,7 @@ export function useLauncherController() {
   };
 
   const changeView = (view: View) => {
+    if (view === 'solo-test' && !runtimeCapabilities.soloTest) return;
     if (view === 'ai' && !aiDevToolsEnabled) {
       return;
     }
@@ -1577,14 +1588,30 @@ export function useLauncherController() {
   };
 
   useEffect(() => {
-    if (activeView === 'ai' && !aiDevToolsEnabled) {
+    if (
+      (activeView === 'ai' && !aiDevToolsEnabled) ||
+      (activeView === 'solo-test' && !runtimeCapabilities.soloTest)
+    ) {
       void setActiveView('battle');
     }
-  }, [activeView, aiDevToolsEnabled, setActiveView]);
+  }, [
+    activeView,
+    aiDevToolsEnabled,
+    runtimeCapabilities.soloTest,
+    setActiveView,
+  ]);
 
   return {
     actions,
     activeView,
+    soloTest,
+    soloTestBlocked:
+      connectionStatus.active ||
+      Boolean(hostedRoom) ||
+      matchmakingActionBusy ||
+      romEnsureBusy ||
+      romGenerationBusy ||
+      !defaultsLoaded,
     changeView,
     connectionActive,
     connectionStatus,
@@ -1603,6 +1630,7 @@ export function useLauncherController() {
         createRoomMutation.isPending ||
         joinRoomMutation.isPending,
       busy:
+        soloBusy ||
         matchmakingActionBusy ||
         createRoomMutation.isPending ||
         joinRoomMutation.isPending,

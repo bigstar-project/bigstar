@@ -477,6 +477,8 @@ dependencies = [
  "tauri-plugin-window-state",
  "tauri-specta",
  "tauri-winrt-notification",
+ "tempfile",
+ "toml 0.8.2",
  "uuid",
  "win32job",
  "zip 2.4.2",

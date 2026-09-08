@@ -84,6 +84,10 @@ test('local版とdistribution版の機能差を能力一覧として定義する
     distributionBuild,
   );
 
+  assert.equal(localInsiders.soloTest, true);
+  assert.equal(localPublic.soloTest, true);
+  assert.equal(distributionInsiders.soloTest, false);
+  assert.equal(distributionPublic.soloTest, false);
   assert.equal(localInsiders.configurableSignalServer, true);
   assert.equal(localInsiders.notifyOwnRooms, true);
   assert.equal(localInsiders.aiDevTools, true);

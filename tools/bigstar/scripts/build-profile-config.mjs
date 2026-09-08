@@ -45,6 +45,7 @@ export function validateBuildProfileConfig(config, expectedProfile) {
 
 export function resolveRuntimeCapabilities(edition, buildProfile) {
   return {
+    soloTest: buildProfile.profile === 'local',
     aiDevTools:
       edition.capabilities.aiDevToolsInLocalBuilds &&
       buildProfile.capabilities.developerTools,

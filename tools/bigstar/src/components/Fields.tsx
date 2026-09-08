@@ -264,12 +264,14 @@ export function NumberField({
 }
 
 export function SelectField({
+  disabled,
   icon,
   label,
   onChange,
   options,
   value,
 }: {
+  disabled?: boolean;
   icon?: ReactNode;
   label: string;
   value: string;
@@ -299,6 +301,7 @@ export function SelectField({
       })}
     >
       <Select.Root
+        disabled={disabled}
         collection={collection}
         // size="lg"
         value={[value]}

@@ -1,5 +1,6 @@
 export type AppEdition = 'insiders' | 'public';
 export type RuntimeCapabilities = {
+  soloTest: boolean;
   aiDevTools: boolean;
   automaticUnresolvedSessionReport: boolean;
   configurableSignalServer: boolean;
@@ -14,6 +15,8 @@ const insidersFallback = {
 };
 
 const localInsidersCapabilities: RuntimeCapabilities = {
+  // Solo testing requires an explicitly injected local build capability.
+  soloTest: false,
   aiDevTools: true,
   automaticUnresolvedSessionReport: true,
   configurableSignalServer: true,

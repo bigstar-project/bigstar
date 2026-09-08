@@ -14,6 +14,7 @@ mod processes;
 mod roms;
 mod save_bootstrap;
 mod settings;
+mod solo_test;
 mod state;
 mod windowing;
 
@@ -63,6 +64,9 @@ fn specta_builder() -> SpectaBuilder<tauri::Wry> {
         commands::generate_roms,
         commands::ensure_roms,
         commands::start_match,
+        solo_test::start_solo_test,
+        solo_test::stop_solo_test,
+        solo_test::get_solo_test_status,
         commands::stop_match,
         commands::session_status,
         commands::upsert_match_history,
@@ -190,6 +194,9 @@ fn start_session_supervisor(app: tauri::AppHandle) {
             if let Err(err) = processes::supervise_session_inner(state.inner()) {
                 diagnostics::record_backend_error(&app, "session_supervisor", &err);
                 eprintln!("session supervisor failed: {err}");
+            }
+            if let Err(err) = solo_test::status_inner(state.inner()) {
+                diagnostics::record_backend_error(&app, "solo_test_supervisor", &err);
             }
         });
 }

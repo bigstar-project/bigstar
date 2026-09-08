@@ -89,7 +89,9 @@ fn canonical_test_save() -> Vec<u8> {
     const GZIP_HEX: &str = "1f8b0800000000000400edd7410ac2301046e109d4c3b80b75513c848710bad095e009bc4e77b988e08d52699bf598424218dfb77dd012f80b4d385eaecffba31fe5ecbd179197fc9118df5d3affb09e7f71a8f0ee8ff560b46a6216f6572c18ad1af6d748305a3579fbbb4d697fa7effedcf60cb7eb590000e03781fb3fffbf6582d1aac9fbfed85fb160b46ad85f23c168d5e4ed8ffb3f0000f5cdd5f07dd200200000";
     let compressed = GZIP_HEX
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             u8::from_str_radix(std::str::from_utf8(pair).expect("gzip hex utf8"), 16)
                 .expect("gzip hex byte")

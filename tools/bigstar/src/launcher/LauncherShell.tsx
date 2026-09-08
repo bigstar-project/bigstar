@@ -3,6 +3,7 @@ import {
   ClockCounterClockwise,
   Flag,
   FlagCheckered,
+  Flask,
   Gear,
   Wrench,
 } from '@phosphor-icons/react';
@@ -102,6 +103,7 @@ function updateButtonClass(updateStatus: UpdateStatus) {
 }
 
 function viewTitle(view: View) {
+  if (view === 'solo-test') return 'ひとり検証';
   if (view === 'battle') {
     return '対戦';
   }
@@ -115,6 +117,7 @@ function viewTitle(view: View) {
 }
 
 function viewIcon(view: View) {
+  if (view === 'solo-test') return <Flask size={28} weight="fill" />;
   if (view === 'battle') {
     return (
       <Flag
@@ -151,6 +154,7 @@ export function LauncherShell({
   activeView,
   activityStatus,
   aiDevToolsEnabled = true,
+  soloTestEnabled = false,
   children,
   connectionStatus,
   onCheckForUpdate,
@@ -162,6 +166,7 @@ export function LauncherShell({
   activeView: View;
   activityStatus: { text: string; kind: StatusKind } | null;
   aiDevToolsEnabled?: boolean;
+  soloTestEnabled?: boolean;
   children: ReactNode;
   connectionStatus: { text: string; kind: StatusKind };
   onCheckForUpdate: () => void;
@@ -345,6 +350,16 @@ export function LauncherShell({
                     Ctrl+1
                   </Kbd>
                 </Tabs.Trigger>
+                {soloTestEnabled ? (
+                  <Tabs.Trigger
+                    aria-label="ひとり検証"
+                    className={sidebarTabClass}
+                    value="solo-test"
+                  >
+                    <Flask size={22} weight="fill" />
+                    <span>ひとり検証</span>
+                  </Tabs.Trigger>
+                ) : null}
                 {aiDevToolsEnabled ? (
                   <Tabs.Trigger
                     aria-label="AI"
