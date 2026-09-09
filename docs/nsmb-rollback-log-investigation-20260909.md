@@ -4,7 +4,27 @@
 
 修正済み。原因は、ROM-loopが入力の現在frameを処理した後に、さらに次frameを実行する `depth + 2` の境界だった。再実行をrestoreからcurrentまでの閉区間（`depth + 1`）へ修正し、次frameのcheckpointは次の通常gateで採取する。片側の訂正回数が増えるほどゲーム内部時刻だけが進む不具合を解消した。旧版との記録入力A/Bで因果関係を確認した。
 
-実際のWAN回線で双方を更新して対戦する確認は未実施だが、元WANのROMペアと両者の全キー入力を用いた再生、ひとり検証の記録入力、深度7、片側連続訂正、再戦、両playerの在庫放出を検証した。修正後の恒久的なplayer状態差は確認していない。WAN再生で移動床の生成が訂正完了frameに1標本早く観測され、次frameで一致する例が1件ある。無訂正対照にも死亡・復帰や移動床の1frame標本差があり、全観測値の毎frame完全一致までは主張しない。
+実際のWAN回線で双方を更新して対戦する確認は未実施だが、元WANのROMペアと両者の全キー入力を用いた再生、ひとり検証の記録入力、深度7、片側連続訂正、再戦、両playerの在庫放出を検証した。修正後の恒久的なplayer状態差は確認していない。WAN再生で残った移動床の1標本差は、9月10日の同一game tick・処理段階比較で採取位相差と確定した（次節）。raw標本の毎frame完全一致を同期判定の基準にはしない。
+
+## 移動床1標本差の原因確定（2026-09-10）
+
+結論: raw frame末尾の採取位相差。移動床の生成・最初の更新が論理game tickで先行した不具合ではない。通常実行のraw標本は描画処理の途中で、ROM-loop訂正後の標本は同じtickの描画終了・物体有効化・tick末尾まで通過している。`movingHazardFound` は有効な物体をプロセスリストから読むため、この境界をまたいだ比較で0/1差になった。9月9日の「生成が1frame早い」は正確ではなく、「採取時点が有効化の前後に分かれた」へ訂正する。
+
+再現は元WANのROM・stage・seed・記録入力を維持し、client checkpoint 2699、current 2700、深度1、2 tick訂正を固定した。元と同じCSV raw 2721のclientだけFound=1/X=`0x2a8000`、raw 2722では両側X=`0x2a8800`になる差を再現した。通常側のNDS内部frame 2720はCSV raw 2721に対応する。
+
+| 比較する処理段階 | 無訂正対照と訂正再実行の両方で観測した移動床 |
+| --- | --- |
+| game 2479、gameplay開始前 | 対象GUIDはまだ存在しない |
+| game 2479、gameplay終了・render開始/終了 | GUID `0x33`、state 0、X `0x2a8000`。ID一覧のみ、execute/render一覧には未登録 |
+| game 2480、tick-end境界 | 同GUID、state 1、同X。execute/render一覧へ登録済み |
+| game 2480、最初のgameplay開始 | 同GUID、state 1、X `0x2a8000` |
+| game 2480、gameplay終了・render開始 | X `0x2a8800`。最初の移動と描画対象になるtickは一致 |
+
+raw 2721で通常側は上表2行目、訂正側は3行目を記録する。実際のゲーム更新前後・render前後など、同じgame counterとmarkerで揃えたgame 2478〜2482の各role 50標本、計100標本では、GUID・状態・flags・位置・各プロセス一覧と、存在する移動床の先頭256 byteに差は0。次のframeで偶然再一致したという推測ではなく、同じ処理段階での状態一致を確認した。
+
+確認範囲はこの生成イベントの物体状態・実行/描画一覧・最初の更新であり、画面全pixelや全衝突条件の網羅試験ではない。ただしこのログ差を根拠にゲームの生成処理やrollback件数を変える必要はない。診断を改善するなら、同じlogical tick・同じ処理境界のsnapshotを比較する設計にする。raw標本だけから有効化前後の差を同期エラー扱いしない。
+
+作業物は `logs/codex-hazard-phase-20260910/` の `diagnostic.patch`、診断専用exe、各stageのRAM dump、`parse.py`、`compare-aligned.py`、`aligned-comparison.json`。runログは `logs/codex-rollback-fix-20260909/hazard-phase-{candidate,control,probe}/`。最初の自然遅延runはdump負荷で対象訂正が消えたため原因判定には使わず、固定probeを使った。診断なしの既存製品exeでも、元の左入力bit `0x20` を使う固定probeで同じraw 2721の差を再現した（`hazard-phase-clean-probe`）。診断負荷だけが生んだ差ではない。診断コードは製品ソースから除去し、通常exeを再ビルドして診断文字列が残らないことを確認、CTest 17件も再passした。GUI用sidecarは今回変更していない。
 
 ## 修正と検証結果
 
@@ -25,7 +45,7 @@
 | candidate-plus1-depth7 | 3300 | 76 / 85 | 送信遅延8〜9、実深度1〜7、phase recovery有効。訂正完了後の対照差0 |
 | manual-probe-client-depth5 | 2100 | 6 / 4 | client checkpoint 1798/1804/1810/1816を深度5で訂正、完了後の対照差0 |
 | manual-probe-host-depth7 | 2100 | 10 / 0 | host固定4訂正を含む深度7、完了後の対照差0 |
-| wan-input-candidate | 4300 | 112 / 95 | 元ROMペア、stage 0、seed、両roleの全キー入力を再現。対応差221固定、player状態の完了後差0。移動床生成1標本差は次frameで収束 |
+| wan-input-candidate | 4300 | 112 / 95 | 元ROMペア、stage 0、seed、両roleの全キー入力を再現。対応差221固定、player状態の完了後差0。移動床検出1標本差は次frameで収束（9月10日に採取位相差と確定） |
 | rematch-candidate | 4100 | 31 / 32 | frame 1957でgeneration 1へ移行、両generationで対応差220固定。再戦後も状態差は収束 |
 | stock-depth7 | 2200 | 2 / 2 | 両方向の送信遅延8〜9。Mario/Luigiの在庫2→0が両peerでraw 1838/1938と対照に完全一致。1351標本で主要状態の対照差・peer差0 |
 

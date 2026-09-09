@@ -1,10 +1,10 @@
 # NSMB Mario vs Luigi Online PoC
 
-## Live Slippi-style ROM-loop rollback milestone - updated 2026-09-09
+## Live Slippi-style ROM-loop rollback milestone - updated 2026-09-10
 
 - **Latest fix (2026-09-09):** WAN/solo実ログの恒久ずれは、訂正時に次のlogical inputまで実行する `depth + 2` による時間軸の前進だった。restore..currentを含む `depth + 1` へ修正した。元solo入力の旧版A/Bで、旧版の対応差220→166/191に対し、修正版は全区間220固定となり、未確定入力区間を除くplayer主要状態の対照差は0。8月26日の限定gateから一般化した境界評価を訂正する。
-- **Verification / current status:** 元solo入力3300frame、実深度7の人工遅延、片側固定連続訂正、元WANのROMペア・全キー入力4300frame、再戦4100frame、両player在庫放出2200frameが完了。再戦の各generation内でも時間軸対応差が固定され、在庫放出は双方とも対照と同じframeで発生。CMakeビルド・CTest 17件、GUI packageの `corepack pnpm run ci` がpass。修正版はリポジトリ内GUI sidecarへ反映済み。詳細と残る1frame移動床生成標本差は [2026-09-09調査・修正](nsmb-rollback-log-investigation-20260909.md) を参照。
-- **Next action:** 今回の恒久player同期破綻の修正と自動回帰検証は完了。任意の追加確認は双方を更新した実WAN対戦で、追加ROMやツール導入は不要。既知の音声・単発hitchは別件として残る。以下の8月記録は限定試験の履歴であり、現行の完成判定ではない。
+- **Verification / current status:** 元solo入力3300frame、実深度7の人工遅延、片側固定連続訂正、元WANのROMペア・全キー入力4300frame、再戦4100frame、両player在庫放出2200frameが完了。再戦の各generation内でも時間軸対応差が固定され、在庫放出は双方とも対照と同じframeで発生。CMakeビルド・CTest 17件、GUI packageの `corepack pnpm run ci` がpass。修正版はリポジトリ内GUI sidecarへ反映済み。詳細と原因確定済みの1frame移動床検出差は [2026-09-09調査・修正](nsmb-rollback-log-investigation-20260909.md) を参照。
+- **Next action:** 今回の恒久player同期破綻の修正と自動回帰検証は完了。移動床の1frame検出差は9月10日に採取位相差と確定した。固定訂正で再現し、同一game tick・処理段階の100標本で物体状態・実行/描画一覧・先頭256 byteが一致したため、ゲーム処理の追加変更は不要。診断改善を行う場合はsnapshotの論理tickと採取境界を揃える。更新版同士の実WAN対戦は未確認。追加ROMやツール導入は不要。既知の音声・単発hitchは別件として残る。以下の8月記録は限定試験の履歴であり、現行の完成判定ではない。
 
 - **Previous real-WAN diagnosis (2026-08-26):** Bigstar Insiders 0.11.4 host log `bigstar-1787668305155-39640-1`は、初戦generation 0を正常終了し、再戦generation 1も両peerがraw ready `23057`／shared epoch `840`で一致して開始した。bridge drop、disconnect、異世代packet、cannot-arm、checkpoint missing、failed/capped correctionはなく、再戦開始から最初のcritical差までの22訂正は全件arm/completeしている。それでも再戦logical frame `6840`から`playerGlobal=0`が58標本連続したため、再戦handshakeや通信切断ではなく、gameplay stateの実同期破綻と判定した。
 - **Confirmed divergence trigger:** host/Marioは再戦logical frames `6775..6781`でactive-low Xを含む`keys=0xBDF`を送信し、host側の`player0InventoryPowerup`はraw frame `29028`（logical `6811`）で`1 -> 0`になった。frame `6840`のremote `playerGlobal` hash `31900764AC850793`はhostが在庫を放出する前のhashと一致し、hostの放出後hashは`6A951E2F52621BC2`だった。従って今回の最初の意味的な差は、hostではストック放出が成立し、peer報告stateは放出前に残ったことである。直前の土管wrapや、その後のcoin取得は発火点ではない。
