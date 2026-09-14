@@ -1,6 +1,6 @@
 [package]
 name = "bigstar"
-version = "0.11.5"
+version = "0.11.6"
 description = "Bigstar online launcher"
 edition = "2021"
 
