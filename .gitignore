@@ -20,6 +20,9 @@ node_modules/
 *.layout
 *.o
 __pycache__/
+.venv-rl/
+.venv-rl-cpu/
+/tmp/
 melon_grc.c
 melon_grc.h
 melon.rc
