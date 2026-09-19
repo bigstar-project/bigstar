@@ -756,6 +756,72 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
         RollbackContext(), hooks, instanceID, frame, nds);
 }
 
+std::array<PacketBridge::GameTickInputQueue, 16> GameTickInputs;
+std::array<GameStateTraceWriter, 16> GameTickTraces;
+
+[[noreturn]] void FailGameTickInputs(int instanceID, const char* reason)
+{
+    std::fprintf(stderr, "NSMB GameTickInput: inst=%d fatal=%s\n", instanceID, reason);
+    std::fflush(stderr);
+    std::_Exit(70);
+}
+
+bool UseGameTickInputs(melonDS::NDS* nds)
+{
+    return G.Enabled && G.Input.NetplayOnly && !G.Rollback.Enabled
+        && G.RuntimePatch.PacketBridgeJitHelperPatchEnabled
+        && nds && nds->ARM9Read32(0x02001AC8) == 0x32505447;
+}
+
+void QueueGameTickInputs(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
+    int localPlayer, const InputState& local, const InputState& remote, bool hasRemote)
+{
+    auto& queue = GameTickInputs[instanceID];
+    const auto generation = G.NetplaySession.Handshake.Generation();
+    if (queue.Generation() != generation || !nds->NSMLGameStageCallback)
+    {
+        if (!PacketBridge::InstallGameTickInputBoundary(nds))
+            FailGameTickInputs(instanceID, "unsupported-input-gate");
+        queue.Reset(generation);
+        GameTickTraces[instanceID].Close();
+        // Optional per-generation trace, keyed by consumed input rather than
+        // display frames. This does not change the existing display trace.
+        if (const char* path = std::getenv("MELONDS_NSML_GAME_TICK_TRACE"))
+        {
+            const auto output = std::string(path) + "-g" + std::to_string(generation) + ".csv";
+            if (!GameTickTraces[instanceID].Open(output, false))
+                std::fprintf(stderr, "NSMB GameTickInput: cannot open trace %s\n", output.c_str());
+        }
+        std::printf("NSMB GameTickInput: inst=%d generation=%u start=%u boundary=input-begin\n",
+            instanceID, generation, frame);
+    }
+    if (!queue.Enqueue({frame, local, remote, hasRemote}))
+        FailGameTickInputs(instanceID, "noncontiguous-input-or-backlog-limit");
+    nds->NSMLGameStageCallback = [instanceID, nds, localPlayer, generation](melonDS::u32 marker) {
+        if (generation != G.NetplaySession.Handshake.Generation())
+            return;
+        auto& pending = GameTickInputs[instanceID];
+        if (marker == 2)
+        {
+            const auto input = pending.Consume();
+            if (!input)
+                FailGameTickInputs(instanceID, "input-queue-underflow");
+            PacketBridge::WriteJitScratchInputs(PacketBridgeContext(), PacketBridgeHooks(),
+                instanceID, input->Frame, nds, localPlayer, input->Local, input->Remote,
+                input->HasRemote, false);
+        }
+        else if (marker == 12 && pending.AppliedFrame())
+        {
+            const auto frame = *pending.AppliedFrame();
+            GameStateSync::Sync(GameStateSyncContext(), GameStateSyncHooks(),
+                instanceID, frame, nds);
+            if (GameTickTraces[instanceID].IsOpen())
+                GameTickTraces[instanceID].Write(instanceID, frame,
+                    ReadGameStateSample(nds), nullptr);
+        }
+    };
+}
+
 void WritePacketBridgeJitScratchIfNeeded(
     int instanceID,
     melonDS::u32 frame,
@@ -925,17 +991,21 @@ void WritePacketBridgeJitScratchIfNeeded(
     if (writeScratch)
     {
         const auto writeStart = std::chrono::steady_clock::now();
-        PacketBridge::WriteJitScratchInputs(
-            PacketBridgeContext(),
-            PacketBridgeHooks(),
-            instanceID,
-            logicalFrame,
-            nds,
-            localPlayer,
-            effectiveLocalInput,
-            remoteInput,
-            hasRemoteInput,
-            predictedRemoteInput);
+        if (UseGameTickInputs(nds))
+            QueueGameTickInputs(instanceID, logicalFrame, nds, localPlayer,
+                effectiveLocalInput, remoteInput, hasRemoteInput);
+        else
+            PacketBridge::WriteJitScratchInputs(
+                PacketBridgeContext(),
+                PacketBridgeHooks(),
+                instanceID,
+                logicalFrame,
+                nds,
+                localPlayer,
+                effectiveLocalInput,
+                remoteInput,
+                hasRemoteInput,
+                predictedRemoteInput);
         writeUs = static_cast<unsigned long long>(ElapsedUs(writeStart));
         wroteScratch = true;
     }
@@ -1365,6 +1435,9 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     const bool pauseInputNetplayForRestart = serviceNetworkForResult
         && MvlLifecycle::ShouldPauseInputForRestart(
             MvlLifecycleContext(), instanceID, nds);
+
+    if (pauseInputNetplayForRestart)
+        nds->NSMLGameStageCallback = {};
 
     RunBeforeFramePatchPhase(instanceID, inputFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Patch);
@@ -1814,9 +1887,10 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         AIObservationContext(), AIObservationHooks(), instanceID, logFrame, nds);
     const auto afterTrace = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "sync-game", instanceID, logFrame, logFrame, logFrame);
-    GameStateSync::Sync(
-        GameStateSyncContext(), GameStateSyncHooks(), instanceID,
-        logicalFrame, nds);
+    if (!UseGameTickInputs(nds))
+        GameStateSync::Sync(
+            GameStateSyncContext(), GameStateSyncHooks(), instanceID,
+            logicalFrame, nds);
     const auto afterSyncGame = std::chrono::steady_clock::now();
     TraceHangPhase("end", "after-frame", instanceID, logFrame, logFrame, logFrame);
 

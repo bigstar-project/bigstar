@@ -472,6 +472,9 @@ public: // TODO: Encapsulate the rest of these members
 
     std::unique_ptr<GBACart::CartCommon> EjectGBACart() { return GBACartSlot.EjectCart(); }
 
+    // Called by the instrumented NSMB ROM at game-loop stage boundaries.
+    // The frontend owns input delivery; the core only reports the boundary.
+    std::function<void(u32)> NSMLGameStageCallback;
     u32 RunFrame();
 
     bool IsRunning() const noexcept { return Running; }

@@ -66,6 +66,7 @@ void WriteJitScratchInputs(IntegrationContext context,
                            bool predictedRemoteInput);
 void ApplyJitHelperPatchIfNeeded(IntegrationContext context, int instanceID,
                                  melonDS::u32 frame, melonDS::NDS *nds);
+bool InstallGameTickInputBoundary(melonDS::NDS *nds);
 
 } // namespace NsmbMvlNetplay::PacketBridge
 

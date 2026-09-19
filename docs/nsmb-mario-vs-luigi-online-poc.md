@@ -1,5 +1,15 @@
 # NSMB Mario vs Luigi Online PoC
 
+## Current real-WAN investigation - 2026-09-16 (updated 2026-09-19)
+
+- **Current status:** 当日の城での同期ずれ2件を旧版で再現し、入力を消費するゲーム更新の対応が崩れる原因を特定、通常lockstep (`rollback=0`) 経路を修正した。CMake buildとCTest 17件、元入力の48500/66500-frame最終再生がpass。既存ROMファイルの再生成は不要。
+- **Root cause:** 画面frameごとに入力scratchを上書きしていた。復活処理が片側だけ画面frameを跨ぐと、同じgame tickに別の入力が使われる。末尾-0ではgame 12002にhostがtick 11384 / Luigi keys 0x800、clientがtick 11383 / 0x810を使い、処理終了時のXが分岐した。OSの10秒停滞とは別の、エミュレータ内の更新境界の問題。
+- **Fix:** 入力ペアをFIFOに保持し、GTP2 gateのInputUpdate直前で1組だけ消費する。ゲーム更新途中ではscratchを更新せず、hash検査は同じ入力番号のgameplay終了境界へ移す。再戦ではqueueを世代ごとに破棄し、結果画面ではcallbackを解除。未知gate・入力欠落/重複・異常なbacklogを黙って継続しない。ROM-loop rollbackは従来経路を維持。
+- **Verification:** 旧版は当日と同じ最初のcritical frame/hashを再現。修正版の`session0-fixed-final` / `session5-fixed-final` はcritical 0、全9試合の共通game tick 46789 / 64506件で位置・速度・乱数・入力18 fieldの差0。両runの末尾各1 tickは片側だけが終了上限までに完了したため比較対象外。両roleともexit 0・stderr 0。毎display frameの採取位相差は残るため、同じgame tick境界の比較で判定する。
+- **Artifacts / delivery:** `logs/codex-desync-replay-20260919/`に入力、旧/新版exe、状態CSV、比較JSON、再実行scriptを保存。修正binaryは`build/release-windows-x86_64/melonDS.exe`。現インストール版・GUI同梱sidecar・配布版は未差替え。実際の対戦では両側の更新が必要。追加ROM・ツール導入不要、pushなし。
+- **Remaining / next action:** 同一PC/localhostでの再現と修正検証は完了。更新版同士の実WAN対戦は未確認。別件の01:10/01:15の約10.8秒停滞は、手元停滞中に相手が入力待ち・ENet切断へ進む順序を確認したが、CPU/I/O原因は未特定。再発時の性能トレースが必要。切断後の自動再接続・途中再開も未実装。
+- **Details:** [2026-09-16実ログ調査](nsmb-log-investigation-20260916.md)。今回の全sessionはrollback=0のため、以下のROM-loop訂正修正のWAN検証とは区別する。
+
 ## Live Slippi-style ROM-loop rollback milestone - updated 2026-09-10
 
 - **Latest fix (2026-09-09):** WAN/solo実ログの恒久ずれは、訂正時に次のlogical inputまで実行する `depth + 2` による時間軸の前進だった。restore..currentを含む `depth + 1` へ修正した。元solo入力の旧版A/Bで、旧版の対応差220→166/191に対し、修正版は全区間220固定となり、未確定入力区間を除くplayer主要状態の対照差は0。8月26日の限定gateから一般化した境界評価を訂正する。

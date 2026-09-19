@@ -346,6 +346,42 @@ void WriteJitScratchInputs(IntegrationContext context,
   }
 }
 
+bool InstallGameTickInputBoundary(melonDS::NDS *nds) {
+  if (!nds || !nds->MainRAM || nds->ARM9Read32(0x02001AC8) != 0x32505447)
+    return false;
+  // The inactive-history BEQ identifies the normal InputUpdate call site.
+  constexpr melonDS::u32 branchAddress = 0x02001B4C;
+  const auto branch = nds->ARM9Read32(branchAddress);
+  if ((branch & 0xFF000000) != 0x0A000000)
+    return false;
+  const auto address = branchAddress + 8 +
+      (static_cast<melonDS::s32>(branch << 8) >> 6);
+  if ((address & 3) || address < 0x02001B50 || address > 0x02001CD0)
+    return false;
+  std::array<melonDS::u32, 4> words;
+  for (unsigned i = 0; i < words.size(); ++i)
+    words[i] = nds->ARM9Read32(address + 4 * i);
+  const bool installed = (words[0] & 0xFFFFF000) == 0xE59F2000;
+  const auto load = installed ? words[0] : words[1];
+  const auto literalAddress = address + (installed ? 8 : 12) + (load & 0xFFF);
+  if (literalAddress >= 0x02001D00 || (literalAddress & 3))
+    return false;
+  const auto patch = BuildGameTickInputBoundaryPatch(
+      address, words, nds->ARM9Read32(literalAddress));
+  if (!patch)
+    return false;
+  for (unsigned i = 0; i < words.size(); ++i) {
+    if (words[i] == (*patch)[i])
+      continue;
+    nds->ARM9Write32(address + 4 * i, (*patch)[i]);
+    nds->JIT.CheckAndInvalidate<0, melonDS::ARMJIT_Memory::memregion_MainRAM>(
+        address + 4 * i);
+    nds->JIT.CheckAndInvalidate<1, melonDS::ARMJIT_Memory::memregion_MainRAM>(
+        address + 4 * i);
+  }
+  return true;
+}
+
 void ApplyJitHelperPatchIfNeeded(IntegrationContext context, int instanceID,
                                  melonDS::u32 frame, melonDS::NDS *nds) {
   if (!context.RuntimePatch.PacketBridgeJitHelperPatchEnabled || !nds ||

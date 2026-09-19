@@ -671,6 +671,7 @@ void NDS::SetupDirectBoot(const std::string& romname)
 
 void NDS::Reset()
 {
+    NSMLGameStageCallback = {};
     Platform::FileHandle* f;
     u32 i;
 
@@ -1636,6 +1637,8 @@ void NDS::RunSystemSleep(u64 timestamp)
 
 static void RecordNSMLRomGameTickProbeStage(NDS* nds, u32 marker)
 {
+    if (nds->NSMLGameStageCallback)
+        nds->NSMLGameStageCallback(marker);
     constexpr u32 activeAddr = 0x02001AC4;
     constexpr u32 historyEnabledAddr = 0x02001ACC;
     constexpr u32 historyIndexAddr = 0x02001AD0;

@@ -20,6 +20,54 @@ bool UpdateTraceMarker(melonDS::u32 value, melonDS::u32 &lastValue) {
 
 } // namespace
 
+void GameTickInputQueue::Reset(melonDS::u32 generation) {
+  Generation_ = generation;
+  Inputs_.clear();
+  LastQueuedFrame_.reset();
+  AppliedFrame_.reset();
+}
+
+bool GameTickInputQueue::Enqueue(const GameTickInput &input) {
+  if (Inputs_.size() >= Capacity ||
+      (LastQueuedFrame_ && input.Frame != *LastQueuedFrame_ + 1))
+    return false;
+  Inputs_.push_back(input);
+  LastQueuedFrame_ = input.Frame;
+  return true;
+}
+
+std::optional<GameTickInput> GameTickInputQueue::Consume() {
+  if (Inputs_.empty())
+    return std::nullopt;
+  const auto input = Inputs_.front();
+  Inputs_.pop_front();
+  AppliedFrame_ = input.Frame;
+  return input;
+}
+
+std::optional<std::array<melonDS::u32, 4>> BuildGameTickInputBoundaryPatch(
+    melonDS::u32 address, const std::array<melonDS::u32, 4> &words,
+    melonDS::u32 markerLiteral) {
+  if ((address & 3) || address < 0x02001B50 || address > 0x02001CD0 ||
+      markerLiteral != 0x04FFFA28)
+    return std::nullopt;
+  const auto callsInputUpdate = [](melonDS::u32 pc, melonDS::u32 word) {
+    return (word & 0xFF000000) == 0xEB000000 &&
+           pc + 8 + (static_cast<melonDS::s32>(word << 8) >> 6) == 0x02005230;
+  };
+  if ((words[0] & 0xFFFFF000) == 0xE59F2000 &&
+      words[1] == 0xE3A01002 && words[2] == 0xE5821000 &&
+      callsInputUpdate(address + 12, words[3]))
+    return words; // Already installed, e.g. a restored patched checkpoint.
+  if (!callsInputUpdate(address, words[0]) ||
+      (words[1] & 0xFFFFF000) != 0xE59F2000 ||
+      (words[1] & 0xFFF) > 0xFFB ||
+      words[2] != 0xE3A01003 || words[3] != 0xE5821000)
+    return std::nullopt;
+  return std::array<melonDS::u32, 4>{
+      words[1] + 4, 0xE3A01002, words[3], words[0] - 3};
+}
+
 InputState SelectPlayerInput(int player, int localPlayer,
                              const InputState &localInput,
                              const InputState &remoteInput,

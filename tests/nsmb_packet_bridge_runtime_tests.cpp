@@ -268,7 +268,86 @@ void TestRestartQueueReset() {
 
 } // namespace
 
+void TestGameTickInputBoundaries() {
+  using NsmbMvlNetplay::PacketBridge::GameTickInput;
+  using NsmbMvlNetplay::PacketBridge::GameTickInputQueue;
+  GameTickInputQueue host;
+  GameTickInputQueue client;
+  host.Reset(3);
+  client.Reset(3);
+  GameTickInput pressed{11382, InputState{}, InputState{}, true};
+  pressed.Remote.KeyMask = 0x7EF;
+  pressed.Local.Touching = true;
+  pressed.Local.TouchX = 217;
+  pressed.Local.TouchY = 153;
+  auto released = pressed;
+  released.Frame = 11383;
+  released.Remote.KeyMask = 0x7FF;
+  released.Local.Touching = false;
+  Require(host.Enqueue(pressed) && client.Enqueue(pressed), "queue first tick");
+  const auto firstHost = host.Consume();
+  const auto firstClient = client.Consume();
+  Require(firstHost && firstClient && firstHost->Local.Touching &&
+              firstHost->Local.TouchX == 217 && firstHost->Local.TouchY == 153,
+          "touch coordinates survive deferred delivery");
+  Require(host.Enqueue(released) && client.Enqueue(released), "queue release");
+  const auto secondClient = client.Consume();
+  auto next = released;
+  next.Frame++;
+  Require(host.Enqueue(next) && client.Enqueue(next), "display advances during host update");
+  Require(host.AppliedFrame() == pressed.Frame && host.PendingCount() == 2,
+          "a display frame cannot overwrite the in-progress game tick");
+  const auto secondHost = host.Consume();
+  Require(secondHost && secondClient && secondHost->Frame == secondClient->Frame &&
+              secondHost->Remote.KeyMask == secondClient->Remote.KeyMask &&
+              !secondHost->Local.Touching,
+          "late game update consumes the same release, without skipping it");
+  Require(!host.Enqueue(next), "duplicate capture cannot create an extra game tick");
+  next.Frame += 2;
+  Require(!host.Enqueue(next), "missing input cannot silently advance simulation");
+  host.Reset(4);
+  Require(!host.Consume() && !host.AppliedFrame() && host.PendingCount() == 0 &&
+              host.Generation() == 4,
+          "rematch discards previous generation inputs and applied frame");
+  pressed.Frame = 840;
+  Require(host.Enqueue(pressed), "rematch accepts a new logical epoch");
+  Require(host.Consume().has_value() && !host.Consume(),
+          "underflow cannot repeat the previous button edge");
+  host.Reset(5);
+  for (std::size_t i = 0; i < GameTickInputQueue::Capacity; ++i) {
+    pressed.Frame = static_cast<melonDS::u32>(i);
+    Require(host.Enqueue(pressed), "bounded backlog accepts available capacity");
+  }
+  pressed.Frame++;
+  Require(!host.Enqueue(pressed), "stalled guest cannot allocate an unlimited backlog");
+}
+
+void TestGameTickInputGatePatch() {
+  using NsmbMvlNetplay::PacketBridge::BuildGameTickInputBoundaryPatch;
+  constexpr melonDS::u32 address = 0x02001C50;
+  constexpr melonDS::u32 call = 0xEB000000 | ((0x02005230 - address - 8) >> 2);
+  const std::array<melonDS::u32, 4> original{call, 0xE59F2040, 0xE3A01003, 0xE5821000};
+  const auto patched = BuildGameTickInputBoundaryPatch(address, original, 0x04FFFA28);
+  Require(patched.has_value(), "recognized GTP2 input gate can be patched");
+  Require(address + 8 + ((*patched)[0] & 0xFFF) == address + 12 + (original[1] & 0xFFF),
+          "relocated literal load still points at the marker address");
+  Require(address + 12 + 8 + (((*patched)[3] & 0xFFFFFF) << 2) == 0x02005230 &&
+              (*patched)[1] == 0xE3A01002 && (*patched)[2] == 0xE5821000,
+          "input-begin marker precedes the original InputUpdate call");
+  Require(BuildGameTickInputBoundaryPatch(address, *patched, 0x04FFFA28) == patched,
+          "restored patched checkpoint is accepted idempotently");
+  auto damaged = original;
+  damaged[0]++;
+  Require(!BuildGameTickInputBoundaryPatch(address, damaged, 0x04FFFA28),
+          "wrong call destination is rejected before guest mutation");
+  Require(!BuildGameTickInputBoundaryPatch(address, original, 0x12345678) &&
+              !BuildGameTickInputBoundaryPatch(0x02001000, original, 0x04FFFA28),
+          "unrecognized marker and code range are rejected");
+}
+
 int main() {
+  TestGameTickInputBoundaries();
+  TestGameTickInputGatePatch();
   TestPacketInputHistory();
   TestInputSelectionAndCanonicalTick();
   TestIncomingPacketPolicy();

@@ -8,6 +8,7 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <deque>
 #include <map>
 #include <optional>
 #include <vector>
@@ -15,6 +16,38 @@
 namespace NsmbMvlNetplay::PacketBridge {
 
 inline constexpr melonDS::u32 kUnsetProgress = 0xFFFFFFFF;
+
+// A display frame can end halfway through a game update. Retain complete
+// input pairs until the next InputUpdate boundary, including touch edges.
+struct GameTickInput {
+  melonDS::u32 Frame = 0;
+  InputState Local;
+  InputState Remote;
+  bool HasRemote = false;
+};
+
+class GameTickInputQueue {
+public:
+  static constexpr std::size_t Capacity = 2048;
+  void Reset(melonDS::u32 generation);
+  melonDS::u32 Generation() const { return Generation_; }
+  bool Enqueue(const GameTickInput &input);
+  std::optional<GameTickInput> Consume();
+  std::optional<melonDS::u32> AppliedFrame() const { return AppliedFrame_; }
+  std::size_t PendingCount() const { return Inputs_.size(); }
+
+private:
+  melonDS::u32 Generation_ = kUnsetProgress;
+  std::deque<GameTickInput> Inputs_;
+  std::optional<melonDS::u32> LastQueuedFrame_;
+  std::optional<melonDS::u32> AppliedFrame_;
+};
+
+// Convert the existing GTP2 InputUpdate + input_end sequence to input_begin
+// + InputUpdate without allocating guest memory or changing the return path.
+std::optional<std::array<melonDS::u32, 4>> BuildGameTickInputBoundaryPatch(
+    melonDS::u32 address, const std::array<melonDS::u32, 4> &words,
+    melonDS::u32 markerLiteral);
 
 struct ReceivedProgress {
   melonDS::u32 Tick = kUnsetProgress;
