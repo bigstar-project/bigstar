@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
-import { commands, type SoloTestStatus } from '../bindings';
+import { type CpuMatchRules, commands, type SoloTestStatus } from '../bindings';
 import { Tabs } from '../components/ui';
 import { useSoloTest } from '../soloTest';
 import { CpuBattleView } from './CpuBattleView';
@@ -36,32 +36,41 @@ function TestView({ blocked = false }: { blocked?: boolean }) {
   );
 }
 
+const defaultRules: CpuMatchRules = {
+  wins: 3,
+  big_stars: 10,
+  lives: 'endless',
+};
 test.each([
-  ['クリボー', 'beginner'],
-  ['ノコノコ', 'combat_v2'],
-  ['カロン', 'development'],
-] as const)('%sを選択して対戦を開始・停止する', async (label, profile) => {
+  ['クリボー', 'beginner', defaultRules],
+  ['ノコノコ', 'combat_v2', defaultRules],
+  ['カロン', 'development', defaultRules],
+  ['カロン', 'development', { wins: 2, big_stars: 3, lives: '5' }],
+] as const)('%sを選択して対戦を開始・停止する', async (label, profile, rules) => {
   vi.mocked(commands.getSoloTestStatus).mockResolvedValue({
     status: 'ok',
     data: idle,
   });
-  vi.mocked(commands.startCpuMatch).mockImplementation(async (opponent) => ({
-    status: 'ok',
-    data: {
-      ...idle,
-      active: true,
-      config: {
-        cpu_opponent: opponent,
-        stage: 0,
-        controlled_player: 'mario',
-        rollback_enabled: false,
-        input_delay_frames: 2,
-        match_seed: '45',
-        host: { delay_frames: 0, jitter_frames: 0, drop_every: 0 },
-        client: { delay_frames: 0, jitter_frames: 0, drop_every: 0 },
+  vi.mocked(commands.startCpuMatch).mockImplementation(
+    async (opponent, cpuRules) => ({
+      status: 'ok',
+      data: {
+        ...idle,
+        active: true,
+        config: {
+          cpu_opponent: opponent,
+          cpu_rules: cpuRules,
+          stage: 0,
+          controlled_player: 'mario',
+          rollback_enabled: false,
+          input_delay_frames: 2,
+          match_seed: '45',
+          host: { delay_frames: 0, jitter_frames: 0, drop_every: 0 },
+          client: { delay_frames: 0, jitter_frames: 0, drop_every: 0 },
+        },
       },
-    },
-  }));
+    }),
+  );
   vi.mocked(commands.stopSoloTest).mockResolvedValue({
     status: 'ok',
     data: idle,
@@ -76,11 +85,33 @@ test.each([
   );
   await screen.getByRole('combobox', { name: '対戦相手' }).click();
   await screen.getByRole('option', { name: label, exact: true }).click();
+  for (const [field, expected] of [
+    ['勝利数', '3'],
+    ['ビッグスター', '10'],
+    ['残機', '無限'],
+  ] as const) {
+    await expect
+      .element(screen.getByRole('combobox', { name: field }))
+      .toHaveTextContent(expected);
+  }
+  if (rules !== defaultRules) {
+    for (const [field, value] of [
+      ['勝利数', String(rules.wins)],
+      ['ビッグスター', String(rules.big_stars)],
+      ['残機', rules.lives],
+    ] as const) {
+      await screen.getByRole('combobox', { name: field }).click();
+      await screen.getByRole('option', { name: value, exact: true }).click();
+    }
+  }
   const start = screen.getByRole('button', { name: '対戦を始める' });
   await expect.element(start).toBeEnabled();
   await start.click();
-  expect(commands.startCpuMatch).toHaveBeenCalledWith(profile);
+  expect(commands.startCpuMatch).toHaveBeenCalledWith(profile, rules);
   await expect.element(start).toBeDisabled();
+  await expect
+    .element(screen.getByRole('combobox', { name: '勝利数' }))
+    .toBeDisabled();
   await screen.getByRole('button', { name: '対戦を終了' }).click();
   expect(commands.stopSoloTest).toHaveBeenCalledOnce();
   await expect.element(start).toBeEnabled();

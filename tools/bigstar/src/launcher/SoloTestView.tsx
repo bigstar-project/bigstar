@@ -24,6 +24,7 @@ export function SoloTestView({
   const [preset, setPreset] = useState('wan');
   const [request, setRequest] = useState<SoloTestRequest>(() => ({
     cpu_opponent: null,
+    cpu_rules: null,
     stage: 3,
     controlled_player: 'mario',
     rollback_enabled: true,

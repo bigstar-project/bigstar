@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isTauri } from '@tauri-apps/api/core';
 import {
+  type CpuMatchRules,
   type CpuOpponent,
   commands,
   type SoloTestRequest,
@@ -44,8 +45,13 @@ export function useSoloTest(enabled: boolean) {
     onSuccess: (data) => client.setQueryData(key, data),
   });
   const startCpu = useMutation({
-    mutationFn: (opponent: CpuOpponent) =>
-      unwrap(commands.startCpuMatch(opponent)),
+    mutationFn: ({
+      opponent,
+      rules,
+    }: {
+      opponent: CpuOpponent;
+      rules: CpuMatchRules;
+    }) => unwrap(commands.startCpuMatch(opponent, rules)),
     onSuccess: (data) => client.setQueryData(key, data),
   });
   const stop = useMutation({

@@ -1,11 +1,12 @@
-import { Play, Stop } from '@phosphor-icons/react';
+import { Heart, Play, Star, Stop, Trophy } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { css } from 'styled-system/css';
-import type { CpuOpponent } from '../bindings';
+import type { CpuMatchRules, CpuOpponent, Lives } from '../bindings';
 import { SelectField } from '../components/Fields';
 import { Button, Tabs } from '../components/ui';
 import type { SoloTestController } from '../soloTest';
 import { LauncherCard } from './LauncherCards';
+import { bigStarsOptions, livesOptions, winsOptions } from './options';
 
 export const cpuOpponents = [
   { value: 'beginner', label: 'クリボー' },
@@ -21,19 +22,30 @@ export function CpuBattleView({
   blocked: boolean;
 }) {
   const [opponent, setOpponent] = useState<CpuOpponent>('beginner');
+  const [rules, setRules] = useState<CpuMatchRules>({
+    wins: 3,
+    big_stars: 10,
+    lives: 'endless',
+  });
   const { status, busy } = controller;
   const locked = busy || status.active || status.preparing;
   const activeOpponent = status.active ? status.config?.cpu_opponent : null;
   const displayed = activeOpponent ?? opponent;
+  const displayedRules = activeOpponent
+    ? (status.config?.cpu_rules ?? rules)
+    : rules;
   const name = cpuOpponents.find((entry) => entry.value === displayed)?.label;
   const error = controller.error ? String(controller.error) : status.error;
   return (
-    <Tabs.Content
-      value="cpu"
-      className={css({ overflowY: 'auto', h: 'full', p: '4' })}
-    >
+    <Tabs.Content value="cpu">
       <div
-        className={css({ display: 'grid', gap: '4', maxW: '3xl', mx: 'auto' })}
+        className={css({
+          display: 'grid',
+          gap: '4',
+          maxW: { base: 'xl', xl: 'mainPanel' },
+          mx: 'auto',
+          w: 'full',
+        })}
       >
         <LauncherCard title="CPU対戦">
           <p>マリオを操作して、CPUのルイージと対戦します。</p>
@@ -48,10 +60,50 @@ export function CpuBattleView({
             クリボー、ノコノコ、カロンの順に手ごわい相手に挑戦できます。
             名前は難易度の目安で、対戦キャラクターはすべてルイージです。
           </p>
-          <p>草原・スター5個・3本先取・残機無制限</p>
-          <p className={css({ color: 'fg.muted', textStyle: 'sm' })}>
-            キーボードやゲームパッドの操作設定は、設定画面から変更できます。
-          </p>
+          <div
+            className={css({
+              display: 'grid',
+              gap: '3',
+              gridTemplateColumns: {
+                base: '1fr',
+                sm: 'repeat(3, minmax(0, 1fr))',
+              },
+            })}
+          >
+            <SelectField
+              icon={<Trophy size={18} weight="fill" />}
+              label="勝利数"
+              options={winsOptions}
+              value={String(displayedRules.wins)}
+              disabled={locked}
+              onChange={(value) =>
+                setRules((current) => ({ ...current, wins: Number(value) }))
+              }
+            />
+            <SelectField
+              icon={<Star size={18} weight="fill" />}
+              label="ビッグスター"
+              options={bigStarsOptions}
+              value={String(displayedRules.big_stars)}
+              disabled={locked}
+              onChange={(value) =>
+                setRules((current) => ({
+                  ...current,
+                  big_stars: Number(value),
+                }))
+              }
+            />
+            <SelectField
+              icon={<Heart size={18} weight="fill" />}
+              label="残機"
+              options={livesOptions}
+              value={displayedRules.lives}
+              disabled={locked}
+              onChange={(value) =>
+                setRules((current) => ({ ...current, lives: value as Lives }))
+              }
+            />
+          </div>
           {blocked ? (
             <output>
               対戦や部屋の待機、ROMの準備を終了すると開始できます。
@@ -66,7 +118,7 @@ export function CpuBattleView({
               onClick={() => {
                 controller.stop.reset();
                 controller.start.reset();
-                controller.startCpu.mutate(opponent);
+                controller.startCpu.mutate({ opponent, rules });
               }}
             >
               <Play />

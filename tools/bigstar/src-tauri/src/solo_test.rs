@@ -51,7 +51,26 @@ impl CpuOpponent {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Type)]
+pub(crate) struct CpuMatchRules {
+    pub(crate) wins: u8,
+    pub(crate) big_stars: u8,
+    pub(crate) lives: Lives,
+}
+
+impl Default for CpuMatchRules {
+    fn default() -> Self {
+        Self {
+            wins: 3,
+            big_stars: 10,
+            lives: Lives::Endless,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Type)]
 pub(crate) struct SoloTestRequest {
+    #[serde(default)]
+    pub(crate) cpu_rules: Option<CpuMatchRules>,
     #[serde(default)]
     pub(crate) cpu_opponent: Option<CpuOpponent>,
     pub(crate) stage: u8,
@@ -65,17 +84,24 @@ pub(crate) struct SoloTestRequest {
 
 impl SoloTestRequest {
     fn settings(&self) -> GameSettings {
+        let rules = if self.cpu_opponent.is_some() {
+            self.cpu_rules.clone().unwrap_or_default()
+        } else {
+            CpuMatchRules {
+                wins: 1,
+                big_stars: 10,
+                lives: Lives::Endless,
+            }
+        };
+        let games = usize::from(rules.wins.saturating_mul(2).saturating_sub(1));
         GameSettings {
             course_mode: CourseMode::Select,
-            course_stages: vec![self.stage; if self.cpu_opponent.is_some() { 5 } else { 1 }],
-            wins: if self.cpu_opponent.is_some() { 3 } else { 1 },
-            big_stars: if self.cpu_opponent.is_some() { 5 } else { 10 },
-            lives: Lives::Endless,
+            course_stages: vec![self.stage; games],
+            wins: rules.wins,
+            big_stars: rules.big_stars,
+            lives: rules.lives,
             match_seed: self.match_seed.clone(),
-            rng_seeds: vec![
-                self.match_seed.clone();
-                if self.cpu_opponent.is_some() { 5 } else { 1 }
-            ],
+            rng_seeds: vec![self.match_seed.clone(); games],
             input_delay_frames: self.input_delay_frames,
             input_max_frame_lead: 2,
             rollback_enabled: self.rollback_enabled,
@@ -157,18 +183,20 @@ pub(crate) async fn start_solo_test(
 pub(crate) async fn start_cpu_match(
     app: AppHandle,
     opponent: CpuOpponent,
+    rules: CpuMatchRules,
 ) -> Result<SoloTestStatus, String> {
-    let request = cpu_request(opponent);
+    let request = cpu_request(opponent, rules);
     start_session(app, request).await
 }
 
-fn cpu_request(opponent: CpuOpponent) -> SoloTestRequest {
+fn cpu_request(opponent: CpuOpponent, rules: CpuMatchRules) -> SoloTestRequest {
     let network = SoloNetwork {
         delay_frames: 0,
         jitter_frames: 0,
         drop_every: 0,
     };
     SoloTestRequest {
+        cpu_rules: Some(rules),
         cpu_opponent: Some(opponent),
         stage: 0,
         controlled_player: SoloControl::Mario,
@@ -513,6 +541,7 @@ mod tests {
     fn request() -> SoloTestRequest {
         SoloTestRequest {
             cpu_opponent: None,
+            cpu_rules: None,
             stage: 3,
             controlled_player: SoloControl::Mario,
             rollback_enabled: true,
@@ -615,10 +644,10 @@ mod tests {
             CpuOpponent::CombatV2,
             CpuOpponent::Development,
         ] {
-            let request = cpu_request(profile);
+            let request = cpu_request(profile, CpuMatchRules::default());
             request.validate().unwrap();
             assert_eq!(request.settings().course_stages, vec![0; 5]);
-            assert_eq!(request.settings().big_stars, 5);
+            assert_eq!(request.settings().big_stars, 10);
             assert_eq!(request.settings().wins, 3);
             assert!(!request.rollback_enabled);
             assert!(matches!(request.controlled_player, SoloControl::Mario));
@@ -642,7 +671,7 @@ mod tests {
         ] {
             let log_dir = root.join(profile.profile());
             fs::create_dir_all(&log_dir).unwrap();
-            let mut request = cpu_request(profile);
+            let mut request = cpu_request(profile, CpuMatchRules::default());
             request.match_seed = "45".into();
             let pair = launch_pair(
                 &melon,
@@ -686,6 +715,36 @@ mod tests {
                 "CPU {}: gameplay and peer cleanup verified",
                 profile.profile()
             );
+        }
+    }
+
+    #[test]
+    fn cpu_rules_are_forwarded_and_invalid_values_rejected() {
+        let request = cpu_request(
+            CpuOpponent::Development,
+            CpuMatchRules {
+                wins: 2,
+                big_stars: 3,
+                lives: Lives::Five,
+            },
+        );
+        request.validate().unwrap();
+        let settings = request.settings();
+        assert_eq!(settings.wins, 2);
+        assert_eq!(settings.big_stars, 3);
+        assert!(matches!(settings.lives, Lives::Five));
+        assert_eq!(settings.course_stages, vec![0; 3]);
+        assert_eq!(settings.rng_seeds.len(), 3);
+        for (wins, big_stars) in [(0, 10), (4, 10), (3, 4)] {
+            let invalid = cpu_request(
+                CpuOpponent::Beginner,
+                CpuMatchRules {
+                    wins,
+                    big_stars,
+                    lives: Lives::Endless,
+                },
+            );
+            assert!(invalid.validate().is_err());
         }
     }
 

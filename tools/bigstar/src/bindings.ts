@@ -27,7 +27,7 @@ export const commands = {
 	ensureRoms: (request: GenerateRomRequest) => typedError<GenerateRomResponse, string>(__TAURI_INVOKE("ensure_roms", { request })),
 	startMatch: (request: LaunchRequest_Deserialize) => typedError<LaunchResponse, string>(__TAURI_INVOKE("start_match", { request })),
 	startSoloTest: (request: SoloTestRequest) => typedError<SoloTestStatus, string>(__TAURI_INVOKE("start_solo_test", { request })),
-	startCpuMatch: (opponent: CpuOpponent) => typedError<SoloTestStatus, string>(__TAURI_INVOKE("start_cpu_match", { opponent })),
+	startCpuMatch: (opponent: CpuOpponent, rules: CpuMatchRules) => typedError<SoloTestStatus, string>(__TAURI_INVOKE("start_cpu_match", { opponent, rules })),
 	stopSoloTest: () => typedError<SoloTestStatus, string>(__TAURI_INVOKE("stop_solo_test")),
 	getSoloTestStatus: () => typedError<SoloTestStatus, string>(__TAURI_INVOKE("get_solo_test_status")),
 	stopMatch: () => typedError<null, string>(__TAURI_INVOKE("stop_match")),
@@ -92,6 +92,12 @@ export type CleanupDetailedLogsResponse = {
 };
 
 export type CourseMode = "random" | "select";
+
+export type CpuMatchRules = {
+	wins: number,
+	big_stars: number,
+	lives: Lives,
+};
 
 export type CpuOpponent = "beginner" | "combat_v2" | "development";
 
@@ -483,6 +489,7 @@ export type SoloNetwork = {
 };
 
 export type SoloTestRequest = {
+	cpu_rules?: CpuMatchRules | null,
 	cpu_opponent?: CpuOpponent | null,
 	stage: number,
 	controlled_player: SoloControl,
