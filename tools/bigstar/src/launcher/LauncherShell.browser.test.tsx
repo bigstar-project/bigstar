@@ -42,42 +42,38 @@ function pressShortcut(key: string, shiftKey = false) {
 }
 
 describe('ランチャーのタブショートカット', () => {
-  test('Ctrl+1/2/3で対応するタブへ移動する', async () => {
+  test('Ctrl+1/2/3/4で対応するタブへ移動する', async () => {
     const screen = await render(<ShortcutTestShell />);
-
-    pressShortcut('2');
-    await expect
-      .element(screen.getByTestId('active-view'))
-      .toHaveTextContent('history');
-
-    pressShortcut('3');
-    await expect
-      .element(screen.getByTestId('active-view'))
-      .toHaveTextContent('settings');
-
-    pressShortcut('1');
-    await expect
-      .element(screen.getByTestId('active-view'))
-      .toHaveTextContent('battle');
+    for (const [key, view, label] of [
+      ['2', 'cpu', 'CPU対戦'],
+      ['3', 'history', '対戦履歴'],
+      ['4', 'settings', '設定'],
+      ['1', 'battle', '対戦'],
+    ]) {
+      pressShortcut(key);
+      await expect
+        .element(screen.getByTestId('active-view'))
+        .toHaveTextContent(view);
+      await expect
+        .element(screen.getByRole('tab', { name: label, exact: true }))
+        .toHaveTextContent(`Ctrl+${key}`);
+    }
   });
 
-  test('Ctrl+Tabで順送りしCtrl+Shift+Tabで逆送りする', async () => {
+  test('Ctrl+TabでCPU対戦を含めて順送りしCtrl+Shift+Tabで逆送りする', async () => {
     const screen = await render(<ShortcutTestShell />);
-
-    pressShortcut('Tab');
-    await expect
-      .element(screen.getByTestId('active-view'))
-      .toHaveTextContent('history');
-
-    pressShortcut('Tab');
-    await expect
-      .element(screen.getByTestId('active-view'))
-      .toHaveTextContent('settings');
-
-    pressShortcut('Tab', true);
-    await expect
-      .element(screen.getByTestId('active-view'))
-      .toHaveTextContent('history');
+    for (const view of ['cpu', 'history', 'settings', 'battle']) {
+      pressShortcut('Tab');
+      await expect
+        .element(screen.getByTestId('active-view'))
+        .toHaveTextContent(view);
+    }
+    for (const view of ['settings', 'history', 'cpu', 'battle']) {
+      pressShortcut('Tab', true);
+      await expect
+        .element(screen.getByTestId('active-view'))
+        .toHaveTextContent(view);
+    }
   });
 });
 

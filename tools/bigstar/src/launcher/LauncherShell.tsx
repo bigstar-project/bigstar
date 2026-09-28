@@ -19,7 +19,8 @@ import type { StatusKind } from '../types';
 import type { UpdateStatus, View } from './types';
 
 const currentAppVersion = __BIGSTAR_GUI_VERSION__;
-const viewOrder: View[] = ['battle', 'history', 'settings'];
+const viewOrder: View[] = ['battle', 'cpu', 'history', 'settings'];
+const viewShortcuts = viewOrder.map((_, index) => `ctrl+${index + 1}`);
 
 const sidebarTabClass = css({
   borderRadius: 'l2',
@@ -180,7 +181,7 @@ export function LauncherShell({
   const edition = currentEditionConfig();
 
   useHotkeys(
-    ['ctrl+1', 'ctrl+2', 'ctrl+3'],
+    viewShortcuts,
     (event) => {
       const view = viewOrder[Number(event.key) - 1];
       if (view) onViewChange(view);
@@ -349,7 +350,7 @@ export function LauncherShell({
                     size="sm"
                     variant="surface"
                   >
-                    Ctrl+1
+                    Ctrl+{viewOrder.indexOf('battle') + 1}
                   </Kbd>
                 </Tabs.Trigger>
                 <Tabs.Trigger
@@ -359,6 +360,15 @@ export function LauncherShell({
                 >
                   <Brain size={22} weight="fill" />
                   <span>CPU対戦</span>
+                  <Kbd
+                    className={sidebarShortcutClass}
+                    colorPalette="gray"
+                    data-sidebar-shortcut
+                    size="sm"
+                    variant="surface"
+                  >
+                    Ctrl+{viewOrder.indexOf('cpu') + 1}
+                  </Kbd>
                 </Tabs.Trigger>
                 {soloTestEnabled ? (
                   <Tabs.Trigger
@@ -418,7 +428,7 @@ export function LauncherShell({
                     size="sm"
                     variant="surface"
                   >
-                    Ctrl+2
+                    Ctrl+{viewOrder.indexOf('history') + 1}
                   </Kbd>
                 </Tabs.Trigger>
                 <Tabs.Trigger
@@ -447,7 +457,7 @@ export function LauncherShell({
                     size="sm"
                     variant="surface"
                   >
-                    Ctrl+3
+                    Ctrl+{viewOrder.indexOf('settings') + 1}
                   </Kbd>
                 </Tabs.Trigger>
                 <Tabs.Indicator className={css({ bg: 'blue.subtle.bg' })} />
