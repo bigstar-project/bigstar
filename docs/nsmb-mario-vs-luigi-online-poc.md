@@ -9,7 +9,7 @@
 - デスクトップGUIでカロンを選択して対戦開始・終了を確認。CPU側は `WA_DontShowOnScreen` で非表示にし、人間側1画面だけで60fps表示を確認した。長時間・全環境での無停止保証ではない。詳細研究ログは通常対戦では無効。
 - Rust: fmt、strict Clippy、69テスト通過。GUI: typecheck、Biome、版別15・unit37・browser77・E2E2テスト通過。CPU単体ビルドと自己診断も通過。
 - 配布用GUI・MSI・NSISを生成し、`tools/bigstar/artifacts/insiders/release` にCPU実行ファイルを含めて配置・ハッシュ確認済み。WindowsでNodeのフォルダーrenameがEPERMとなる場合は、引数を環境変数で渡してPowerShellの標準移動へフォールバックする。実成果物の移動を再検証した。
-- 次の工程は統合差分のmainへのレビュー・マージ。mainへのマージ・pushは未実施。CPUランタイムの構成とビルド手順は `tools/rule-cpu/README.md`。
+- 統合状態: 2026-09-29、ユーザーの指示で `codex/gui-rule-cpu` の4コミット（先端 `6d3d3fc3`）をローカルmainへfast-forwardでマージ済み。競合なし、pushは未実施。CPUランタイムの構成とビルド手順は `tools/rule-cpu/README.md`。
 
 ## 維持しているreal-WAN修正 - 2026-09-16 (updated 2026-09-19)
 
