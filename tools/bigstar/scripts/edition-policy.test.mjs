@@ -224,6 +224,7 @@ test('共有Rustキャッシュから版別成果物だけを保存する', () =
       'bigstar.exe',
       'melonDS.exe',
       'bigstar-net-bridge.exe',
+      'bigstar-rule-cpu.exe',
     ]) {
       writeFileSync(resolve(targetRelease, fileName), fileName);
     }
@@ -285,6 +286,11 @@ test('共有Rustキャッシュから版別成果物だけを保存する', () =
     );
     assert.equal(manifest.edition, 'insiders');
     assert.equal(manifest.rustCache, 'shared');
+    assert.equal(
+      readFileSync(resolve(destination, 'bigstar-rule-cpu.exe'), 'utf8'),
+      'bigstar-rule-cpu.exe',
+    );
+    assert.ok(manifest.files.some((file) => file.path === 'bigstar-rule-cpu.exe'));
   } finally {
     rmSync(root, { force: true, recursive: true });
   }

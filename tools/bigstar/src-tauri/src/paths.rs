@@ -145,6 +145,14 @@ pub(crate) fn find_melonds_binary(app: &AppHandle) -> Result<PathBuf, String> {
     )
 }
 
+pub(crate) fn find_rule_cpu_binary(app: &AppHandle) -> Result<PathBuf, String> {
+    find_binary(
+        app,
+        &[PathBuf::from("build/rule-cpu/bigstar-rule-cpu.exe")],
+        "bigstar-rule-cpu",
+    )
+}
+
 pub(crate) fn find_bridge_binary(app: &AppHandle) -> Result<PathBuf, String> {
     find_binary(
         app,

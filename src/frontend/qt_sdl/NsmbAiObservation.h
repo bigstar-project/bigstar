@@ -23,6 +23,16 @@ class Runtime;
 
 namespace NsmbMvlNetplay::AIObservation {
 
+constexpr bool IsVsDroppedStarActorSettings(melonDS::u32 settings) {
+  const melonDS::u32 normalized = settings & 0x7FFFFFFFu;
+  // The two-/three-star ground-pound fan uses 0x2102/0x3102 and
+  // auxiliary 0x3 actors. Verified against star loss, motion and game images.
+  return normalized == 0x00001002u || normalized == 0x00001012u ||
+         normalized == 0x00001102u || normalized == 0x00001112u ||
+         normalized == 0x00002102u || normalized == 0x00003102u ||
+         normalized == 0x00000003u;
+}
+
 enum class LogKind : std::size_t {
   V1,
   V2,
@@ -252,6 +262,14 @@ struct Hooks {
   std::function<bool(melonDS::NDS *)> IsGameplay;
 };
 
+struct DecisionFrame {
+  melonDS::u32 RawFrame = 0;
+  melonDS::u32 LogicalFrame = 0;
+  melonDS::u32 Generation = 0;
+  melonDS::u32 InputDelay = 0;
+  bool RollbackEnabled = false;
+};
+
 const char *ObjectCategory(melonDS::u16 objectID, melonDS::u32 settings);
 GameStateModel::AITerrainDerivedSummary
 DeriveTerrainSummary(const GameStateModel::AIPlayerTileProbeSample &probe,
@@ -267,5 +285,8 @@ InputState ApplyImitationInput(Context context, const Hooks &hooks,
                                const InputState &fallback);
 void TracePlayLog(Context context, const Hooks &hooks, int instanceID,
                   melonDS::u32 frame, melonDS::NDS *nds);
+std::string BuildDecisionRecord(Context context, const Hooks &hooks, int instanceID,
+                                const DecisionFrame &frame, const InputState &localInput,
+                                melonDS::NDS *nds);
 
 } // namespace NsmbMvlNetplay::AIObservation

@@ -33,3 +33,5 @@ function Copy-Sidecar {
 
 Copy-Sidecar -Source $MelonDSExe -Name "melonDS"
 Copy-Sidecar -Source $BridgeExe -Name "bigstar-net-bridge"
+
+Copy-Sidecar -Source 'build/rule-cpu/bigstar-rule-cpu.exe' -Name 'bigstar-rule-cpu'

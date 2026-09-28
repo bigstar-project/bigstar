@@ -1,7 +1,13 @@
 import type { RoomSummary } from '../matchmakingClient';
 import type { FeedbackCategory, FormState, MatchHistoryRecord } from '../types';
 
-export type View = 'battle' | 'ai' | 'solo-test' | 'history' | 'settings';
+export type View =
+  | 'battle'
+  | 'ai'
+  | 'solo-test'
+  | 'cpu'
+  | 'history'
+  | 'settings';
 
 export type UpdateStatus = {
   phase:

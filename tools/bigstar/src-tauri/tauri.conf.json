@@ -34,7 +34,8 @@
     ],
     "externalBin": [
       "binaries/melonDS",
-      "binaries/bigstar-net-bridge"
+      "binaries/bigstar-net-bridge",
+      "binaries/bigstar-rule-cpu"
     ],
     "resources": {
       "../../../tests/nsmb_us_direct_mvl_minimal_bootstrap.inputs": "resources/nsmb_us_direct_mvl_minimal_bootstrap.inputs",

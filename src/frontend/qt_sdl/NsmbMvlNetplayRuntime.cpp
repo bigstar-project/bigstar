@@ -39,6 +39,9 @@
 #include "NsmbInputTimeline.h"
 #include "NsmbImitationAI.h"
 #include "NsmbRuleAI.h"
+#include <QProcess>
+#include <QElapsedTimer>
+#include <QThread>
 
 #include <algorithm>
 #include <array>
@@ -472,6 +475,110 @@ bool RuleAIProvidesInputForPlayer(int player)
 void RecordAIPlayLogAppliedInput(int instanceID, melonDS::u32 frame, int player, const InputState& input)
 {
     G.AIObservationRuntime.RecordAppliedInput(instanceID, frame, player, input);
+}
+
+// Local CPU worker protocol; enabled explicitly by the GUI.
+// Only the client local player is supported; rollback needs a separate memory contract.
+InputState ApplyWatchPolicy(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
+                           const InputState& fallback)
+{
+    const auto worker = qEnvironmentVariable("MELONDS_NSML_RULE_WORKER");
+    if (worker.isEmpty() || G.NetRole != Role::Client || !G.Enabled || !G.Input.NetplayOnly
+        || !G.NetplaySession.Handshake.LocalReadyFrame() || !IsMarioVsLuigiGameplay(nds))
+        return fallback;
+    // Destroy the QObject during Qt thread shutdown, before C++ TLS teardown.
+    // QProcess cleanup in a thread_local destructor can hang Windows shutdown.
+    thread_local QProcess* workerProcess = [] {
+        auto* created = new QProcess;
+        QObject::connect(QThread::currentThread(), &QThread::finished, created,
+            [created] {
+                created->closeWriteChannel();
+                if (!created->waitForFinished(1000)) {
+                    created->kill();
+                    created->waitForFinished(1000);
+                }
+                created->deleteLater();
+            }, Qt::DirectConnection);
+        return created;
+    }();
+    auto& process = *workerProcess;
+    thread_local bool started = false;
+    thread_local bool failed = false;
+    thread_local unsigned submittedHeld = 0;
+    thread_local melonDS::u32 submittedFrame = 0;
+    thread_local melonDS::u32 submittedGeneration = 0;
+    const auto fail = [&]() -> InputState {
+        if (!failed) {
+            TraceOutput::Printf("NSMB WatchPolicy: FAILED frame=%u; inputs disabled\n", frame);
+            TraceOutput::Flush();
+            process.kill();
+        }
+        failed = true;
+        std::fflush(nullptr);
+        std::_Exit(71); // Let the GUI supervisor stop the pair on worker failure.
+    };
+    const auto readLine = [&](int timeout) {
+        QElapsedTimer timer;
+        timer.start();
+        while (!process.canReadLine()) {
+            const int remaining = timeout - static_cast<int>(timer.elapsed());
+            if (remaining <= 0 || !process.waitForReadyRead(remaining))
+                return QByteArray();
+        }
+        return process.readLine().trimmed();
+    };
+    if (failed || G.Rollback.Enabled)
+        return fail();
+    if (!started) {
+        process.setProcessChannelMode(QProcess::ForwardedErrorChannel);
+#ifdef Q_OS_WIN
+        process.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* args) {
+            args->flags |= 0x08000000; // CREATE_NO_WINDOW
+        });
+#endif
+        process.start(worker, QStringList{});
+        if (!process.waitForStarted(10000) || readLine(30000) != "READY")
+            return fail();
+        started = true;
+        TraceOutput::Printf("NSMB WatchPolicy: ready player=1 ruleCPU=1\n");
+        TraceOutput::Flush();
+    }
+    const AIObservation::DecisionFrame decisionFrame {
+        frame, NetplaySession::LogicalFrame(NetplaySessionContext(), frame),
+        G.NetplaySession.Handshake.Generation(),
+        static_cast<melonDS::u32>(std::max(0, G.Connection.Delay)), false,
+    };
+    const auto observation = AIObservation::BuildDecisionRecord(
+        AIObservationContext(), AIObservationHooks(), instanceID, decisionFrame, fallback, nds);
+    if (observation.empty())
+        return fail();
+    const auto* previous = G.AIObservationRuntime.AppliedInput(instanceID, CurrentPacketBridgeLocalPlayer());
+    const unsigned appliedPreviousHeld = previous ? (~previous->Input.KeyMask & 0xFFF) : 0;
+    // Training history is the previous submitted decision, not the delayed
+    // input consumed by the game. The packet bridge overwrites AppliedInput.
+    if (submittedFrame + 1 != frame || submittedGeneration != decisionFrame.Generation)
+        submittedHeld = 0;
+    const auto request = std::string("{\"previousHeld\":") + std::to_string(submittedHeld)
+        + ",\"appliedPreviousHeld\":" + std::to_string(appliedPreviousHeld)
+        + ",\"decision\":" + observation.substr(0, observation.size() - 1) + "}\n";
+    if (process.write(request.data(), static_cast<qint64>(request.size())) != static_cast<qint64>(request.size()))
+        return fail();
+    const auto reply = readLine(5000);
+    unsigned replyFrame = 0, held = 0;
+    char extra = 0;
+    if (std::sscanf(reply.constData(), "%u %u %c", &replyFrame, &held, &extra) != 2
+        || replyFrame != frame || held > 0xFFF)
+        return fail();
+    auto input = NeutralInput();
+    input.KeyMask = static_cast<melonDS::u16>((~held) & 0xFFF);
+    submittedHeld = held;
+    submittedFrame = frame;
+    submittedGeneration = decisionFrame.Generation;
+    if (frame % 120 == 0) {
+        TraceOutput::Printf("NSMB WatchPolicy: frame=%u held=0x%03X\n", frame, held);
+        TraceOutput::Flush();
+    }
+    return input;
 }
 
 InputState ApplyRuleBasedAIInput(
@@ -1477,6 +1584,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         testInput = AIObservation::ApplyImitationInput(
             AIObservationContext(), AIObservationHooks(), instanceID,
             inputFrame, nds, CurrentPacketBridgeLocalPlayer(), testInput);
+    testInput = ApplyWatchPolicy(instanceID, inputFrame, nds, testInput);
     RecordAIPlayLogAppliedInput(
         instanceID,
         inputFrame,

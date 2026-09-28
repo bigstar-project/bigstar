@@ -1,0 +1,2 @@
+# Frozen packages have byte-verified source manifests, including line endings.
+nsmb_mvl_rule_versions/** -text whitespace=cr-at-eol

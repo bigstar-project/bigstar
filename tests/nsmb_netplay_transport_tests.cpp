@@ -42,14 +42,11 @@ bool PumpUntilConnected(NsmbNetplayTransport::Transport &host,
 
 void TestLoopbackSendReceive() {
   NsmbNetplayTransport::Transport host;
-  std::uint16_t port = 0;
-  for (std::uint16_t candidate = 38650; candidate < 38750; candidate++) {
-    if (host.Initialize({false, candidate, "127.0.0.1"}) ==
-        NsmbNetplayTransport::InitializeResult::Success) {
-      port = candidate;
-      break;
-    }
-  }
+  // Let the OS choose an available port; fixed ranges can be reserved or occupied.
+  Expect(host.Initialize({false, 0, "127.0.0.1"}) ==
+             NsmbNetplayTransport::InitializeResult::Success,
+         "host initializes on an ephemeral loopback port");
+  const std::uint16_t port = host.BoundPort();
   Expect(port != 0, "host binds an available loopback port");
   if (port == 0)
     return;

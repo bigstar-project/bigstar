@@ -65,6 +65,7 @@ fn specta_builder() -> SpectaBuilder<tauri::Wry> {
         commands::ensure_roms,
         commands::start_match,
         solo_test::start_solo_test,
+        solo_test::start_cpu_match,
         solo_test::stop_solo_test,
         solo_test::get_solo_test_status,
         commands::stop_match,

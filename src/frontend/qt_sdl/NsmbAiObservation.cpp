@@ -135,12 +135,6 @@ private:
   const Hooks *PreviousHooks;
 };
 
-bool IsVsDroppedStarActorSettings(melonDS::u32 settings) {
-  const melonDS::u32 normalized = settings & 0x7FFFFFFFu;
-  return normalized == 0x00001002u || normalized == 0x00001012u ||
-         normalized == 0x00001102u || normalized == 0x00001112u;
-}
-
 void WriteJsonHex(std::ostream &out, melonDS::u32 value, int width = 8) {
   const std::ios::fmtflags oldFlags = out.flags();
   const char oldFill = out.fill();
@@ -3813,6 +3807,37 @@ void WriteAIObservationV2ObjectEntityJson(std::ostream& out, const GameStateObje
     out << "{\"source\":\"object\",\"category\":\"" << category
         << "\",\"categoryId\":" << AIObservationV2EntityCategoryID(category)
         << ",\"objectId\":" << entry.ObjectID
+        << ",\"actorGuid\":" << entry.Actor.GUID
+        << ",\"goombaBehaviorFunctionRaw\":" << entry.Actor.GoombaBehaviorFunctionRaw
+        << ",\"entityUpdateStateFound\":" << entry.Actor.EntityUpdateStateFound
+        << ",\"entityUpdateStateRaw\":" << entry.Actor.EntityUpdateStateRaw
+        << ",\"npcContactFound\":" << entry.Actor.NpcContactFound
+        << ",\"npcCollidedGroupsRaw\":" << entry.Actor.NpcCollidedGroupsRaw
+        << ",\"npcPlayerContactXRaw\":"
+        << static_cast<melonDS::s32>(entry.Actor.NpcPlayerContactXRaw)
+        << ",\"npcPlayerContactYRaw\":"
+        << static_cast<melonDS::s32>(entry.Actor.NpcPlayerContactYRaw)
+        << ",\"npcContactPlayerRaw\":" << entry.Actor.NpcContactPlayerRaw
+        << ",\"npcStompTriggerRaw\":" << entry.Actor.NpcStompTriggerRaw
+        << ",\"npcStompSpecialRaw\":" << entry.Actor.NpcStompSpecialRaw
+        << ",\"npcStompGraceRaw\":" << entry.Actor.NpcStompGraceRaw
+        << ",\"npcColliderCenterXRaw\":"
+        << static_cast<melonDS::s32>(entry.Actor.NpcColliderCenterXRaw)
+        << ",\"npcColliderCenterYRaw\":"
+        << static_cast<melonDS::s32>(entry.Actor.NpcColliderCenterYRaw)
+        << ",\"npcColliderHalfWidthRaw\":" << entry.Actor.NpcColliderHalfWidthRaw
+        << ",\"npcColliderHalfHeightRaw\":" << entry.Actor.NpcColliderHalfHeightRaw
+        << ",\"itemBehaviorFunctionRaw\":" << entry.Actor.ItemBehaviorFunctionRaw
+        << ",\"itemBehaviorStepRaw\":" << entry.Actor.ItemBehaviorStepRaw
+        << ",\"itemDirectionRaw\":" << entry.Actor.ItemDirectionRaw
+        << ",\"itemEmergenceTargetYRaw\":" << entry.Actor.ItemEmergenceTargetYRaw
+        << ",\"itemKindRaw\":" << entry.Actor.ItemKindRaw
+        << ",\"itemRollingSuppressedRaw\":" << entry.Actor.ItemRollingSuppressedRaw
+        << ",\"koopaBehaviorFunctionRaw\":" << entry.Actor.KoopaBehaviorFunctionRaw
+        << ",\"koopaBehaviorStepRaw\":" << entry.Actor.KoopaBehaviorStepRaw
+        << ",\"koopaShellModeRaw\":" << entry.Actor.KoopaShellModeRaw
+        << ",\"koopaDirectionRaw\":" << entry.Actor.KoopaDirectionRaw
+        << ",\"koopaCollisionRaw\":" << entry.Actor.KoopaCollisionRaw
         << ",\"settings\":" << entry.Actor.Settings
         << ",\"kindByPlayer\":[{\"kind\":" << p0Kind.first << ",\"confidence\":" << p0Kind.second
         << "},{\"kind\":" << p1Kind.first << ",\"confidence\":" << p1Kind.second << "}]"
@@ -4256,6 +4281,94 @@ void TracePlayLog(Context context, const Hooks &hooks, int instanceID,
                   melonDS::u32 frame, melonDS::NDS *nds) {
   const ScopedContext active(context, hooks);
   TraceAIPlayLog(instanceID, frame, nds);
+}
+
+std::string BuildDecisionRecord(Context context, const Hooks &hooks, int instanceID,
+                                const DecisionFrame &frame, const InputState &localInput,
+                                melonDS::NDS *nds) {
+  if (!nds || !nds->MainRAM)
+    return {};
+  const auto &config = context.Diagnostics;
+  const ScopedContext active(context, hooks);
+  const GameStateSample sample = hooks.ReadGameState(nds);
+  // V4 extends the same stage scope as the comparison V3 stream.
+  if (config.AIObservationV3StageFilter >= 0 &&
+      (sample.StageGroup != 9 || sample.StageID !=
+          static_cast<melonDS::u32>(config.AIObservationV3StageFilter)))
+    return {};
+  const GameStateObjectScanCache objects = BuildGameStateObjectScanCache(nds);
+  std::ostringstream legacy;
+  WriteAIObservationV2Record(legacy, instanceID, frame.RawFrame, sample,
+                             objects, context.LocalPlayer, true);
+  std::string observation = legacy.str();
+  if (!observation.empty() && observation.back() == '\n')
+    observation.pop_back();
+
+  std::ostringstream record;
+  record << "{\"schema\":\"nsmb_mvl_decision_observation_v4\",\"revision\":2"
+         << ",\"time\":{\"phase\":\"before_input_submission\""
+         << ",\"rawFrame\":" << frame.RawFrame
+         << ",\"logicalFrame\":" << frame.LogicalFrame
+         << ",\"generation\":" << frame.Generation
+         << ",\"inputDelay\":" << frame.InputDelay
+         << ",\"sampleApplyLogicalFrame\":" << (frame.LogicalFrame + frame.InputDelay)
+         << ",\"gamePacketTickRaw\":" << sample.NetPacketTick
+         << ",\"rollbackEnabled\":" << (frame.RollbackEnabled ? "true" : "false")
+         << "},\"sampledLocalInput\":{\"player\":" << context.LocalPlayer
+         << ",\"held\":" << ((~localInput.KeyMask) & 0xFFF)
+         << ",\"touching\":" << (localInput.Touching ? "true" : "false")
+         << ",\"touchX\":" << localInput.TouchX
+         << ",\"touchY\":" << localInput.TouchY
+         << "},\"runtimePlayers\":[";
+  for (int player = 0; player < 2; player++) {
+    if (player != 0)
+      record << ',';
+    const auto value = [player](melonDS::u32 p0, melonDS::u32 p1) {
+      return player == 0 ? p0 : p1;
+    };
+    const auto direction = value(sample.PlayerActor0Direction, sample.PlayerActor1Direction);
+    const bool facingKnown = value(sample.PlayerActor0Found, sample.PlayerActor1Found) != 0 && direction <= 1;
+    record << "{\"found\":" << value(sample.PlayerActor0Found, sample.PlayerActor1Found)
+           << ",\"inventoryPowerupRaw\":" << value(sample.Player0InventoryPowerup, sample.Player1InventoryPowerup)
+           << ",\"powerupRaw\":" << value(sample.Player0Powerup, sample.Player1Powerup)
+           << ",\"facing\":" << (facingKnown ? (direction == 0 ? "1" : "-1") : "null")
+           << ",\"facingKnown\":" << (facingKnown ? "true" : "false")
+           << ",\"directionRaw\":" << value(sample.PlayerActor0Direction, sample.PlayerActor1Direction)
+           << ",\"animationIDRaw\":" << value(sample.PlayerActor0AnimationID, sample.PlayerActor1AnimationID)
+           << ",\"visibleFlagRaw\":" << value(sample.PlayerActor0VisibleFlag, sample.PlayerActor1VisibleFlag)
+           << ",\"characterIDRaw\":" << value(sample.PlayerActor0CharacterIDBase, sample.PlayerActor1CharacterIDBase)
+           << ",\"controlStateRaw\":" << value(sample.PlayerActor0ControlState, sample.PlayerActor1ControlState)
+           << ",\"actionFlagRaw\":" << value(sample.PlayerActor0ActionFlag, sample.PlayerActor1ActionFlag)
+           << ",\"subActionFlagRaw\":" << value(sample.PlayerActor0SubActionFlag, sample.PlayerActor1SubActionFlag)
+           << ",\"physicsFlagRaw\":" << value(sample.PlayerActor0PhysicsFlag, sample.PlayerActor1PhysicsFlag)
+           << ",\"collisionFlagRaw\":" << value(sample.PlayerActor0CollisionFlag, sample.PlayerActor1CollisionFlag)
+           << ",\"environmentFlagRaw\":" << value(sample.PlayerActor0EnvironmentFlag, sample.PlayerActor1EnvironmentFlag)
+           << ",\"transitionFlagRaw\":" << value(sample.PlayerActor0TransitionFlag, sample.PlayerActor1TransitionFlag)
+           << ",\"updateLockedRaw\":" << value(sample.PlayerActor0UpdateLocked, sample.PlayerActor1UpdateLocked)
+           << ",\"transitioningRaw\":" << value(sample.PlayerActor0TransitioningFlag, sample.PlayerActor1TransitioningFlag)
+           << ",\"transitionStepRaw\":" << value(sample.PlayerActor0TransitionStep, sample.PlayerActor1TransitionStep)
+           << ",\"transitFuncRaw\":" << value(sample.PlayerActor0TransitFunc, sample.PlayerActor1TransitFunc)
+           << ",\"behaviorFuncRaw\":" << value(sample.PlayerActor0BehaviorFunc, sample.PlayerActor1BehaviorFunc)
+           << ",\"behaviorStepRaw\":" << value(sample.PlayerActor0BehaviorStep, sample.PlayerActor1BehaviorStep)
+           << ",\"turnAngleRaw\":" << value(sample.PlayerActor0TurnAngle, sample.PlayerActor1TurnAngle)
+           << ",\"transitArgRaw\":" << value(sample.PlayerActor0TransitArg, sample.PlayerActor1TransitArg)
+           << ",\"defeatedRaw\":" << value(sample.PlayerActor0DefeatedFlag, sample.PlayerActor1DefeatedFlag)
+           << ",\"damageStateRaw\":" << value(sample.PlayerActor0DamageState, sample.PlayerActor1DamageState)
+           << ",\"damageCooldownRaw\":" << value(sample.PlayerActor0DamageCooldown, sample.PlayerActor1DamageCooldown)
+           << ",\"damageGuardTimerRaw\":" << value(sample.Player0DamageGuardTimer, sample.Player1DamageGuardTimer)
+           << ",\"damageGuardFlagRaw\":" << value(sample.PlayerActor0DamageGuardFlag, sample.PlayerActor1DamageGuardFlag)
+           << ",\"powerupPhaseRaw\":" << value(sample.PlayerActor0PowerupPhase, sample.PlayerActor1PowerupPhase)
+           << ",\"powerupTimerRaw\":" << value(sample.PlayerActor0PowerupTimer, sample.PlayerActor1PowerupTimer)
+           << ",\"powerupGainTimerRaw\":" << value(sample.PlayerActor0PowerupGainTimer, sample.PlayerActor1PowerupGainTimer)
+           << ",\"requestedPowerupRaw\":" << value(sample.PlayerActor0RequestedPowerup, sample.PlayerActor1RequestedPowerup)
+           << ",\"currentPowerupRaw\":" << value(sample.PlayerActor0CurrentPowerup, sample.PlayerActor1CurrentPowerup)
+           << ",\"previousPowerupRaw\":" << value(sample.PlayerActor0PreviousPowerup, sample.PlayerActor1PreviousPowerup)
+           << ",\"lives\":" << value(sample.Player0Lives, sample.Player1Lives)
+           << ",\"deaths\":" << value(sample.Player0Deaths, sample.Player1Deaths)
+           << '}';
+  }
+  record << "],\"observation\":" << observation << "}\n";
+  return record.str();
 }
 
 } // namespace NsmbMvlNetplay::AIObservation

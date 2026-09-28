@@ -89,3 +89,11 @@ if (process.env.CI === "true" && existsSync(bridgeSource)) {
 
 copySidecar("bigstar-net-bridge", bridgeSource, bridgeTargets);
 copySidecar("melonDS", melonDsSource, melonDsTargets);
+
+// CPU runtime is self-contained; no user Python installation is needed.
+const cpuSource = resolve(repoRoot, "build/rule-cpu/bigstar-rule-cpu.exe");
+execFileSync(cpuSource, ["--check"], { stdio: "inherit", timeout: 30000 });
+copySidecar("bigstar-rule-cpu", cpuSource, [
+  resolve(guiDir, "src-tauri/target/release/bigstar-rule-cpu.exe"),
+  resolve(guiDir, "src-tauri/binaries/bigstar-rule-cpu-x86_64-pc-windows-msvc.exe"),
+]);

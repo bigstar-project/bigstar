@@ -555,6 +555,15 @@ void ReadPlayerTransitionState(melonDS::NDS *nds, const ObjectScanSample &actor,
       (actionFlag & 0x00400000u) != 0 ? (shellActorPtr != 0 ? 2u : 1u) : 0u;
   const melonDS::u32 transitFunc = nds->ARM9Read32(actor.Base + 0x990);
   const melonDS::u32 transitArg = nds->ARM9Read32(actor.Base + 0x994);
+  // US overlay 10's ordinary movement state, separate from death/pipe transit.
+  const melonDS::u32 behaviorFunc = nds->ARM9Read32(actor.Base + 0x980);
+  const melonDS::u32 behaviorStep = nds->ARM9Read8(actor.Base + 0xB9E);
+  // US overlay 10's turning state compares this signed 16-bit angle with
+  // its facing target before leaving phase 1. Preserve the raw bits here.
+  const melonDS::u32 turnAngle =
+      IsValidMainRAMRange(nds, actor.Base + 0xA2, 2)
+          ? nds->ARM9Read16(actor.Base + 0xA2)
+          : 0;
 
   if (player == 0) {
     sample.PlayerActor0PlayerID = playerID;
@@ -578,6 +587,9 @@ void ReadPlayerTransitionState(melonDS::NDS *nds, const ObjectScanSample &actor,
     sample.PlayerActor0ShellActorPtr = shellActorPtr;
     sample.PlayerActor0ShellState = shellState;
     sample.PlayerActor0TransitFunc = transitFunc;
+    sample.PlayerActor0BehaviorFunc = behaviorFunc;
+    sample.PlayerActor0BehaviorStep = behaviorStep;
+    sample.PlayerActor0TurnAngle = turnAngle;
     sample.PlayerActor0TransitArg = transitArg;
     return;
   }
@@ -602,6 +614,9 @@ void ReadPlayerTransitionState(melonDS::NDS *nds, const ObjectScanSample &actor,
   sample.PlayerActor1ShellActorPtr = shellActorPtr;
   sample.PlayerActor1ShellState = shellState;
   sample.PlayerActor1TransitFunc = transitFunc;
+  sample.PlayerActor1BehaviorFunc = behaviorFunc;
+  sample.PlayerActor1BehaviorStep = behaviorStep;
+  sample.PlayerActor1TurnAngle = turnAngle;
   sample.PlayerActor1TransitArg = transitArg;
 }
 
@@ -613,6 +628,10 @@ void ReadPlayerBaseRuntimeState(melonDS::NDS *nds,
     return;
 
   const melonDS::u32 linkedActor = nds->ARM9Read32(actor.Base + 0x688);
+  // NSMB-US StageActor::direction and PlayerBase::animID. These are
+  // independent of horizontal velocity (skidding and standing still).
+  const melonDS::u32 direction = nds->ARM9Read8(actor.Base + 0x2BD);
+  const melonDS::u32 animationID = nds->ARM9Read32(actor.Base + 0x76C);
   const melonDS::u32 transitionFlag = nds->ARM9Read32(actor.Base + 0x784);
   const melonDS::u32 collisionFlag = nds->ARM9Read32(actor.Base + 0x788);
   const melonDS::u32 environmentFlag = nds->ARM9Read32(actor.Base + 0x790);
@@ -638,6 +657,8 @@ void ReadPlayerBaseRuntimeState(melonDS::NDS *nds,
     sample.PlayerActor0EnvironmentFlag = environmentFlag;
     sample.PlayerActor0UpdateLocked = updateLocked;
     sample.PlayerActor0ControlState = controlState;
+    sample.PlayerActor0Direction = direction;
+    sample.PlayerActor0AnimationID = animationID;
     sample.PlayerActor0CharacterIDBase = characterID;
     sample.PlayerActor0RequestedPowerup = requestedPowerup;
     sample.PlayerActor0CurrentPowerup = currentPowerup;
@@ -658,6 +679,8 @@ void ReadPlayerBaseRuntimeState(melonDS::NDS *nds,
   sample.PlayerActor1EnvironmentFlag = environmentFlag;
   sample.PlayerActor1UpdateLocked = updateLocked;
   sample.PlayerActor1ControlState = controlState;
+  sample.PlayerActor1Direction = direction;
+  sample.PlayerActor1AnimationID = animationID;
   sample.PlayerActor1CharacterIDBase = characterID;
   sample.PlayerActor1RequestedPowerup = requestedPowerup;
   sample.PlayerActor1CurrentPowerup = currentPowerup;
@@ -1090,6 +1113,65 @@ void AddGameStateProcessObject(melonDS::NDS *nds,
   entry.Actor.StateType = stateType;
   entry.Actor.Flags = flags;
   ReadObjectTransform(nds, entry.Offset, entry.Actor);
+  if ((entry.ObjectID == 83 || entry.ObjectID == 94) &&
+      IsValidMainRAMRange(nds, base, 0x344)) {
+    melonDS::u32 updateState = 0;
+    // US ROM StageEntity::defeat at 0x0209CAB4 writes state 2 at +0x340.
+    // The reference header's inferred +0x33C layout differs from this ROM.
+    if (ReadMainRAMAddressU32(nds, base + 0x340, updateState)) {
+      entry.Actor.EntityUpdateStateFound = 1;
+      entry.Actor.EntityUpdateStateRaw = updateState;
+    }
+  }
+  if (entry.ObjectID == 83 && IsValidMainRAMRange(nds, base, 0x3FC)) {
+    melonDS::u32 function = 0;
+    if (ReadMainRAMAddressU32(nds, base + 0x3F4, function) &&
+        IsValidMainRAMRange(nds, function & ~1u, 4))
+      entry.Actor.GoombaBehaviorFunctionRaw = function;
+  }
+  if ((entry.ObjectID == 83 || entry.ObjectID == 94) &&
+      IsValidMainRAMRange(nds, base, 0x3F2) &&
+      IsValidMainRAMRange(nds, 0x020CA290, 1)) {
+    // ActiveCollider at +0x120: rectangle config at +0x14, signed half
+    // intersection distances at +0x3C/+0x64, player group zero.
+    // ROM canPlayerStomp reads the NPC bytes +0x3EC/+0x3F1 and the shared
+    // byte 0x020CA290. Preserve raw values; don't infer contact causality here.
+    entry.Actor.NpcCollidedGroupsRaw = nds->ARM9Read16(base + 0x1C0);
+    entry.Actor.NpcPlayerContactXRaw = nds->ARM9Read32(base + 0x15C);
+    entry.Actor.NpcPlayerContactYRaw = nds->ARM9Read32(base + 0x184);
+    entry.Actor.NpcContactPlayerRaw = nds->ARM9Read8(base + 0x1C7);
+    entry.Actor.NpcStompTriggerRaw = nds->ARM9Read8(base + 0x3EC);
+    entry.Actor.NpcStompSpecialRaw = nds->ARM9Read8(base + 0x3F1);
+    entry.Actor.NpcStompGraceRaw = nds->ARM9Read8(0x020CA290);
+    entry.Actor.NpcColliderCenterXRaw = nds->ARM9Read32(base + 0x134);
+    entry.Actor.NpcColliderCenterYRaw = nds->ARM9Read32(base + 0x138);
+    entry.Actor.NpcColliderHalfWidthRaw = nds->ARM9Read32(base + 0x13C);
+    entry.Actor.NpcColliderHalfHeightRaw = nds->ARM9Read32(base + 0x140);
+    entry.Actor.NpcContactFound = 1;
+  }
+  if (entry.ObjectID == 31 && IsValidMainRAMRange(nds, base, 0x5CE)) {
+    melonDS::u32 function = 0;
+    if (ReadMainRAMAddressU32(nds, base + 0x53C, function) &&
+        IsValidMainRAMRange(nds, function & ~1u, 4)) {
+      entry.Actor.ItemBehaviorFunctionRaw = function;
+      entry.Actor.ItemBehaviorStepRaw = nds->ARM9Read8(base + 0x5CD);
+      entry.Actor.ItemDirectionRaw = nds->ARM9Read8(base + 0x2BD);
+      entry.Actor.ItemEmergenceTargetYRaw = nds->ARM9Read32(base + 0x568);
+      entry.Actor.ItemKindRaw = nds->ARM9Read16(base + 0x5A0);
+      entry.Actor.ItemRollingSuppressedRaw = nds->ARM9Read8(base + 0x5C2);
+    }
+  }
+  if (entry.ObjectID == 94 && IsValidMainRAMRange(nds, base, 0x474)) {
+    melonDS::u32 function = 0;
+    if (ReadMainRAMAddressU32(nds, base + 0x40C, function) &&
+        IsValidMainRAMRange(nds, function & ~1u, 4)) {
+      entry.Actor.KoopaBehaviorFunctionRaw = function;
+      entry.Actor.KoopaBehaviorStepRaw = nds->ARM9Read8(base + 0x473);
+      entry.Actor.KoopaShellModeRaw = nds->ARM9Read8(base + 0x471);
+      entry.Actor.KoopaDirectionRaw = nds->ARM9Read8(base + 0x2BD);
+      entry.Actor.KoopaCollisionRaw = nds->ARM9Read32(base + 0x24C);
+    }
+  }
   cache.Entries.push_back(entry);
 
   if (entry.LifecycleState > 2 || entry.Type > 2)

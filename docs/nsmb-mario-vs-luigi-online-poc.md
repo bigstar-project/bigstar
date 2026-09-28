@@ -1,6 +1,17 @@
 # NSMB Mario vs Luigi Online PoC
 
-## Current real-WAN investigation - 2026-09-16 (updated 2026-09-19)
+## CPU対戦GUIへの統合 - 2026-09-29
+
+- mainから `codex/gui-rule-cpu` を作成し、研究ブランチから3種類のCPUと必要な観測・入力ブリッジだけを移植。学習処理・研究ログ・実験用ローカルロールアウトは移していない。
+- 下記WAN修正のゲーム更新単位の入力FIFO・同期検査は維持。CPUはローカルのルイージ入力だけを供給し、ロールバックを無効にする。形態・敵・地形などの読取情報を追加した。
+- カロンは高速探索DLLを含む独立実行ファイルに同梱。旧手動対戦9598フレームに対して操作差0件。3種類をGUIと同じ起動処理で各40秒実行し、操作・起動・片側終了時の両側停止を確認。強さの追加評価ではない。
+- CMakeビルド、CTest 17件通過。通信テストの固定ポート範囲が使用できなかったため、OSによる空きポート割当へ変更した。
+- デスクトップGUIでカロンを選択して対戦開始・終了を確認。CPU側は `WA_DontShowOnScreen` で非表示にし、人間側1画面だけで60fps表示を確認した。長時間・全環境での無停止保証ではない。詳細研究ログは通常対戦では無効。
+- Rust: fmt、strict Clippy、69テスト通過。GUI: typecheck、Biome、版別15・unit37・browser77・E2E2テスト通過。CPU単体ビルドと自己診断も通過。
+- 配布用GUI・MSI・NSISを生成し、`tools/bigstar/artifacts/insiders/release` にCPU実行ファイルを含めて配置・ハッシュ確認済み。WindowsでNodeのフォルダーrenameがEPERMとなる場合は、引数を環境変数で渡してPowerShellの標準移動へフォールバックする。実成果物の移動を再検証した。
+- 次の工程は統合差分のmainへのレビュー・マージ。mainへのマージ・pushは未実施。CPUランタイムの構成とビルド手順は `tools/rule-cpu/README.md`。
+
+## 維持しているreal-WAN修正 - 2026-09-16 (updated 2026-09-19)
 
 - **Current status:** 当日の城での同期ずれ2件を旧版で再現し、入力を消費するゲーム更新の対応が崩れる原因を特定、通常lockstep (`rollback=0`) 経路を修正した。CMake buildとCTest 17件、元入力の48500/66500-frame最終再生がpass。既存ROMファイルの再生成は不要。
 - **Root cause:** 画面frameごとに入力scratchを上書きしていた。復活処理が片側だけ画面frameを跨ぐと、同じgame tickに別の入力が使われる。末尾-0ではgame 12002にhostがtick 11384 / Luigi keys 0x800、clientがtick 11383 / 0x810を使い、処理終了時のXが分岐した。OSの10秒停滞とは別の、エミュレータ内の更新境界の問題。

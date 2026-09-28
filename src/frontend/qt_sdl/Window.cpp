@@ -695,6 +695,10 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
         // if the window was closed in fullscreen do not restore this
         setWindowState(windowState() & ~Qt::WindowFullScreen);
     }
+    // Keep the CPU peer rendering without creating a second interactive window.
+    // The static Windows Qt build does not include the offscreen QPA plugin.
+    if (!qgetenv("MELONDS_NSML_RULE_WORKER").isEmpty())
+        setAttribute(Qt::WA_DontShowOnScreen);
     show();
 
     panel = nullptr;

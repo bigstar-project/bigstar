@@ -1,0 +1,15 @@
+{
+  "version": "combat-v2-20260920",
+  "source_run": "logs\\rl-rule-overheadflight-source-20260920",
+  "source_controller_sha256": "56529c0c01df96a649d83c852fd43b9956fcdc8cdc652421ef981b404ca547ed",
+  "common_base_commit": "62ebbdc7",
+  "validation": "Overhead landing prediction. Beginner: 12 cases 4 wins, star difference +32, 14 deaths; additional 6 cases 4 wins, +26, 4 deaths. Noop 9/9 five-star finishes, 4 deaths. Combat opponent: 3 wins and 3 timeouts across both slots; P1 wins all 3, P0 weaker. Human strength unverified.",
+  "files": {
+    "__init__.py": "e3e6df09f9eb67f74e2eddb6d17f994e6ba6740315cae347e03dac7f5679486f",
+    "base.py": "dd82d311855b406c0b21c174f2f4f229f45d284fa9127a4a10bf9952df77ecc7",
+    "features.py": "eeca8bdf5b57f53490cc2e9919cc03d19b9c07b547a88334bdedbe27e0cf55f9",
+    "grass-navigation-tiles.json": "e8dc961bb2efd0d4f0e95a008b1105e05d879b62aa23bd08ba92a4263820db17",
+    "navigation.py": "97d8a15d7c3ea9d34496b5035f6d17928b9ea03b0f3504497f112e4ed7f47929",
+    "routed.py": "67ba8ecd5717902cfb4644d44c1dc8d637b4d4134c90332558748f9e06013f9f"
+  }
+}

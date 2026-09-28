@@ -7,6 +7,7 @@ import {
 } from './buildProfile';
 import { AppTitlebar } from './components/AppTitlebar';
 import { BattleView } from './launcher/BattleView';
+import { CpuBattleView } from './launcher/CpuBattleView';
 import { HistoryView } from './launcher/HistoryView';
 import { LauncherShell } from './launcher/LauncherShell';
 import { OnboardingGate } from './launcher/OnboardingGate';
@@ -61,6 +62,10 @@ export function App() {
             updateField={launcher.updateField}
           />
           {aiDevToolsEnabled && aiViewerMounted ? <AIReplayViewer /> : null}
+          <CpuBattleView
+            controller={launcher.soloTest}
+            blocked={launcher.soloTestBlocked}
+          />
           {currentRuntimeCapabilities().soloTest ? (
             <SoloTestView
               controller={launcher.soloTest}

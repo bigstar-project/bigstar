@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isTauri } from '@tauri-apps/api/core';
 import {
+  type CpuOpponent,
   commands,
   type SoloTestRequest,
   type SoloTestStatus,
@@ -42,16 +43,22 @@ export function useSoloTest(enabled: boolean) {
       unwrap(commands.startSoloTest(request)),
     onSuccess: (data) => client.setQueryData(key, data),
   });
+  const startCpu = useMutation({
+    mutationFn: (opponent: CpuOpponent) =>
+      unwrap(commands.startCpuMatch(opponent)),
+    onSuccess: (data) => client.setQueryData(key, data),
+  });
   const stop = useMutation({
     mutationFn: () => unwrap(commands.stopSoloTest()),
     onSuccess: (data) => client.setQueryData(key, data),
   });
   return {
     status: query.data ?? idle,
-    busy: start.isPending || stop.isPending,
+    busy: start.isPending || startCpu.isPending || stop.isPending,
     start,
+    startCpu,
     stop,
-    error: start.error ?? stop.error ?? query.error,
+    error: startCpu.error ?? start.error ?? stop.error ?? query.error,
     available: enabled && isTauri() && query.isSuccess,
   };
 }

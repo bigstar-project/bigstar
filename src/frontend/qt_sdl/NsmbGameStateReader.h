@@ -23,6 +23,41 @@ struct ObjectScanSample {
   melonDS::u32 Settings = 0;
   melonDS::u32 StateType = 0;
   melonDS::u32 Flags = 0;
+  // Diagnostic only: Goomba's member-function state at StageEntity + 0x3F4.
+  // Zero means unavailable; this is not the generic object lifecycle state.
+  melonDS::u32 GoombaBehaviorFunctionRaw = 0;
+  // Diagnostic only for Goomba/Koopa: US ROM update dispatcher at +0x340.
+  // The actor-specific state function can remain unchanged during defeat.
+  melonDS::u32 EntityUpdateStateFound = 0;
+  melonDS::u32 EntityUpdateStateRaw = 0;
+  // Read-only US ROM diagnostics for the NPC's last player intersection.
+  // These are sampled after the frame, not a collision callback event log.
+  melonDS::u32 NpcContactFound = 0;
+  melonDS::u32 NpcCollidedGroupsRaw = 0;
+  melonDS::u32 NpcPlayerContactXRaw = 0;
+  melonDS::u32 NpcPlayerContactYRaw = 0;
+  melonDS::u32 NpcContactPlayerRaw = 0;
+  melonDS::u32 NpcStompTriggerRaw = 0;
+  melonDS::u32 NpcStompSpecialRaw = 0;
+  melonDS::u32 NpcStompGraceRaw = 0;
+  melonDS::u32 NpcColliderCenterXRaw = 0;
+  melonDS::u32 NpcColliderCenterYRaw = 0;
+  melonDS::u32 NpcColliderHalfWidthRaw = 0;
+  melonDS::u32 NpcColliderHalfHeightRaw = 0;
+  // Item::switchState uses +0x53C and resets the byte at +0x5CD.
+  melonDS::u32 ItemBehaviorFunctionRaw = 0;
+  melonDS::u32 ItemBehaviorStepRaw = 0;
+  melonDS::u32 ItemDirectionRaw = 0;
+  melonDS::u32 ItemEmergenceTargetYRaw = 0;
+  melonDS::u32 ItemKindRaw = 0;
+  melonDS::u32 ItemRollingSuppressedRaw = 0;
+  // KoopaTroopa state member function, step, shell mode and collision probes.
+  // Diagnostic only; object ID and valid function must be checked by consumers.
+  melonDS::u32 KoopaBehaviorFunctionRaw = 0;
+  melonDS::u32 KoopaBehaviorStepRaw = 0;
+  melonDS::u32 KoopaShellModeRaw = 0;
+  melonDS::u32 KoopaDirectionRaw = 0;
+  melonDS::u32 KoopaCollisionRaw = 0;
   melonDS::u32 PosX = 0;
   melonDS::u32 PosY = 0;
   melonDS::u32 PosZ = 0;

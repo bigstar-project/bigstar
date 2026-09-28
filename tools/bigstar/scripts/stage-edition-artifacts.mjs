@@ -10,17 +10,47 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const RUNTIME_FILES = [
   'bigstar.exe',
   'melonDS.exe',
   'bigstar-net-bridge.exe',
+  'bigstar-rule-cpu.exe',
 ];
 
 function assertGeneratedPath(path, generatedRoot) {
   const normalizedRoot = `${resolve(generatedRoot)}${sep}`;
   if (!resolve(path).startsWith(normalizedRoot)) {
     throw new Error(`成果物ディレクトリ外のパスは操作できません: ${path}`);
+  }
+}
+
+function renameGeneratedDirectory(source, destination) {
+  try {
+    renameSync(source, destination);
+  } catch (error) {
+    if (process.platform !== 'win32' || error?.code !== 'EPERM') {
+      throw error;
+    }
+    // Some Windows hosts reject libuv's rename for executable payloads while
+    // the native directory move succeeds. Pass paths as data, never shell code.
+    const moved = spawnSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      '$ErrorActionPreference = "Stop"; if (Test-Path -LiteralPath $env:BIGSTAR_STAGE_DESTINATION) { throw "Artifact destination already exists" }; Move-Item -LiteralPath $env:BIGSTAR_STAGE_SOURCE -Destination $env:BIGSTAR_STAGE_DESTINATION',
+    ], {
+      env: {
+        ...process.env,
+        BIGSTAR_STAGE_SOURCE: source,
+        BIGSTAR_STAGE_DESTINATION: destination,
+      },
+      windowsHide: true,
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    if (moved.error || moved.status !== 0) {
+      throw new Error(`成果物の移動に失敗しました: ${moved.stderr || moved.error || error}`);
+    }
   }
 }
 
@@ -162,6 +192,6 @@ export function stageEditionArtifacts({
   );
 
   rmSync(destinationRoot, { force: true, recursive: true });
-  renameSync(temporaryRoot, destinationRoot);
+  renameGeneratedDirectory(temporaryRoot, destinationRoot);
   return destinationRoot;
 }

@@ -289,7 +289,7 @@ function defaultPlayerIds(
 export function useLauncherController() {
   const aiDevToolsEnabled = areAiDevToolsEnabled();
   const runtimeCapabilities = currentRuntimeCapabilities();
-  const soloTest = useSoloTest(runtimeCapabilities.soloTest);
+  const soloTest = useSoloTest(true);
   const soloBusy =
     soloTest.busy || soloTest.status.active || soloTest.status.preparing;
   const queryClient = useQueryClient();
@@ -314,6 +314,7 @@ export function useLauncherController() {
       'battle',
       'ai',
       'solo-test',
+      'cpu',
       'history',
       'settings',
     ] as const)

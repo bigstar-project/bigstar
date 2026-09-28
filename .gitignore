@@ -47,3 +47,4 @@ freebios/build/
 
 roms/
 **/.alchemy/**
+.venv-rule-build/

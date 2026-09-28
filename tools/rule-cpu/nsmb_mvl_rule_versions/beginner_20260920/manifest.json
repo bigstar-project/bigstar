@@ -1,0 +1,18 @@
+{
+  "version": "beginner-20260920",
+  "source_commit": "62ebbdc7",
+  "source_hashes": {
+    "scripts/nsmb_mvl_rule_match.py": "6600bc27d588b70586ddcdbc7add8cdbdbdded091944299c75fbd26f1c1ddd0a",
+    "scripts/nsmb_mvl_rule_match_v2.py": "d1e8f8f016441331241a1dd7147567e31e8603de3630ee7229d8e9b143e482be",
+    "scripts/nsmb_mvl_grass_navigation.py": "87021fcc76330ff8a0e8602d28975e7dc17675930973028338ee9fba957586c2",
+    "docs/analysis/nsmb-mvl-rule-match-20260920/grass-navigation-tiles.json": "e8dc961bb2efd0d4f0e95a008b1105e05d879b62aa23bd08ba92a4263820db17"
+  },
+  "files": {
+    "base.py": "dd82d311855b406c0b21c174f2f4f229f45d284fa9127a4a10bf9952df77ecc7",
+    "features.py": "eeca8bdf5b57f53490cc2e9919cc03d19b9c07b547a88334bdedbe27e0cf55f9",
+    "grass-navigation-tiles.json": "e8dc961bb2efd0d4f0e95a008b1105e05d879b62aa23bd08ba92a4263820db17",
+    "navigation.py": "97d8a15d7c3ea9d34496b5035f6d17928b9ea03b0f3504497f112e4ed7f47929",
+    "routed.py": "48c4f74ace6957971dc1da65bd257061cc01267f0d8361801cfee2e37cb18fe7",
+    "__init__.py": "e3e6df09f9eb67f74e2eddb6d17f994e6ba6740315cae347e03dac7f5679486f"
+  }
+}

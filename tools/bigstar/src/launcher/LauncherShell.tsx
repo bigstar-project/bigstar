@@ -103,6 +103,7 @@ function updateButtonClass(updateStatus: UpdateStatus) {
 }
 
 function viewTitle(view: View) {
+  if (view === 'cpu') return 'CPU対戦';
   if (view === 'solo-test') return 'ひとり検証';
   if (view === 'battle') {
     return '対戦';
@@ -117,6 +118,7 @@ function viewTitle(view: View) {
 }
 
 function viewIcon(view: View) {
+  if (view === 'cpu') return <Brain size={28} weight="fill" />;
   if (view === 'solo-test') return <Flask size={28} weight="fill" />;
   if (view === 'battle') {
     return (
@@ -349,6 +351,14 @@ export function LauncherShell({
                   >
                     Ctrl+1
                   </Kbd>
+                </Tabs.Trigger>
+                <Tabs.Trigger
+                  aria-label="CPU対戦"
+                  className={sidebarTabClass}
+                  value="cpu"
+                >
+                  <Brain size={22} weight="fill" />
+                  <span>CPU対戦</span>
                 </Tabs.Trigger>
                 {soloTestEnabled ? (
                   <Tabs.Trigger

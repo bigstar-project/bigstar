@@ -227,6 +227,8 @@ struct GameStateSample {
   melonDS::u32 PlayerActor0EnvironmentFlag = 0;
   melonDS::u32 PlayerActor0UpdateLocked = 0;
   melonDS::u32 PlayerActor0ControlState = 0;
+  melonDS::u32 PlayerActor0Direction = 0;
+  melonDS::u32 PlayerActor0AnimationID = 0;
   melonDS::u32 PlayerActor0CharacterIDBase = 0;
   melonDS::u32 PlayerActor0RequestedPowerup = 0;
   melonDS::u32 PlayerActor0CurrentPowerup = 0;
@@ -253,6 +255,9 @@ struct GameStateSample {
   melonDS::u32 PlayerActor0ShellActorPtr = 0;
   melonDS::u32 PlayerActor0ShellState = 0;
   melonDS::u32 PlayerActor0TransitFunc = 0;
+  melonDS::u32 PlayerActor0BehaviorFunc = 0;
+  melonDS::u32 PlayerActor0BehaviorStep = 0;
+  melonDS::u32 PlayerActor0TurnAngle = 0;
   melonDS::u32 PlayerActor0TransitArg = 0;
   PlayerCollisionMgrSample PlayerActor0CollisionMgr;
   PlayerHitboxSample PlayerActor0Hitbox;
@@ -287,6 +292,8 @@ struct GameStateSample {
   melonDS::u32 PlayerActor1EnvironmentFlag = 0;
   melonDS::u32 PlayerActor1UpdateLocked = 0;
   melonDS::u32 PlayerActor1ControlState = 0;
+  melonDS::u32 PlayerActor1Direction = 0;
+  melonDS::u32 PlayerActor1AnimationID = 0;
   melonDS::u32 PlayerActor1CharacterIDBase = 0;
   melonDS::u32 PlayerActor1RequestedPowerup = 0;
   melonDS::u32 PlayerActor1CurrentPowerup = 0;
@@ -313,6 +320,9 @@ struct GameStateSample {
   melonDS::u32 PlayerActor1ShellActorPtr = 0;
   melonDS::u32 PlayerActor1ShellState = 0;
   melonDS::u32 PlayerActor1TransitFunc = 0;
+  melonDS::u32 PlayerActor1BehaviorFunc = 0;
+  melonDS::u32 PlayerActor1BehaviorStep = 0;
+  melonDS::u32 PlayerActor1TurnAngle = 0;
   melonDS::u32 PlayerActor1TransitArg = 0;
   PlayerCollisionMgrSample PlayerActor1CollisionMgr;
   PlayerHitboxSample PlayerActor1Hitbox;
