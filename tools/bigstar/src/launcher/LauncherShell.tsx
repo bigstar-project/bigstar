@@ -370,38 +370,6 @@ export function LauncherShell({
                     Ctrl+{viewOrder.indexOf('cpu') + 1}
                   </Kbd>
                 </Tabs.Trigger>
-                {soloTestEnabled ? (
-                  <Tabs.Trigger
-                    aria-label="ひとり検証"
-                    className={sidebarTabClass}
-                    value="solo-test"
-                  >
-                    <Flask size={22} weight="fill" />
-                    <span>ひとり検証</span>
-                  </Tabs.Trigger>
-                ) : null}
-                {aiDevToolsEnabled ? (
-                  <Tabs.Trigger
-                    aria-label="AI"
-                    className={sidebarTabClass}
-                    value="ai"
-                  >
-                    <Brain
-                      className={css({
-                        flexShrink: '0',
-                      })}
-                      size={22}
-                      weight="fill"
-                    />
-                    <span
-                      className={css({
-                        textStyle: 'sm',
-                      })}
-                    >
-                      AI
-                    </span>
-                  </Tabs.Trigger>
-                ) : null}
                 <Tabs.Trigger
                   aria-label="対戦履歴"
                   className={sidebarTabClass}
@@ -460,6 +428,39 @@ export function LauncherShell({
                     Ctrl+{viewOrder.indexOf('settings') + 1}
                   </Kbd>
                 </Tabs.Trigger>
+                {/* ローカル限定のタブは、通常タブと区別できるよう設定の下に置く。 */}
+                {soloTestEnabled ? (
+                  <Tabs.Trigger
+                    aria-label="ひとり検証"
+                    className={sidebarTabClass}
+                    value="solo-test"
+                  >
+                    <Flask size={22} weight="fill" />
+                    <span>ひとり検証</span>
+                  </Tabs.Trigger>
+                ) : null}
+                {aiDevToolsEnabled ? (
+                  <Tabs.Trigger
+                    aria-label="AI"
+                    className={sidebarTabClass}
+                    value="ai"
+                  >
+                    <Brain
+                      className={css({
+                        flexShrink: '0',
+                      })}
+                      size={22}
+                      weight="fill"
+                    />
+                    <span
+                      className={css({
+                        textStyle: 'sm',
+                      })}
+                    >
+                      AI
+                    </span>
+                  </Tabs.Trigger>
+                ) : null}
                 <Tabs.Indicator className={css({ bg: 'blue.subtle.bg' })} />
               </Tabs.List>
             </div>
