@@ -34,6 +34,7 @@ pub(super) struct DiagnosticsReporter {
     local_address: Option<String>,
     remote_address: Option<String>,
     last_error: Option<String>,
+    recovery_deadline_unix_ms: Option<u128>,
     started_at: Instant,
     pub(super) stats: PacketStats,
 }
@@ -58,6 +59,7 @@ impl DiagnosticsReporter {
             local_address: None,
             remote_address: None,
             last_error: None,
+            recovery_deadline_unix_ms: None,
             started_at: Instant::now(),
             stats: PacketStats::default(),
         };
@@ -211,10 +213,24 @@ impl DiagnosticsReporter {
     }
 
     pub(super) fn fail(&mut self, error: &dyn std::fmt::Display) {
+        self.recovery_deadline_unix_ms = None;
         self.phase = "failed".to_owned();
         self.last_error = Some(error.to_string());
         eprintln!("bigstar-net-bridge diagnostics: failed: {error}");
         self.persist();
+    }
+
+    pub(super) fn begin_recovery(&mut self) {
+        self.recovery_deadline_unix_ms
+            .get_or_insert_with(|| super::unix_ms() + 60000);
+        self.last_error = None;
+        self.set_phase("recovering");
+    }
+
+    pub(super) fn finish_recovery(&mut self) {
+        self.recovery_deadline_unix_ms = None;
+        self.last_error = None;
+        self.set_phase("connected");
     }
 
     pub(super) fn persist(&self) {
@@ -230,7 +246,8 @@ impl DiagnosticsReporter {
             "updated_at_unix_ms": updated_at_unix_ms,
             "elapsed_seconds": self.started_at.elapsed().as_secs_f32(),
             "role": self.role,
-            "phase": self.phase,
+            "phase": if self.recovery_deadline_unix_ms.is_some() { "recovering" } else { &self.phase },
+            "recovery_deadline_unix_ms": self.recovery_deadline_unix_ms,
             "signal_url": self.signal_url,
             "session": self.session,
             "ice_servers": self.ice_servers,

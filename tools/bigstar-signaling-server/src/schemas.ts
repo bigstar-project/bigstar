@@ -139,6 +139,7 @@ export const wsClientMessageSchema = z.discriminatedUnion('type', [
     type: z.literal('sdp'),
     sdpType: z.enum(['offer', 'answer']),
     sdp: z.string(),
+    connectionId: z.number().int().nonnegative().optional(),
   }),
   z.object({
     type: z.literal('candidate'),
@@ -146,6 +147,10 @@ export const wsClientMessageSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('ping'),
+  }),
+  z.object({
+    type: z.literal('restart'),
+    connectionId: z.number().int().nonnegative(),
   }),
 ]);
 
@@ -157,10 +162,12 @@ export const wsServerMessageSchema = z.discriminatedUnion('type', [
     peerCount: z.number().int(),
     iceServers: z.array(z.string()),
     settings: gameSettingsSchema.optional(),
+    recoveryVersion: z.literal(1).optional(),
   }),
   z.object({
     type: z.literal('ready-for-offer'),
     peerCount: z.number().int(),
+    connectionId: z.number().int().nonnegative().optional(),
   }),
   z.object({
     type: z.literal('peer-joined'),
@@ -184,6 +191,7 @@ export const wsServerMessageSchema = z.discriminatedUnion('type', [
     from: roleSchema,
     sdpType: z.enum(['offer', 'answer']),
     sdp: z.string(),
+    connectionId: z.number().int().nonnegative().optional(),
   }),
   z.object({
     type: z.literal('candidate'),

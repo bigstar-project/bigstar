@@ -29,6 +29,13 @@ struct Runtime {
   bool NetworkPumpThreadStarted = false;
   bool NetworkPumpStop = false;
   std::thread NetworkPumpThread;
+  bool ConnectedOnce = false;
+  bool ResumeValidated = true;
+  melonDS::u64 SessionNonce = 0;
+  melonDS::u64 RemoteSessionNonce = 0;
+  std::optional<std::chrono::steady_clock::time_point> RecoveryStarted;
+  std::chrono::steady_clock::time_point LastResumeSent{};
+  std::chrono::steady_clock::time_point LastConnectAttempt{};
 };
 
 struct Context {

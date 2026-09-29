@@ -42,6 +42,7 @@ Transport::~Transport() { Shutdown(); }
 
 InitializeResult Transport::Initialize(const InitializeOptions &options) {
   Shutdown();
+  Options = options;
   if (!AcquireENet())
     return InitializeResult::ENetInitializationFailed;
   ENetAcquired = true;
@@ -101,8 +102,10 @@ std::uint16_t Transport::BoundPort() const {
   return Host ? Host->address.port : 0;
 }
 
-void Transport::HandleConnected(ENetPeer *peer) {
+void Transport::HandleConnected(ENetPeer *peer, bool recoverable) {
   Peer = peer;
+  if (recoverable)
+    enet_peer_timeout(peer, 32, 3000, 5000);
   if (ConnectingPeer == peer)
     ConnectingPeer = nullptr;
 }
@@ -112,6 +115,18 @@ void Transport::HandleDisconnected(ENetPeer *peer) {
     Peer = nullptr;
   if (ConnectingPeer == peer)
     ConnectingPeer = nullptr;
+}
+
+void Transport::RetryConnection() {
+  if (!Host || !Options.Client || Peer || ConnectingPeer)
+    return;
+  ENetAddress address{};
+  if (enet_address_set_host(&address, Options.PeerHost.c_str()) != 0)
+    return;
+  address.port = Options.Port;
+  ConnectingPeer = enet_host_connect(Host, &address, 1, 0);
+  if (ConnectingPeer)
+    enet_peer_timeout(ConnectingPeer, 32, 1000, 3000);
 }
 
 int Transport::Service(ENetEvent &event, std::uint32_t timeoutMs) {

@@ -73,6 +73,7 @@ export type BridgeDiagnostics = {
 	selected_candidate_pair: SelectedCandidatePair | null,
 	stats: BridgeStats | null,
 	last_error: string | null,
+	recovery_deadline_unix_ms: number | null,
 };
 
 export type BridgeStats = {

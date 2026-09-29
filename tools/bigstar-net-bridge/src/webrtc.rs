@@ -160,6 +160,12 @@ fn env_path(name: &str) -> Option<PathBuf> {
     })
 }
 
+// Opt-in fault injection for the loopback recovery integration test. Production
+// launchers never set this path; no system network settings are changed.
+fn test_outage_active() -> bool {
+    env_path("BIGSTAR_NET_BRIDGE_OUTAGE_FILE").is_some_and(|path| path.exists())
+}
+
 fn unix_ms() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -206,6 +212,7 @@ pub struct SignalingWebRtcConfig {
 }
 
 mod diagnostics;
+mod recovery;
 use diagnostics::DiagnosticsReporter;
 
 fn init_native_logging() {
@@ -821,65 +828,9 @@ pub async fn run_manual_webrtc(
 pub async fn run_signaling_webrtc(
     config: SignalingWebRtcConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let SignalingWebRtcConfig {
-        side,
-        local_bind,
-        local_target,
-        stun_servers,
-        signal_url,
-        session,
-        status_file,
-        fallback_to_default_stun,
-    } = config;
-    let role = role_from_side(&side);
-    let mut reporter = DiagnosticsReporter::new(status_file, role);
-    println!(
-            "bigstar-net-bridge webrtc: start mode=signaling role={} localBind={} localTarget={} signalUrl={} session={}",
-            role,
-            local_bind,
-            local_target
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "learn".to_owned()),
-            signal_url,
-            session
-        );
-    let endpoint = {
-        let endpoint_result = match role_from_side(&side) {
-            "offer" => {
-                connect_signal_offer(
-                    signal_url,
-                    session,
-                    stun_servers,
-                    &mut reporter,
-                    fallback_to_default_stun,
-                )
-                .await
-            }
-            "answer" => {
-                connect_signal_answer(
-                    signal_url,
-                    session,
-                    stun_servers,
-                    &mut reporter,
-                    fallback_to_default_stun,
-                )
-                .await
-            }
-            _ => unreachable!("validated by caller"),
-        };
-        match endpoint_result {
-            Ok(endpoint) => endpoint,
-            Err(error) => {
-                reporter.fail(error.as_ref());
-                return Err(error);
-            }
-        }
-    };
-    let result = run_webrtc_udp_tunnel(endpoint, local_bind, local_target, &mut reporter).await;
-    if let Err(error) = &result {
-        reporter.fail(error.as_ref());
-    }
-    result
+    recovery::run(config)
+        .await
+        .map_err(|error| error as Box<dyn std::error::Error>)
 }
 
 pub async fn run_loopback_smoke(
@@ -958,6 +909,7 @@ async fn run_local_signaling_server(
     let hello = serde_json::json!({
         "type": "hello",
         "role": "loopback",
+        "recoveryVersion": 1,
         "session": "loopback",
         "peerCount": 2,
         "iceServers": [],
@@ -970,6 +922,7 @@ async fn run_local_signaling_server(
     let ready = serde_json::json!({
         "type": "ready-for-offer",
         "peerCount": 2,
+        "connectionId": 1,
     })
     .to_string();
     first_tx
@@ -1171,9 +1124,26 @@ async fn run_webrtc_udp_tunnel(
     reporter: &mut DiagnosticsReporter,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let local_socket = TokioUdpSocket::bind(local_bind).await?;
-    let local_addr = local_socket.local_addr()?;
     let fixed_local_target = local_target.is_some();
     let local_target = Arc::new(TokioMutex::new(local_target));
+    run_webrtc_udp_tunnel_on_socket(
+        endpoint,
+        &local_socket,
+        &local_target,
+        fixed_local_target,
+        reporter,
+    )
+    .await
+}
+
+async fn run_webrtc_udp_tunnel_on_socket(
+    endpoint: WebRtcEndpoint,
+    local_socket: &TokioUdpSocket,
+    local_target: &Arc<TokioMutex<Option<SocketAddr>>>,
+    fixed_local_target: bool,
+    reporter: &mut DiagnosticsReporter,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let local_addr = local_socket.local_addr()?;
     let WebRtcEndpoint {
         data_channel,
         peer_connection,
@@ -1200,6 +1170,9 @@ async fn run_webrtc_udp_tunnel(
     let data_channel_state = "open".to_owned();
     let mut local_app_seen = false;
     let mut pending_local_replays: VecDeque<PendingLocalDatagram> = VecDeque::new();
+    let mut heartbeat_tick = tokio::time::interval(Duration::from_millis(500));
+    let mut last_peer_activity = Instant::now();
+    const HEARTBEAT: &[u8] = b"\0BIGSTAR-KEEPALIVE-v1\0";
 
     let initial_target = {
         let target = local_target.lock().await;
@@ -1235,6 +1208,13 @@ async fn run_webrtc_udp_tunnel(
 
     loop {
         tokio::select! {
+            _ = heartbeat_tick.tick() => {
+                if last_peer_activity.elapsed() >= Duration::from_secs(5) {
+                    return Err(io::Error::new(io::ErrorKind::TimedOut, "WebRTC peer heartbeat timed out").into());
+                }
+                if test_outage_active() { continue; }
+                dc_tx.send(HEARTBEAT).await?;
+            }
             recv = local_socket.recv_from(&mut app_buf) => {
                 let (len, from) = match recv {
                     Ok(received) => received,
@@ -1244,6 +1224,7 @@ async fn run_webrtc_udp_tunnel(
                     }
                     Err(err) => return Err(err.into()),
                 };
+                if test_outage_active() { continue; }
                 if !local_app_seen {
                     local_app_seen = true;
                     if !pending_local_replays.is_empty() {
@@ -1314,6 +1295,9 @@ async fn run_webrtc_udp_tunnel(
                     );
                     return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "WebRTC data channel closed").into());
                 };
+                if test_outage_active() { continue; }
+                last_peer_activity = Instant::now();
+                if msg == HEARTBEAT { continue; }
                 let target = *local_target.lock().await;
                 let Some(target) = target else {
                     reporter.stats.dropped_no_local_target += 1;
@@ -1494,8 +1478,8 @@ async fn run_webrtc_udp_tunnel(
                         since_last_app_to_rtc_ms,
                         last_webrtc_to_app_unix_ms,
                         since_last_rtc_to_app_ms,
-                        &peer_connection_state,
-                        &data_channel_state,
+                        peer_connection_state,
+                        data_channel_state,
                         reporter.stats.dropped_no_local_target,
                         delta_no_local_target,
                         impairment.app_to_webrtc_dropped,

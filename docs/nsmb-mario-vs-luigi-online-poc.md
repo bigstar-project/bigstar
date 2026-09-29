@@ -1,5 +1,41 @@
 # NSMB Mario vs Luigi Online PoC
 
+## 一時切断からの復帰 - 2026-09-29 実装・ローカル検証完了
+
+- 対象: 両側のエミュレーターと対戦状態が残っている通常lockstep対戦。通信断・処理停滞時は60秒の復帰待ちとし、再接続後に不足入力を補完する。アプリ再起動・クラッシュからの状態復元は対象外。
+- 実装: ENetの再接続、実行中セッションnonce・試合世代・入力epochの確認、連続受信ACK以降の入力再送を追加。初期seed・開始readyを再初期化せず、ゲーム進行で必要な入力を受け取るまで復帰期限を維持する。
+- 検証済み: 実エミュレーター2台で10/55/59秒の双方向遮断、10秒の片方向遮断、hostの10秒停止、10秒遮断2回から復帰。ゲーム更新単位の18 field（位置・速度・乱数・入力）の差0。65秒遮断は両側が期限超過でexit 70。CMake build・CTest 17件pass。
+- 検証基盤: `scripts/test-nsmb-recovery.py`。準備済みreplay fixtureをコピーし、子プロセスとlocalhost通信だけを操作。結果は `logs/recovery-20260929/` の各 `verification.json` と両roleのgame-tick CSVに保存。
+- 追加検証済み: clientの10秒停止、再戦の開始直後、2試合目のプレイ中の10秒遮断でも差0で復帰。後者は2世代の共通9359 tickを比較した。
+- WebRTC通し検証: ローカルの実仲介サーバー・2つのbridge・実エミュレーターで55/59秒遮断と10秒遮断2回、仲介WebSocketのみ10秒切断から復帰。全runでゲーム更新18 fieldの差0、両側exit 0。接続世代の更新、UDP socket/宛先の維持、ENet再接続と不足入力の補完を確認した。
+- 通し試験で見つけた修正: 再交渉中にOSのUDP受信queueへ溜まった古いENet接続要求が、相手の1枠だけのpeerを占有し、55秒遮断試験で期限超過した。再交渉中のUDPを消費・破棄して現行ENetと入力protocolの再送に任せるよう修正し、上記55/59秒・反復試験で通過。修正前の失敗ログは`webrtc55`、修正後は`webrtc55-fixed`/`webrtc59-fixed`/`webrtc-repeat10`。
+- GUIはゲーム側・bridge側の早い期限を使い「再接続中… 残り○秒」を表示。通信路が先に復活してもゲーム入力の復帰待ち表示を維持する。失敗・終了時には再接続中の表示を残さない。
+- 品質検証: CTest 17件、bridge strict Clippy・Rust 2件・WebRTC signaling UDP pair smoke、Tauri fmt・strict Clippy・Rust 71件（既存2件ignored）、GUI `corepack pnpm run ci`（版別15/unit37/browser79/E2E2・typecheck・Biome）、仲介サーバー同ci（14件・typecheck・Biome）がpass。native debugリンク時のOpenSSL PDB欠落警告は残るが、ビルドと実行は成功。
+- 次の確認: 更新した両クライアントで実WAN・別PCの対戦。ローカル試験は通信断からの復帰を検証したもので、全ネットワーク条件での保証ではない。60秒は検知後の復帰猶予で、再交渉・入力補完もその中に含む。既存ROMで追加導入不要。配布版・インストール版・本番サーバーは未更新、pushなし。
+- 配備条件: 新bridgeは`recoveryVersion=1`対応の仲介サーバーを必要とする。先にサーバーを更新し、両側のGUI・bridge・melonDSを揃える。旧クライアントの従来接続経路は維持。復帰用の参加権は既存tokenで検証し、切断中の部屋へ第三者は参加できない。
+
+### 復帰試験の再実行
+
+`scripts/test-nsmb-recovery.py --help` で引数を確認できる。fixtureは準備済みのhost/client別ROM・save・入力列・設定と`environment.json`を持つディレクトリ。原本は変更せず、未使用の出力先へコピーする。試験は実エミュレーター2台を起動し、共通game tickの18 field、traceの連続性、終了コード、復帰ログを照合する。出力先にはROMのコピーを含むため、外部共有しない。
+
+```powershell
+# リポジトリルート。--output は実行ごとに未使用の名前にする。
+cmake --build --preset release-windows-x86_64 -j 4
+python scripts/test-nsmb-recovery.py --fixture logs/codex-desync-replay-20260919/session0-fixed-final --output logs/recovery-repeat/udp --outage 10
+python scripts/test-nsmb-recovery.py --fixture logs/codex-desync-replay-20260919/session0-fixed-final --output logs/recovery-repeat/stall --mode stall-client --outage 10
+python scripts/test-nsmb-recovery.py --fixture logs/codex-desync-replay-20260919/session0-fixed-final --output logs/recovery-repeat/timeout --outage 65 --expect-timeout
+```
+
+`--direction host/client` は片方向遮断、`--repeat 2` は800入力間隔で2回、`--trigger-generation 1 --frames 10500` は2試合目の遮断。`--mode webrtc` はローカル仲介サーバーで部屋を作り、2つのbridgeと実エミュレーターを接続して通信断を注入する。`--mode signaling` はhost専用localhost TCP proxyで仲介WebSocketのみを切断し、同じ参加tokenによる再接続を確認する。既定は`http://127.0.0.1:18888`。試験用の`BIGSTAR_NET_BRIDGE_OUTAGE_FILE`は本番ランチャーでは設定しない。
+
+```powershell
+# 別ターミナルでローカル仲介サーバーを起動。
+cd tools/bigstar-signaling-server
+corepack pnpm exec wrangler dev --local --ip 127.0.0.1 --port 18888 --compatibility-date 2026-06-02
+```
+
+互換日付の指定は手元のWranglerに同梱されたruntimeの上限に合わせたローカル試験用で、配備設定は変更しない。bridgeを`cargo build --features webrtc`でビルドした後、ルートから上のPythonコマンドへ`--mode webrtc`を指定する。ホストのシステム全体のネットワーク設定は変更しない。
+
 ## CPU対戦GUIへの統合 - 2026-09-29
 
 - mainから `codex/gui-rule-cpu` を作成し、研究ブランチから3種類のCPUと必要な観測・入力ブリッジだけを移植。学習処理・研究ログ・実験用ローカルロールアウトは移していない。
@@ -18,7 +54,7 @@
 - **Fix:** 入力ペアをFIFOに保持し、GTP2 gateのInputUpdate直前で1組だけ消費する。ゲーム更新途中ではscratchを更新せず、hash検査は同じ入力番号のgameplay終了境界へ移す。再戦ではqueueを世代ごとに破棄し、結果画面ではcallbackを解除。未知gate・入力欠落/重複・異常なbacklogを黙って継続しない。ROM-loop rollbackは従来経路を維持。
 - **Verification:** 旧版は当日と同じ最初のcritical frame/hashを再現。修正版の`session0-fixed-final` / `session5-fixed-final` はcritical 0、全9試合の共通game tick 46789 / 64506件で位置・速度・乱数・入力18 fieldの差0。両runの末尾各1 tickは片側だけが終了上限までに完了したため比較対象外。両roleともexit 0・stderr 0。毎display frameの採取位相差は残るため、同じgame tick境界の比較で判定する。
 - **Artifacts / delivery:** `logs/codex-desync-replay-20260919/`に入力、旧/新版exe、状態CSV、比較JSON、再実行scriptを保存。修正binaryは`build/release-windows-x86_64/melonDS.exe`。現インストール版・GUI同梱sidecar・配布版は未差替え。実際の対戦では両側の更新が必要。追加ROM・ツール導入不要、pushなし。
-- **Remaining / next action:** 同一PC/localhostでの再現と修正検証は完了。更新版同士の実WAN対戦は未確認。別件の01:10/01:15の約10.8秒停滞は、手元停滞中に相手が入力待ち・ENet切断へ進む順序を確認したが、CPU/I/O原因は未特定。再発時の性能トレースが必要。切断後の自動再接続・途中再開も未実装。
+- **Remaining / next action:** 同一PC/localhostでの再現と修正検証は完了。更新版同士の実WAN対戦は未確認。別件の01:10/01:15の約10.8秒停滞は、手元停滞中に相手が入力待ち・ENet切断へ進む順序を確認したが、CPU/I/O原因は未特定。再発時の性能トレースが必要。切断後の自動再接続・途中再開の進捗は冒頭の2026-09-29節を参照。
 - **Details:** [2026-09-16実ログ調査](nsmb-log-investigation-20260916.md)。今回の全sessionはrollback=0のため、以下のROM-loop訂正修正のWAN検証とは区別する。
 
 ## Live Slippi-style ROM-loop rollback milestone - updated 2026-09-10

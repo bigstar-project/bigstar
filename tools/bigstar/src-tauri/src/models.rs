@@ -485,6 +485,7 @@ pub(crate) struct BridgeDiagnostics {
     pub(crate) selected_candidate_pair: Option<SelectedCandidatePair>,
     pub(crate) stats: Option<BridgeStats>,
     pub(crate) last_error: Option<String>,
+    pub(crate) recovery_deadline_unix_ms: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Type)]

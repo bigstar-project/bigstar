@@ -638,6 +638,13 @@ pub(crate) fn melon_env(
     env.insert("MELONDS_NSML_INPUT_NETPLAY_ONLY".into(), "1".into());
     env.insert("MELONDS_NSML_REMOTE_INPUT_TIMEOUT_FATAL".into(), "1".into());
     env.insert("MELONDS_NSML_WAIT_TIMEOUT_MS".into(), "60000".into());
+    env.insert(
+        "MELONDS_NSML_RECOVERY_STATUS".into(),
+        log_dir
+            .join("melonds-recovery.json")
+            .to_string_lossy()
+            .into_owned(),
+    );
     env.insert("MELONDS_NSML_SEED_WAIT_TIMEOUT_MS".into(), "60000".into());
     env.insert(
         "MELONDS_NSML_DELAY".into(),
@@ -1137,8 +1144,39 @@ pub(crate) fn read_bridge_diagnostics(
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return (None, None),
         Err(err) => return (None, Some(format!("bridge 診断を読めません: {err}"))),
     };
-    match serde_json::from_slice(&json) {
-        Ok(value) => (Some(value), None),
+    match serde_json::from_slice::<BridgeDiagnostics>(&json) {
+        Ok(mut value) => {
+            // The emulator owns the gameplay recovery deadline. The bridge
+            // can already be connected while inputs are still being restored.
+            if let Ok(bytes) = fs::read(log_dir.join("melonds-recovery.json")) {
+                if let Ok(recovery) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                    match recovery.get("state").and_then(serde_json::Value::as_str) {
+                        Some("recovering") => {
+                            value.phase = Some("recovering".into());
+                            if let Some(deadline) = recovery
+                                .get("deadline_unix_ms")
+                                .and_then(serde_json::Value::as_f64)
+                            {
+                                value.recovery_deadline_unix_ms = Some(
+                                    value
+                                        .recovery_deadline_unix_ms
+                                        .map_or(deadline, |bridge| bridge.min(deadline)),
+                                );
+                            }
+                        }
+                        Some("failed") => {
+                            value.phase = Some("failed".into());
+                            value.last_error = recovery
+                                .get("reason")
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_owned);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            (Some(value), None)
+        }
         Err(err) => (None, Some(format!("bridge 診断 JSON を読めません: {err}"))),
     }
 }

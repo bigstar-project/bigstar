@@ -858,6 +858,36 @@ fn bridge_diagnostics_reads_status_json() {
 }
 
 #[test]
+fn recovery_status_keeps_gameplay_wait_after_webrtc_connects() {
+    let dir = temp_log_dir("recovery-status");
+    fs::write(
+        dir.join("bridge-status.json"),
+        br#"{"phase":"connected","recovery_deadline_unix_ms":1900000060000}"#,
+    )
+    .expect("bridge status");
+    fs::write(
+        dir.join("melonds-recovery.json"),
+        br#"{"state":"recovering","deadline_unix_ms":1900000050000}"#,
+    )
+    .expect("emulator status");
+    let (value, error) = read_bridge_diagnostics(&dir);
+    assert!(error.is_none());
+    let value = value.expect("diagnostics");
+    assert_eq!(value.phase.as_deref(), Some("recovering"));
+    assert_eq!(value.recovery_deadline_unix_ms, Some(1900000050000.0));
+    fs::write(dir.join("melonds-recovery.json"), br#"{"state":"failed"}"#).expect("failed status");
+    assert_eq!(
+        read_bridge_diagnostics(&dir)
+            .0
+            .expect("diagnostics")
+            .phase
+            .as_deref(),
+        Some("failed")
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn melon_diagnostics_reads_game_state_mismatch_json() {
     let dir = temp_log_dir("game-state-mismatch");
     fs::write(

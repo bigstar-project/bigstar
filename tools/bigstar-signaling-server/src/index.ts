@@ -29,6 +29,7 @@ type Attachment = {
   token: string | null;
   joinedAt: number;
   legacy: boolean;
+  recovery: boolean;
 };
 
 type HostEventsAttachment = {
@@ -43,7 +44,10 @@ type LobbyAttachment = {
   joinedAt: number;
 };
 
-type RelaySignalMessage = Exclude<WsClientMessage, { type: 'ping' }> & {
+type RelaySignalMessage = Exclude<
+  WsClientMessage,
+  { type: 'ping' | 'restart' }
+> & {
   from: Role;
 };
 
@@ -56,6 +60,7 @@ const DEFAULT_STUN_SERVER = 'stun:stun.l.google.com:19302';
 const ROOM_KEY = 'room';
 const LOBBY_ROOMS_KEY = 'rooms';
 const QUEUED_SIGNALS_KEY = 'queued-signals';
+const CONNECTION_ID_KEY = 'connection-id';
 
 const attachmentSchema = z.object({
   type: z.literal('signal'),
@@ -64,6 +69,7 @@ const attachmentSchema = z.object({
   token: z.string().nullable(),
   joinedAt: z.number(),
   legacy: z.boolean(),
+  recovery: z.boolean().default(false),
 });
 
 const hostEventsAttachmentSchema = z.object({
@@ -218,6 +224,7 @@ export class SignalingRoom
       url.searchParams.get('room') ?? url.searchParams.get('session');
     const role = roleSchema.safeParse(url.searchParams.get('role'));
     const token = url.searchParams.get('token');
+    const recovery = url.searchParams.get('recovery') === '1';
     if (!session || !role.success) {
       return json({ error: 'invalid session or role' }, { status: 400 });
     }
@@ -237,10 +244,18 @@ export class SignalingRoom
 
     const existing = this.getSocketByRole(role.data);
     if (existing !== null) {
-      return json(
-        { error: `role ${role.data} is already connected` },
-        { status: 409 },
-      );
+      if (!legacy && recovery && getAttachment(existing)?.recovery) {
+        // The same authenticated participant may replace a half-open socket.
+        // Invalidate its attachment before close so late events cannot close
+        // the room or relay into the replacement connection.
+        existing.serializeAttachment(null);
+        existing.close(1000, 'replaced by reconnect');
+      } else {
+        return json(
+          { error: `role ${role.data} is already connected` },
+          { status: 409 },
+        );
+      }
     }
 
     const pair = new WebSocketPair();
@@ -253,6 +268,7 @@ export class SignalingRoom
       token,
       joinedAt: Date.now(),
       legacy,
+      recovery,
     } satisfies Attachment);
 
     const sockets = this.ctx.getWebSockets();
@@ -269,6 +285,7 @@ export class SignalingRoom
       peerCount: count,
       iceServers: parseIceServers(this.env.DEFAULT_ICE_SERVERS),
       settings: room?.settings,
+      recoveryVersion: 1,
     });
     this.broadcast(
       {
@@ -281,7 +298,7 @@ export class SignalingRoom
 
     if (this.getSocketByRole('offer') && this.getSocketByRole('answer')) {
       await this.markConnected();
-      this.broadcast({ type: 'ready-for-offer', peerCount: 2 });
+      await this.startConnection();
     }
     await this.flushQueuedSignals(role.data);
 
@@ -319,6 +336,34 @@ export class SignalingRoom
     if (parsed.data.type === 'ping') {
       send(ws, { type: 'pong' });
       return;
+    }
+
+    if (parsed.data.type === 'restart') {
+      if (!attachment.recovery) return;
+      const current =
+        (await this.ctx.storage.get<number>(CONNECTION_ID_KEY)) ?? 0;
+      if (
+        parsed.data.connectionId === current &&
+        this.getSocketByRole('offer') &&
+        this.getSocketByRole('answer')
+      ) {
+        await this.startConnection(parsed.data.connectionId);
+      } else if (parsed.data.connectionId < current) {
+        send(ws, {
+          type: 'ready-for-offer',
+          peerCount: 2,
+          connectionId: current,
+        });
+      }
+      return;
+    }
+    if (parsed.data.type === 'sdp' && attachment.recovery) {
+      const current = await this.ctx.storage.get<number>(CONNECTION_ID_KEY);
+      if (
+        parsed.data.connectionId !== current ||
+        parsed.data.sdpType !== attachment.role
+      )
+        return;
     }
 
     const targetRole = peerRole(attachment.role);
@@ -365,12 +410,34 @@ export class SignalingRoom
       },
       ws,
     );
-    if (!attachment.legacy) {
+    if (!attachment.legacy && !attachment.recovery) {
       await this.closeRoom(Date.now());
       await this.env.LOBBY.get(this.env.LOBBY.idFromName('global')).removeRoom(
         attachment.session,
       );
     }
+  }
+
+  private async startConnection(expectedId?: number): Promise<void> {
+    const connectionId = await this.ctx.storage.transaction(async (storage) => {
+      const current = (await storage.get<number>(CONNECTION_ID_KEY)) ?? 0;
+      if (expectedId !== undefined && expectedId !== current) return current;
+      await storage.put(CONNECTION_ID_KEY, current + 1);
+      return current + 1;
+    });
+    // Keep legacy early offers, but never deliver SDP from a previous recovery.
+    const queued =
+      (await this.ctx.storage.get<QueuedSignalMessage[]>(QUEUED_SIGNALS_KEY)) ??
+      [];
+    await this.ctx.storage.put(
+      QUEUED_SIGNALS_KEY,
+      queued.filter(
+        (entry) =>
+          entry.message.type !== 'sdp' ||
+          entry.message.connectionId === undefined,
+      ),
+    );
+    this.broadcast({ type: 'ready-for-offer', peerCount: 2, connectionId });
   }
 
   private async fetchHostEvents(url: URL): Promise<Response> {
@@ -489,7 +556,11 @@ export class SignalingRoom
 
   private broadcast(data: unknown, except?: WebSocket): void {
     for (const socket of this.ctx.getWebSockets()) {
-      if (socket !== except) {
+      if (
+        socket !== except &&
+        getAttachment(socket) !== null &&
+        socket.readyState === WebSocket.OPEN
+      ) {
         send(socket, data);
       }
     }

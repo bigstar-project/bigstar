@@ -32,6 +32,7 @@ function bridgeDiagnostics(
     ice_servers: null,
     ice_state: null,
     last_error: null,
+    recovery_deadline_unix_ms: null,
     phase,
     role: null,
     selected_candidate_pair: null,
@@ -54,6 +55,23 @@ function sessionStatus(overrides: Partial<SessionStatus> = {}): SessionStatus {
     ...overrides,
   };
 }
+
+test('再接続中は切断イベントより復帰待ちと残り時間を優先する', () => {
+  const status = sessionStatus({
+    webrtc: {
+      ...bridgeDiagnostics('recovering', 'disconnected'),
+      recovery_deadline_unix_ms: Date.now() + 30000,
+    },
+  });
+  expect(connectionStatusFromSession(status)).toEqual({
+    active: true,
+    kind: 'warn',
+    text: '再接続中… 残り30秒',
+  });
+  expect(
+    connectionStatusFromSession({ ...status, bridge: 'exited(1)' }),
+  ).toEqual({ active: true, kind: 'error', text: '接続エラー' });
+});
 
 const mocks = vi.hoisted(() => {
   const hostProfileId = '11111111-1111-4111-8111-111111111111';

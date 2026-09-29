@@ -113,8 +113,9 @@ async function connectWebSocket(url: string) {
   const waiters: Array<(message: ServerTestMessage) => void> = [];
   ws?.addEventListener('message', (event: MessageEvent) => {
     const message = JSON.parse(String(event.data)) as ServerTestMessage;
-    messages.push(message);
-    waiters.shift()?.(message);
+    const waiter = waiters.shift();
+    if (waiter) waiter(message);
+    else messages.push(message);
   });
 
   return {
@@ -505,6 +506,103 @@ describe('部屋主イベント WebSocket API', () => {
 });
 
 describe('シグナリング WebSocket Durable Object', () => {
+  async function recoveryPair() {
+    const created = await createRoom();
+    const joined = await reserveJoin(created.room_id);
+    const hostUrl = `${sessionUrl(created.signal_url, created.room_id, 'offer', created.host_token)}&recovery=1`;
+    const clientUrl = `${sessionUrl(joined.signal_url, joined.room_id, 'answer', joined.join_token)}&recovery=1`;
+    const host = await connectWebSocket(hostUrl);
+    const client = await connectWebSocket(clientUrl);
+    const ready = await waitForMessage(host, 'ready-for-offer');
+    await waitForMessage(client, 'ready-for-offer');
+    if (ready.type !== 'ready-for-offer' || ready.connectionId === undefined)
+      throw new Error('missing connection id');
+    return {
+      created,
+      hostUrl,
+      clientUrl,
+      host,
+      client,
+      id: ready.connectionId,
+    };
+  }
+
+  test('双方の再接続要求を同じ世代へまとめ古いSDPを中継しない', async () => {
+    const pair = await recoveryPair();
+    pair.host.send({ type: 'restart', connectionId: pair.id });
+    pair.client.send({ type: 'restart', connectionId: pair.id });
+    const ready = await waitForMessage(pair.host, 'ready-for-offer');
+    expect(ready).toMatchObject({ connectionId: pair.id + 1 });
+    expect(await waitForMessage(pair.client, 'ready-for-offer')).toMatchObject({
+      connectionId: pair.id + 1,
+    });
+    pair.host.send({
+      type: 'sdp',
+      sdpType: 'offer',
+      sdp: 'stale',
+      connectionId: pair.id,
+    });
+    pair.host.send({
+      type: 'sdp',
+      sdpType: 'offer',
+      sdp: 'current',
+      connectionId: pair.id + 1,
+    });
+    expect(await waitForMessage(pair.client, 'sdp')).toMatchObject({
+      sdp: 'current',
+      connectionId: pair.id + 1,
+    });
+    pair.host.close();
+    pair.client.close();
+  });
+
+  test('半開き接続を同じトークンで置換しても部屋を終了しない', async () => {
+    const pair = await recoveryPair();
+    const replacement = await connectWebSocket(pair.hostUrl);
+    expect(await waitForMessage(pair.client, 'ready-for-offer')).toMatchObject({
+      connectionId: pair.id + 1,
+    });
+    expect(await waitForMessage(replacement, 'ready-for-offer')).toMatchObject({
+      connectionId: pair.id + 1,
+    });
+    const room = await SELF.fetch(
+      `https://match.test/rooms/${pair.created.room_id}`,
+    );
+    expect(room.status).toBe(200);
+    replacement.send({
+      type: 'sdp',
+      sdpType: 'offer',
+      sdp: 'replacement',
+      connectionId: pair.id + 1,
+    });
+    expect(await waitForMessage(pair.client, 'sdp')).toMatchObject({
+      sdp: 'replacement',
+    });
+    replacement.close();
+    pair.client.close();
+  });
+
+  test('仲介接続の切断後も参加者を保持して再接続できる', async () => {
+    const pair = await recoveryPair();
+    pair.client.close();
+    await waitForMessage(pair.host, 'peer-left');
+    const replacement = await connectWebSocket(pair.clientUrl);
+    expect(await waitForMessage(replacement, 'ready-for-offer')).toMatchObject({
+      connectionId: pair.id + 1,
+    });
+    const outsiders = await SELF.fetch(
+      `https://match.test/rooms/${pair.created.room_id}/join`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ rom_pair_id: romIdentity.rom_pair_id }),
+      },
+    );
+    expect(outsiders.status).toBe(409);
+    replacement.close();
+    pair.host.close();
+  });
+
   test('有効な部屋トークンを必須にする', async () => {
     const created = await createRoom();
     const response = await SELF.fetch(

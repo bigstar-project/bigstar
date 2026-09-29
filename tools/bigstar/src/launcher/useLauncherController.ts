@@ -109,6 +109,33 @@ export function connectionStatusFromSession(
     return { active: response.active, kind: 'error', text: '同期エラー' };
   }
   if (
+    phase === 'failed' &&
+    response.webrtc?.last_error === 'deadline-exceeded'
+  ) {
+    return {
+      active: response.active,
+      kind: 'error',
+      text: '再接続がタイムアウトしました',
+    };
+  }
+  if (
+    response.active &&
+    phase === 'recovering' &&
+    !processExited(response.melon) &&
+    !processExited(response.bridge)
+  ) {
+    const deadline = response.webrtc?.recovery_deadline_unix_ms;
+    const remaining =
+      deadline == null
+        ? null
+        : Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    return {
+      active: true,
+      kind: 'warn',
+      text: remaining === null ? '再接続中…' : `再接続中… 残り${remaining}秒`,
+    };
+  }
+  if (
     phase === 'failed' ||
     (connectionState !== null && TERMINAL_WEBRTC_STATES.has(connectionState)) ||
     processExited(response.melon) ||

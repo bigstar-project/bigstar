@@ -139,6 +139,9 @@ constexpr std::size_t kSessionPacketSize = 64;
 enum class MessageKind {
   MatchSeed,
   StartReady,
+  // Value: contiguous remote input; RawReadyFrame: last produced local input;
+  // SemanticHash: process/session nonce. This never resets game/seed state.
+  Resume,
 };
 
 struct Message {

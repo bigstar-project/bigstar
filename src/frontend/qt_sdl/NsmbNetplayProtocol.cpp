@@ -11,6 +11,7 @@ constexpr melonDS::u32 kMagic = 0x4C4D534E; // "NSML", little endian
 constexpr melonDS::u32 kVersion = 2;
 constexpr melonDS::u32 kMatchSeedKind = 0x44454553;  // "SEED", little endian
 constexpr melonDS::u32 kStartReadyKind = 0x54525453; // "STRT", little endian
+constexpr melonDS::u32 kResumeKind = 0x4D555352; // "RSUM", little endian
 
 struct WireMessage {
   melonDS::u32 Magic;
@@ -39,6 +40,8 @@ melonDS::u32 ToWireKind(MessageKind kind) {
     return kMatchSeedKind;
   case MessageKind::StartReady:
     return kStartReadyKind;
+  case MessageKind::Resume:
+    return kResumeKind;
   }
   return 0;
 }
@@ -50,6 +53,9 @@ bool FromWireKind(melonDS::u32 kind, MessageKind &result) {
     return true;
   case kStartReadyKind:
     result = MessageKind::StartReady;
+    return true;
+  case kResumeKind:
+    result = MessageKind::Resume;
     return true;
   default:
     return false;

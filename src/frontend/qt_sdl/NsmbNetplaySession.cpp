@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <optional>
+#include <random>
 #include <thread>
 #include <vector>
 
@@ -25,6 +26,117 @@ unsigned long long NowUnixMs() {
 }
 
 InputState NeutralInput() { return {}; }
+
+bool RecoveryEnabled(Context context) {
+  return context.Input.NetplayOnly && !context.Rollback.Enabled;
+}
+
+void WriteRecoveryStatus(const char *state, unsigned long long deadline = 0,
+                         const char *reason = "") {
+  const char *path = std::getenv("MELONDS_NSML_RECOVERY_STATUS");
+  if (!path || !*path)
+    return;
+  if (FILE *file = std::fopen(path, "wb")) {
+    std::fprintf(file, "{\"state\":\"%s\",\"deadline_unix_ms\":%llu,\"reason\":\"%s\"}\n",
+                 state, deadline, reason);
+    std::fclose(file);
+  }
+}
+
+[[noreturn]] void FailRecovery(const char *reason) {
+  std::printf("NSMB Recovery: failed reason=%s\n", reason);
+  std::fflush(stdout);
+  WriteRecoveryStatus("failed", 0, reason);
+  std::_Exit(70);
+}
+
+void BeginRecovery(Context context) {
+  if (!RecoveryEnabled(context) || context.State.RecoveryStarted)
+    return;
+  context.State.RecoveryStarted = std::chrono::steady_clock::now();
+  WriteRecoveryStatus("recovering", NowUnixMs() + 60000);
+  std::printf("NSMB Recovery: waiting generation=%u timeoutMs=60000\n",
+              context.State.Handshake.Generation());
+  std::fflush(stdout);
+}
+
+void CompleteRecovery(Context context) {
+  if (!context.State.RecoveryStarted || !context.State.ResumeValidated)
+    return;
+  context.State.RecoveryStarted.reset();
+  WriteRecoveryStatus("connected");
+  std::printf("NSMB Recovery: resumed generation=%u lastRecv=%u\n",
+              context.State.Handshake.Generation(),
+              context.Inputs.LastReceivedInputFrame);
+  std::fflush(stdout);
+}
+
+void SendResumeLocked(Context context, bool force = false) {
+  if (!RecoveryEnabled(context) || !context.Transport.IsConnected())
+    return;
+  const auto now = std::chrono::steady_clock::now();
+  if (!force && now - context.State.LastResumeSent < std::chrono::milliseconds(250))
+    return;
+  if (context.State.SessionNonce == 0) {
+    std::random_device random;
+    context.State.SessionNonce = (static_cast<melonDS::u64>(random()) << 32) |
+                                 random() | 1;
+  }
+  SessionProtocol::Message message;
+  message.Kind = SessionProtocol::MessageKind::Resume;
+  message.Generation = context.State.Handshake.Generation();
+  message.SharedLogicalEpoch = context.State.Handshake.SharedLogicalEpoch();
+  message.Value = context.Inputs.HighestContiguousRemoteFrame().value_or(0);
+  message.RawReadyFrame = context.Inputs.LocalInputs.empty()
+                             ? 0 : context.Inputs.LocalInputs.rbegin()->first;
+  message.SemanticHash = context.State.SessionNonce;
+  const auto payload = SessionProtocol::Encode(message);
+  context.Transport.Send(payload.data(), payload.size(),
+                         force ? ENET_PACKET_FLAG_RELIABLE : ENET_PACKET_FLAG_UNSEQUENCED, true);
+  context.State.LastResumeSent = now;
+}
+
+void ReceiveResumeLocked(Context context, const SessionProtocol::Message &message) {
+  if (!RecoveryEnabled(context) || message.SemanticHash == 0)
+    return;
+  if (context.State.RemoteSessionNonce != 0 &&
+      context.State.RemoteSessionNonce != message.SemanticHash)
+    FailRecovery("different-peer-session");
+  context.State.RemoteSessionNonce = message.SemanticHash;
+  // Healthy peers can cross a result/rematch boundary at different times.
+  // Wait for the same generation; never adopt the peer's gameplay timeline.
+  if (message.Generation != context.State.Handshake.Generation())
+    return;
+  if (!context.State.ResumeValidated &&
+      context.State.Handshake.LogicalEpochEstablished() &&
+      message.SharedLogicalEpoch != 0 &&
+      message.SharedLogicalEpoch != context.State.Handshake.SharedLogicalEpoch())
+    FailRecovery("different-input-epoch");
+  const bool resuming = !context.State.ResumeValidated;
+  context.State.ResumeValidated = true;
+  if (resuming) {
+    if (!context.Inputs.LocalInputs.empty() &&
+        message.Value > context.Inputs.LocalInputs.rbegin()->first)
+      FailRecovery("future-input-ack");
+    const auto first = context.Inputs.LocalInputs.upper_bound(message.Value);
+    if (first != context.Inputs.LocalInputs.end() && message.Value != 0 &&
+        first->first != message.Value + 1)
+      FailRecovery("input-history-missing");
+    for (auto entry = first; entry != context.Inputs.LocalInputs.end(); ++entry) {
+      const auto payload = InputProtocol::EncodeInput(
+          {context.State.Handshake.Generation(), entry->first, entry->second});
+      context.Transport.Send(payload.data(), payload.size(), ENET_PACKET_FLAG_RELIABLE, false);
+      context.Inputs.LastSentInputFrame = entry->first;
+    }
+    context.Transport.Flush();
+    std::printf("NSMB Recovery: peer verified generation=%u remoteAck=%u replayThrough=%u\n",
+                message.Generation, message.Value, context.Inputs.LastSentInputFrame);
+    std::fflush(stdout);
+  }
+  // A live network pump is not proof that gameplay resumed. Only resolving
+  // the required remote input may clear the gameplay recovery deadline.
+  context.State.InputCond.notify_all();
+}
 
 void TraceHangPhase(Context context, const char *event, const char *phase,
                     int instanceID = -1, melonDS::u32 frame = 0,
@@ -225,6 +337,13 @@ void HandleReceivedSessionLocked(Context context, const Hooks &hooks,
   if (!SessionProtocol::Decode(data, size, message))
     return;
 
+  if (message.Kind == SessionProtocol::MessageKind::Resume) {
+    ReceiveResumeLocked(context, message);
+    return;
+  }
+  if (!context.State.ResumeValidated)
+    return;
+
   if (message.Kind == SessionProtocol::MessageKind::MatchSeed) {
     context.Mvl.MatchSeed = message.Value;
     context.Mvl.MatchSeedConfigured = true;
@@ -319,6 +438,16 @@ void PumpLocked(Context context, const Hooks &hooks, melonDS::NDS *nds,
   if (!context.Transport.HasHost())
     return;
 
+  const auto now = std::chrono::steady_clock::now();
+  if (context.State.RecoveryStarted &&
+      now - *context.State.RecoveryStarted >= std::chrono::seconds(60))
+    FailRecovery("deadline-exceeded");
+  if (RecoveryEnabled(context) && !context.Transport.IsConnected() &&
+      now - context.State.LastConnectAttempt >= std::chrono::milliseconds(500)) {
+    context.Transport.RetryConnection();
+    context.State.LastConnectAttempt = now;
+  }
+
   TraceHangPhase(context, "begin", "enet-service", -1, localFrame, localFrame,
                  localFrame);
   FlushDelayedInputsLocked(context, localFrame);
@@ -336,8 +465,15 @@ void PumpLocked(Context context, const Hooks &hooks, melonDS::NDS *nds,
                                                event.data);
     switch (event.type) {
     case ENET_EVENT_TYPE_CONNECT:
-      context.Transport.HandleConnected(event.peer);
-      context.State.Handshake.OnPeerConnected();
+      context.Transport.HandleConnected(event.peer, RecoveryEnabled(context));
+      if (context.State.ConnectedOnce && RecoveryEnabled(context)) {
+        BeginRecovery(context);
+        context.State.ResumeValidated = false;
+      } else {
+        context.State.Handshake.OnPeerConnected();
+      }
+      context.State.ConnectedOnce = true;
+      SendResumeLocked(context, true);
       UpdateHangSnapshotLocked(context, localFrame);
       context.State.InputCond.notify_all();
       std::printf("NSMB MvL Netplay: peer connected tUnixMs=%llu localFrame=%u peer=%d "
@@ -361,6 +497,11 @@ void PumpLocked(Context context, const Hooks &hooks, melonDS::NDS *nds,
                                       SessionProtocol::kSessionPacketSize,
                                       sizeof(WireProtocol::WireNSMLPacket),
                                       sizeof(WireProtocol::WireGameState)});
+      if (!context.Transport.IsPeer(event.peer) ||
+          (!context.State.ResumeValidated && packetClass != PacketClassifier::PacketClass::Session)) {
+        enet_packet_destroy(event.packet);
+        break;
+      }
       if (packetClass == PacketClassifier::PacketClass::Input)
         HandleReceivedInputLocked(context, event.packet->data,
                                   event.packet->dataLength, localFrame);
@@ -406,6 +547,8 @@ void PumpLocked(Context context, const Hooks &hooks, melonDS::NDS *nds,
           context.State.Handshake.RemoteReadyFrame().value_or(kNoFrame),
           context.State.Handshake.RemoteReadyAfterLocal() ? 1 : 0, event.data);
       context.Transport.HandleDisconnected(event.peer);
+      if (context.State.ConnectedOnce)
+        BeginRecovery(context);
       UpdateHangSnapshotLocked(context, localFrame);
       std::fflush(stdout);
       break;
@@ -414,6 +557,7 @@ void PumpLocked(Context context, const Hooks &hooks, melonDS::NDS *nds,
       break;
     }
   }
+  SendResumeLocked(context);
   context.Transport.Flush();
   TraceHangPhase(context, "end", "enet-service", -1, localFrame, localFrame,
                  localFrame);
@@ -536,7 +680,7 @@ void MaybeResendStartReadyLocked(Context context, const Hooks &hooks,
 
 void SendInputLocked(Context context, const Hooks &hooks, melonDS::u32 frame,
                      const InputState &input) {
-  if (!context.Transport.IsConnected())
+  if (!context.Transport.IsConnected() || !context.State.ResumeValidated)
     return;
   SendMatchSeedLocked(context);
   MaybeResendStartReadyLocked(context, hooks);
@@ -725,7 +869,8 @@ InputState WaitForRemoteInput(Context context, const Hooks &hooks,
       MaybeResendLatestInputForFrameLeadLocked(context, hooks);
 
       const auto input = context.Inputs.RemoteInputs.find(targetFrame);
-      if (input != context.Inputs.RemoteInputs.end()) {
+      if (input != context.Inputs.RemoteInputs.end() && context.State.ResumeValidated) {
+        CompleteRecovery(context);
         const auto elapsed =
             std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - start)
@@ -754,6 +899,10 @@ InputState WaitForRemoteInput(Context context, const Hooks &hooks,
                        targetFrame, context.Inputs.LastSentInputFrame);
         return input->second;
       }
+
+      if (RecoveryEnabled(context) &&
+          std::chrono::steady_clock::now() - start >= std::chrono::seconds(1))
+        BeginRecovery(context);
 
       if (context.Input.HealthTrace) {
         const auto elapsed =
@@ -787,7 +936,8 @@ InputState WaitForRemoteInput(Context context, const Hooks &hooks,
       }
     }
 
-    if (context.TestEnabled && context.Bootstrap.WaitTimeoutMs > 0) {
+    if (context.TestEnabled && context.Bootstrap.WaitTimeoutMs > 0 &&
+        !RecoveryEnabled(context)) {
       const auto elapsed =
           std::chrono::duration_cast<std::chrono::milliseconds>(
               std::chrono::steady_clock::now() - start)
@@ -1139,6 +1289,9 @@ void ThrottleFrameLead(Context context, const Hooks &hooks, melonDS::NDS *nds,
     {
       std::lock_guard<std::mutex> lock(context.Mutex);
       MaybeResendLatestInputForFrameLeadLocked(context, hooks);
+      if (RecoveryEnabled(context) &&
+          std::chrono::steady_clock::now() - start >= std::chrono::seconds(1))
+        BeginRecovery(context);
     }
 
     if (context.Input.NetplayTrace &&
@@ -1158,7 +1311,8 @@ void ThrottleFrameLead(Context context, const Hooks &hooks, melonDS::NDS *nds,
           CurrentInputLead(context, sendFrame), false, false);
     }
 
-    if (context.TestEnabled && context.Bootstrap.WaitTimeoutMs > 0) {
+    if (context.TestEnabled && context.Bootstrap.WaitTimeoutMs > 0 &&
+        !RecoveryEnabled(context)) {
       const auto elapsed =
           std::chrono::duration_cast<std::chrono::milliseconds>(
               std::chrono::steady_clock::now() - start)

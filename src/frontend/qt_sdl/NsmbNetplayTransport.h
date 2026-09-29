@@ -42,8 +42,9 @@ public:
   int ConnectingPeerState() const;
   std::uint16_t BoundPort() const;
 
-  void HandleConnected(ENetPeer *peer);
+  void HandleConnected(ENetPeer *peer, bool recoverable = false);
   void HandleDisconnected(ENetPeer *peer);
+  void RetryConnection();
 
   int Service(ENetEvent &event, std::uint32_t timeoutMs = 0);
   int Send(const void *data, std::size_t size, std::uint32_t flags, bool flush);
@@ -54,6 +55,7 @@ private:
   ENetPeer *ConnectingPeer = nullptr;
   ENetPeer *Peer = nullptr;
   bool ENetAcquired = false;
+  InitializeOptions Options;
 };
 
 } // namespace NsmbNetplayTransport

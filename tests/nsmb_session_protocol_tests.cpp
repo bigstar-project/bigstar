@@ -113,12 +113,35 @@ void TestMalformedPacketsAreRejected() {
   CHECK(decoded.Value == 99);
 }
 
+void TestResumeDoesNotDecodeAsMatchSeed() {
+  using namespace NsmbMvlNetplay::SessionProtocol;
+  Message message;
+  message.Kind = MessageKind::Resume;
+  message.Value = 1501;
+  message.RawReadyFrame = 1507;
+  message.Generation = 3;
+  message.SharedLogicalEpoch = 840;
+  message.SemanticHash = 0x123456789ABCDEF0ULL;
+  const auto payload = Encode(message);
+  CHECK(payload.size() == kSessionPacketSize);
+  CHECK(payload[8] == 'R' && payload[9] == 'S' && payload[10] == 'U' && payload[11] == 'M');
+  Message decoded;
+  CHECK(Decode(payload.data(), payload.size(), decoded));
+  CHECK(decoded.Kind == MessageKind::Resume);
+  CHECK(decoded.Value == 1501);
+  CHECK(decoded.RawReadyFrame == 1507);
+  CHECK(decoded.Generation == 3);
+  CHECK(decoded.SharedLogicalEpoch == 840);
+  CHECK(decoded.SemanticHash == message.SemanticHash);
+}
+
 } // namespace
 
 int main() {
   TestMatchSeedGoldenBytesAndRoundTrip();
   TestStartReadyGoldenBytesAndRoundTrip();
   TestMalformedPacketsAreRejected();
+  TestResumeDoesNotDecodeAsMatchSeed();
 
   if (Failures != 0) {
     std::fprintf(stderr, "nsmb session protocol tests failed: %d\n", Failures);
