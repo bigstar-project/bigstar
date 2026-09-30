@@ -295,10 +295,8 @@ function SettingsSection({
         ) : null}
       </div>
       <Card.Root
-        className={css({
-          bg: 'gray.2',
-          '& > * + *': { borderTopWidth: '1px' },
-        })}
+        className={css({ '& > * + *': { borderTopWidth: '1px' } })}
+        variant="raised"
       >
         {children}
       </Card.Root>

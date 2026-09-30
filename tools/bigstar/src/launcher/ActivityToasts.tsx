@@ -100,13 +100,4 @@ function ActivityToaster() {
 
 const viewportClass = css({ bottom: '5', insetInlineEnd: '5' });
 
-const rootClass = css({
-  bg: 'gray.3',
-  borderColor: 'gray.5',
-  borderRadius: 'l3',
-  boxShadow: '[0 12px 32px rgba(0, 0, 0, 0.4)]',
-  overflowWrap: 'anywhere',
-  py: '3',
-  pl: '4',
-  pr: '3.5',
-});
+const rootClass = css({ overflowWrap: 'anywhere' });

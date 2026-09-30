@@ -40,8 +40,10 @@ export const dialog = defineSlotRecipe({
       maxHeight: 'calc(100dvh - token(spacing.12))',
       overflowY: 'auto',
       p: { base: '4', md: '6' },
-      bg: 'gray.surface.bg',
+      // App change: gray.surface.bg is the canvas in dark mode, so the popup is raised and outlined.
+      bg: { base: 'gray.surface.bg', _dark: 'gray.2' },
       color: 'fg.default',
+      borderWidth: '1px',
       borderRadius: 'l3',
       boxShadow: 'lg',
       outline: '0',

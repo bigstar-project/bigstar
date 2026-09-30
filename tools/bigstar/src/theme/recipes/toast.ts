@@ -50,7 +50,8 @@ export const toast = defineSlotRecipe({
       alignItems: 'flex-start',
       gap: '3',
       p: '4',
-      bg: 'gray.surface.bg',
+      // App change: gray.surface.bg is the canvas in dark mode, so the toast sits one step above cards.
+      bg: { base: 'gray.surface.bg', _dark: 'gray.3' },
       color: 'fg.default',
       borderWidth: '1px',
       borderColor: 'border',

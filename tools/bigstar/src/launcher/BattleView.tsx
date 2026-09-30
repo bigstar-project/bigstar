@@ -9,7 +9,7 @@ import {
 } from '@phosphor-icons/react';
 import { type ReactNode, useState } from 'react';
 import { css, cx } from 'styled-system/css';
-import { button } from 'styled-system/recipes';
+import { button, card } from 'styled-system/recipes';
 import { Button } from '@/components/ui/button';
 import * as Dialog from '@/components/ui/dialog';
 import * as Tabs from '@/components/ui/tabs';
@@ -122,7 +122,7 @@ export function BattleView({
 
   return (
     <Tabs.Panel className={panelClass} keepMounted value="battle">
-      <Dialog.Root open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog.Root open={createOpen} size="lg" onOpenChange={setCreateOpen}>
         <PageHeader actions={headerAction} title="対戦" />
         <CreateRoomDialog
           busy={matchmakingRooms.busy}
@@ -193,12 +193,7 @@ const panelClass = css({
   outline: 'none',
 });
 
-const cardClass = css({
-  bg: 'gray.2',
-  borderColor: 'gray.4',
-  borderRadius: 'l3',
-  borderWidth: '1px',
-});
+const cardClass = card({ variant: 'raised' }).root;
 
 function RoomsSection({
   busy,
@@ -463,7 +458,7 @@ function RoomRow({
         cardClass,
         css({
           alignItems: 'center',
-          display: 'flex',
+          flexDirection: 'row',
           gap: '5',
           minH: '[72px]',
           pl: '5',
@@ -586,17 +581,7 @@ function HostingCard({
     wins: form.wins,
   });
   return (
-    <section
-      aria-label="あなたの部屋"
-      className={cx(
-        cardClass,
-        css({
-          borderRadius: '[14px]',
-          display: 'flex',
-          flexDirection: 'column',
-        }),
-      )}
-    >
+    <section aria-label="あなたの部屋" className={cardClass}>
       <div
         className={css({
           alignItems: 'center',
@@ -851,8 +836,7 @@ function UpdateRequiredNotice({
         cardClass,
         css({
           alignItems: 'center',
-          borderColor: 'gray.5',
-          display: 'flex',
+          flexDirection: 'row',
           gap: '4',
           px: '5',
           py: '[18px]',

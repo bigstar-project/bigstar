@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { css, cx } from 'styled-system/css';
+import { card } from 'styled-system/recipes';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import type { UpdateStatus, View } from './types';
@@ -29,18 +30,10 @@ const sessionView: Record<SidebarSession['kind'], View> = {
   'solo-test': 'solo-test',
 };
 
-const cardClass = css({
-  bg: 'gray.2',
-  borderColor: 'gray.4',
-  borderRadius: 'l3',
-  borderWidth: '1px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '1.5',
-  mb: '3',
-  p: '3',
-  textAlign: 'left',
-});
+const cardClass = cx(
+  card({ variant: 'raised' }).root,
+  css({ gap: '1.5', mb: '3', p: '3', textAlign: 'left' }),
+);
 
 const cardTitleClass = css({
   alignItems: 'center',

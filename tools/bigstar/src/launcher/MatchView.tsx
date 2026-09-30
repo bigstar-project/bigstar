@@ -67,7 +67,7 @@ export function MatchView({
     <div
       className={css({ display: 'flex', flexDirection: 'column', gap: '5' })}
     >
-      <Card.Root className={css({ bg: 'gray.2' })}>
+      <Card.Root variant="raised">
         <div
           className={css({
             alignItems: 'center',

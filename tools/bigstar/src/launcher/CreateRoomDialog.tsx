@@ -46,26 +46,11 @@ export function CreateRoomDialog({
 }) {
   return (
     <Dialog.Portal>
-      <Dialog.Backdrop className={css({ bg: '[rgba(6, 7, 9, 0.74)]' })} />
-      <Dialog.Popup
-        className={css({
-          bg: 'gray.2',
-          borderColor: 'gray.4',
-          borderRadius: '[14px]',
-          borderWidth: '1px',
-          boxShadow: '[0 28px 72px rgba(0, 0, 0, 0.55)]',
-          gap: '[22px]',
-          maxW: '[540px]',
-          pb: '[22px]',
-          pt: '[26px]',
-          px: '7',
-        })}
-      >
-        <Dialog.Header className={css({ gap: '1.5', pr: '10' })}>
-          <Dialog.Title className={css({ fontSize: 'xl', fontWeight: 'bold' })}>
-            部屋を作る
-          </Dialog.Title>
-          <Dialog.Description className={css({ fontSize: '[13px]' })}>
+      <Dialog.Backdrop />
+      <Dialog.Popup>
+        <Dialog.Header className={css({ pr: '10' })}>
+          <Dialog.Title>部屋を作る</Dialog.Title>
+          <Dialog.Description>
             公開ルームに表示され、最初に参加した人と対戦が始まります。
           </Dialog.Description>
         </Dialog.Header>
@@ -73,7 +58,7 @@ export function CreateRoomDialog({
 
         <MatchSettingsFields form={form} updateField={updateField} />
 
-        <Dialog.Footer className={css({ gap: '2.5', mt: '-1' })}>
+        <Dialog.Footer>
           <Dialog.Close
             render={
               <Button colorPalette="gray" variant="subtle">

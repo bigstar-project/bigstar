@@ -41,6 +41,8 @@ export const card = defineSlotRecipe({
       elevated: { root: { bg: 'gray.surface.bg', boxShadow: 'lg' } },
       outline: { root: { bg: 'gray.surface.bg', borderWidth: '1px' } },
       subtle: { root: { bg: 'gray.subtle.bg' } },
+      // App addition: in dark mode gray.surface.bg is the canvas itself, so this lifts the card off it.
+      raised: { root: { bg: { base: 'gray.surface.bg', _dark: 'gray.2' }, borderWidth: '1px' } },
     },
     // Park UI has one spacing (md); sm and lg are Kiso additions.
     size: {
