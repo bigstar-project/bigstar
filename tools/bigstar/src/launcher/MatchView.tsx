@@ -117,7 +117,7 @@ export function MatchView({
           <Alert.Root className={alertStripClass} role="alert" status="error">
             <Alert.Content>
               <Alert.Title>再接続がタイムアウトしました</Alert.Title>
-              <Alert.Description className={css({ color: 'fg.muted' })}>
+              <Alert.Description>
                 60秒以内に通信が戻らなかったため、対戦を終了しました。この対戦は「中断」として履歴に残ります。
               </Alert.Description>
             </Alert.Content>
@@ -379,7 +379,7 @@ function ReconnectAlert({ deadlineMs }: { deadlineMs: number | null }) {
     >
       <Alert.Content>
         <Alert.Title>相手との通信が途切れました</Alert.Title>
-        <Alert.Description className={css({ color: 'fg.muted' })}>
+        <Alert.Description>
           <span className={css({ display: 'inline-block' })}>
             60秒以内に戻れば、そのまま続けられます。
           </span>

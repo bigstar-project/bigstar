@@ -10,6 +10,8 @@ import {
 import { type ReactNode, useState } from 'react';
 import { css, cx } from 'styled-system/css';
 import { button, card } from 'styled-system/recipes';
+import * as Alert from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import * as Dialog from '@/components/ui/dialog';
 import * as Tabs from '@/components/ui/tabs';
@@ -244,24 +246,12 @@ function RoomsSection({
             公開ルーム
           </h2>
           {error ? null : (
-            <span
-              className={css({
-                bg: 'gray.4',
-                borderRadius: 'full',
-                fontSize: '[12.5px]',
-                fontVariantNumeric: 'tabular-nums',
-                fontWeight: 'semibold',
-                lineHeight: '[22px]',
-                minW: '[22px]',
-                px: '[7px]',
-                textAlign: 'center',
-              })}
-            >
+            <Badge colorPalette="gray" shape="full" size="lg">
               <span aria-hidden="true">{rooms.length}</span>
               <span className={css({ srOnly: true })}>
                 募集中 {rooms.length} 件
               </span>
-            </span>
+            </Badge>
           )}
         </div>
         <div
@@ -303,40 +293,21 @@ function RoomsSection({
       </div>
 
       {error ? (
-        <div
-          className={css({
-            alignItems: 'center',
-            bg: 'danger.2',
-            borderColor: 'danger.6',
-            borderRadius: 'l3',
-            borderWidth: '1px',
-            display: 'flex',
-            gap: '3.5',
-            px: '5',
-            py: '[18px]',
-          })}
+        <Alert.Root
+          className={css({ alignItems: 'center' })}
           role="alert"
+          status="error"
+          variant="surface"
         >
-          <Warning
-            className={css({ color: 'danger.11', flexShrink: '0' })}
-            size={18}
-            weight="bold"
-          />
-          <div
-            className={css({
-              display: 'flex',
-              flexDirection: 'column',
-              flexGrow: '1',
-              gap: '1',
-            })}
-          >
-            <span className={css({ fontSize: '[15px]', fontWeight: 'bold' })}>
-              公開ルームを取得できませんでした
-            </span>
-            <span className={css({ color: 'fg.muted', fontSize: '[13px]' })}>
+          <Alert.Icon>
+            <Warning weight="bold" />
+          </Alert.Icon>
+          <Alert.Content>
+            <Alert.Title>公開ルームを取得できませんでした</Alert.Title>
+            <Alert.Description>
               インターネット接続を確認して、再読み込みしてください。
-            </span>
-          </div>
+            </Alert.Description>
+          </Alert.Content>
           <Button
             colorPalette="gray"
             disabled={refreshDisabled}
@@ -347,7 +318,7 @@ function RoomsSection({
           >
             再読み込み
           </Button>
-        </div>
+        </Alert.Root>
       ) : rooms.length === 0 ? (
         <div
           className={css({

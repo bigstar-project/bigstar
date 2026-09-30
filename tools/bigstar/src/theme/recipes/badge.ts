@@ -13,7 +13,7 @@ export const badge = defineRecipe({
     whiteSpace: 'nowrap',
     userSelect: 'none',
   },
-  defaultVariants: { variant: 'subtle', size: 'md' },
+  defaultVariants: { variant: 'subtle', size: 'md', shape: 'rounded' },
   variants: {
     variant: {
       solid: { bg: 'colorPalette.solid.bg', color: 'colorPalette.solid.fg' },
@@ -29,6 +29,11 @@ export const badge = defineRecipe({
         borderColor: 'colorPalette.outline.border',
         color: 'colorPalette.outline.fg',
       },
+    },
+    // App addition, named after Progress's shape: full makes a pill, e.g. for a count.
+    shape: {
+      rounded: {},
+      full: { borderRadius: 'full', justifyContent: 'center' },
     },
     size: {
       sm: { fontSize: 'xs', px: '1.5', h: '4.5', gap: '0.5', _icon: { boxSize: '2.5' } },

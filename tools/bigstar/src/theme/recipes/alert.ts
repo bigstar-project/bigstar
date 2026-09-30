@@ -21,7 +21,8 @@ export const alert = defineSlotRecipe({
     },
     content: { display: 'flex', flexDirection: 'column', flex: '1', gap: '1', minWidth: '0' },
     title: { fontWeight: 'semibold' },
-    description: { display: 'inline' },
+    // App change: the title carries the status color; the explanation stays readable in fg.muted.
+    description: { display: 'inline', color: 'fg.muted' },
   },
   defaultVariants: { status: 'info', variant: 'subtle', size: 'md' },
   variants: {
@@ -33,7 +34,10 @@ export const alert = defineSlotRecipe({
       neutral: { root: { colorPalette: 'gray' } },
     },
     variant: {
-      solid: { root: { bg: 'colorPalette.solid.bg', color: 'colorPalette.solid.fg' } },
+      solid: {
+        root: { bg: 'colorPalette.solid.bg', color: 'colorPalette.solid.fg' },
+        description: { color: 'inherit' },
+      },
       surface: {
         root: {
           bg: 'colorPalette.surface.bg',

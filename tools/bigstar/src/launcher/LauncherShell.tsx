@@ -2,6 +2,7 @@ import { Brain, Flask } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { css, cx } from 'styled-system/css';
+import { Badge } from '@/components/ui/badge';
 import { Kbd } from '@/components/ui/kbd';
 import * as Tabs from '@/components/ui/tabs';
 import launcherBg from '../assets/launcher-bg.png';
@@ -199,24 +200,14 @@ export function LauncherShell({
             >
               {roomCount > 0 ? (
                 // タブの名前は「対戦」のままにし、部屋の数は対戦画面で読み上げる
-                <span
+                <Badge
                   aria-hidden="true"
-                  className={css({
-                    bg: 'gray.4',
-                    borderRadius: 'full',
-                    color: 'fg.default',
-                    fontSize: 'xs',
-                    fontVariantNumeric: 'tabular-nums',
-                    fontWeight: 'semibold',
-                    lineHeight: '[20px]',
-                    minW: '5',
-                    px: '1.5',
-                    textAlign: 'center',
-                  })}
+                  colorPalette="gray"
                   data-nav-count
+                  shape="full"
                 >
                   {roomCount}
-                </span>
+                </Badge>
               ) : null}
             </NavTab>
             <NavTab
@@ -253,6 +244,7 @@ export function LauncherShell({
                 value="ai"
               />
             ) : null}
+            <Tabs.Indicator />
           </Tabs.List>
 
           <div className={css({ flexGrow: '1', minH: '6' })} />
@@ -373,9 +365,8 @@ function NavTab({
   );
 }
 
+// 選択中の背景は subtle の Tabs.Indicator が描く
 const navTabClass = css({
-  borderRadius: 'l2',
-  color: 'fg.muted',
   fontSize: 'sm',
   fontWeight: 'medium',
   gap: '3',
@@ -386,13 +377,7 @@ const navTabClass = css({
   w: 'full',
   '& svg': { color: 'fg.subtle' },
   _hover: { bg: 'gray.a2', color: 'fg.default' },
-  _selected: {
-    bg: 'gray.2',
-    color: 'white',
-    fontWeight: 'semibold',
-    _hover: { bg: 'gray.2' },
-    '& svg': { color: 'amber.9' },
-  },
+  _selected: { fontWeight: 'semibold', '& svg': { color: 'amber.9' } },
   '&:hover [data-nav-count]': { display: 'none' },
   '&:hover [data-nav-shortcut]': { display: 'inline-flex' },
 });
