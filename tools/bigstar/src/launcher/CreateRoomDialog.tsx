@@ -200,19 +200,10 @@ function SegmentedField({
       </span>
       <ToggleGroup
         aria-labelledby={labelId}
-        className={css({
-          bg: 'app.sidebar',
-          borderColor: 'gray.4',
-          borderRadius: '[9px]',
-          borderWidth: '1px',
-          display: 'grid',
-          gap: '0.5',
-          p: '[3px]',
-        })}
-        style={{
-          gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))`,
-        }}
+        colorPalette="gray"
+        fitted
         value={[value]}
+        variant="enclosed"
         onValueChange={(next) => {
           // 押し直しで選択が外れないように、空の選択は無視する
           const [picked] = next;
@@ -222,20 +213,8 @@ function SegmentedField({
         {options.map((option) => (
           <Toggle
             key={option.value}
-            className={css({
-              borderRadius: 'l1',
-              fontSize: '[13px]',
-              fontWeight: 'medium',
-              h: '[34px]',
-              minW: '0',
-              px: '2',
-              _pressed: {
-                bg: 'fg.default',
-                color: 'gray.1',
-                fontWeight: 'semibold',
-                _hover: { bg: 'fg.default', color: 'gray.1' },
-              },
-            })}
+            pressedVariant="solid"
+            size="xs"
             value={option.value}
           >
             {option.label}
@@ -258,11 +237,12 @@ function CourseSequenceFields({
     clampStage(form.courseStages[index] ?? 0),
   );
   return (
+    // 上の選択肢と同じく、ToggleGroup の enclosed と同じ溝に入れる
     <div
       className={css({
-        bg: 'app.sidebar',
-        borderColor: 'gray.4',
-        borderRadius: '[9px]',
+        bg: { base: 'gray.2', _dark: 'gray.1' },
+        borderColor: 'border',
+        borderRadius: 'l3',
         borderWidth: '1px',
         display: 'grid',
         gap: '2',
