@@ -9,6 +9,7 @@ import { maxGamesForWins } from '../form';
 import { localPlayerSide, opponentPlayerSide } from '../matchHistory';
 import type { MvlStageResult } from '../types';
 import { stageLabel } from './options';
+import { StatusDot, type StatusTone } from './StatusDot';
 import type { BattleMatchRecord, ConnectionStatusState } from './types';
 
 // 相手の復帰を待つ時間。bigstar-net-bridge の再接続待ちと合わせる
@@ -18,7 +19,7 @@ type PlayerSide = 'mario' | 'luigi';
 
 type MatchPhase = 'live' | 'reconnecting' | 'timeout' | 'stopped' | 'finished';
 
-type Tone = 'success' | 'warning' | 'danger' | 'gray';
+type Tone = StatusTone;
 
 /** 1 ゲーム分の列の状態。live / wait / cut は結果がまだ出ていないゲーム */
 type GameState = 'decided' | 'live' | 'wait' | 'cut' | 'empty';
@@ -294,41 +295,6 @@ const toneText: Record<Tone, string> = {
   danger: css({ color: 'danger.11' }),
   gray: css({ color: 'fg.muted' }),
 };
-
-const toneDot: Record<Tone, string> = {
-  success: css({ color: 'success.9' }),
-  warning: css({ color: 'warning.9' }),
-  danger: css({ color: 'danger.9' }),
-  gray: css({ color: 'gray.9' }),
-};
-
-function StatusDot({
-  pulse,
-  size = 'md',
-  tone,
-}: {
-  pulse: boolean;
-  size?: 'sm' | 'md';
-  tone: Tone;
-}) {
-  return (
-    <span
-      aria-hidden="true"
-      className={cx(
-        toneDot[tone],
-        css({
-          bg: 'current',
-          borderRadius: 'full',
-          boxSize: size === 'sm' ? '1.5' : '2',
-          flexShrink: '0',
-        }),
-        pulse
-          ? css({ animation: '[status-ring 1.8s ease-out infinite]' })
-          : undefined,
-      )}
-    />
-  );
-}
 
 function RulesSummary({ match }: { match: BattleMatchRecord }) {
   const { settings } = match;

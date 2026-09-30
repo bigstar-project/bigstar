@@ -1,7 +1,8 @@
 import { type ReactNode, useEffect, useRef } from 'react';
-import { css, cx } from 'styled-system/css';
+import { css } from 'styled-system/css';
 import * as Toast from '@/components/ui/toast';
 import type { StatusKind } from '../types';
+import { StatusDot, type StatusTone } from './StatusDot';
 
 export type ActivityStatus = { text: string; kind: StatusKind };
 
@@ -9,11 +10,11 @@ export type ActivityStatus = { text: string; kind: StatusKind };
 const visibleMs = 5000;
 const errorVisibleMs = 10000;
 
-const dotClass: Record<StatusKind, string> = {
-  ok: css({ bg: 'success.9' }),
-  idle: css({ bg: 'gray.11' }),
-  warn: css({ bg: 'warning.9' }),
-  error: css({ bg: 'danger.9' }),
+const dotTone: Record<StatusKind, StatusTone> = {
+  ok: 'success',
+  idle: 'gray',
+  warn: 'warning',
+  error: 'danger',
 };
 
 /** 右下に操作の結果を出す。表示中のトーストがあれば、積まずに中身を書き換える */
@@ -69,18 +70,13 @@ function ActivityToaster() {
       <Toast.Viewport aria-label="通知" className={viewportClass}>
         {toasts.map((toast) => (
           <Toast.Root key={toast.id} className={rootClass} toast={toast}>
-            <span
-              aria-hidden="true"
-              className={cx(
-                dotClass[(toast.type as StatusKind | undefined) ?? 'idle'] ??
-                  dotClass.idle,
-                css({
-                  borderRadius: 'full',
-                  boxSize: '2',
-                  flexShrink: '0',
-                  mt: '[7px]',
-                }),
-              )}
+            {/* タイトルの 1 行目（行の高さ 20px）の中央に点を合わせる */}
+            <StatusDot
+              className={css({ mt: '1.5' })}
+              tone={
+                dotTone[(toast.type as StatusKind | undefined) ?? 'idle'] ??
+                'gray'
+              }
             />
             <Toast.Content>
               <Toast.Title className={css({ textStyle: 'sm' })}>

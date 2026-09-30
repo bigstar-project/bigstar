@@ -14,6 +14,7 @@ import * as Alert from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import * as Dialog from '@/components/ui/dialog';
+import * as EmptyState from '@/components/ui/empty-state';
 import * as Tabs from '@/components/ui/tabs';
 import type { FormState } from '../types';
 import { CreateRoomDialog } from './CreateRoomDialog';
@@ -22,6 +23,7 @@ import { PageHeader } from './PageHeader';
 import { PixelStar, PixelVersus } from './PixelIcons';
 import { formatRoomAge, roomRuleParts } from './roomRules';
 import { formatElapsed, useNow } from './SidebarStatus';
+import { StatusDot } from './StatusDot';
 import type {
   BattleMatchRecord,
   ConnectionStatusState,
@@ -268,13 +270,7 @@ function RoomsSection({
               error ? css({ color: 'danger.11' }) : css({ color: 'fg.subtle' }),
             )}
           >
-            <span
-              aria-hidden="true"
-              className={cx(
-                css({ borderRadius: 'full', boxSize: '1.5' }),
-                error ? css({ bg: 'danger.9' }) : css({ bg: 'success.9' }),
-              )}
-            />
+            <StatusDot size="sm" tone={error ? 'danger' : 'success'} />
             {error ? '接続できません' : '自動で反映'}
           </span>
           <Button
@@ -320,62 +316,33 @@ function RoomsSection({
           </Button>
         </Alert.Root>
       ) : rooms.length === 0 ? (
-        <div
-          className={css({
-            alignItems: 'center',
-            borderColor: 'gray.4',
-            borderRadius: 'l3',
-            borderStyle: 'dashed',
-            borderWidth: '1px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '2.5',
-            pb: '[60px]',
-            pt: '14',
-            px: '6',
-            textAlign: 'center',
-          })}
-        >
-          <PixelStar
-            className={css({ color: 'gray.4' })}
-            eyeColor="var(--colors-canvas)"
-            size={48}
-          />
-          <span
-            className={css({
-              fontSize: '[17px]',
-              fontWeight: 'bold',
-              mt: '2.5',
-            })}
-          >
-            いま募集中の部屋はありません
-          </span>
-          <span
-            className={css({
-              color: 'fg.muted',
-              display: 'flex',
-              flexDirection: 'column',
-              fontSize: '[13.5px]',
-              lineHeight: '[1.75]',
-            })}
-          >
-            <span>部屋を作ると、ここに表示されて相手を待てます。</span>
-            <span>
+        <EmptyState.Root>
+          <EmptyState.Icon>
+            {/* 地の gray.subtle.bg は背景の上で gray.3 とほぼ同じ色になるので、目をその色で抜く */}
+            <PixelStar eyeColor="var(--colors-gray-3)" />
+          </EmptyState.Icon>
+          <EmptyState.Title>いま募集中の部屋はありません</EmptyState.Title>
+          <EmptyState.Description>
+            <span className={css({ display: 'inline-block' })}>
+              部屋を作ると、ここに表示されて相手を待てます。
+            </span>
+            <span className={css({ display: 'inline-block' })}>
               設定で「新しい部屋の通知」をオンにすると、部屋ができたときにお知らせします。
             </span>
-          </span>
+          </EmptyState.Description>
           {canCreate ? (
-            <Button
-              className={css({ mt: '3.5' })}
-              colorPalette="gray"
-              onClick={onCreate}
-              size="sm"
-              variant="subtle"
-            >
-              部屋を作って待つ
-            </Button>
+            <EmptyState.Actions>
+              <Button
+                colorPalette="gray"
+                onClick={onCreate}
+                size="sm"
+                variant="subtle"
+              >
+                部屋を作って待つ
+              </Button>
+            </EmptyState.Actions>
           ) : null}
-        </div>
+        </EmptyState.Root>
       ) : (
         <ul
           className={css({
@@ -571,16 +538,7 @@ function HostingCard({
             gap: '2.5',
           })}
         >
-          <span
-            aria-hidden="true"
-            className={css({
-              animation: '[status-ring 1.8s ease-out infinite]',
-              bg: 'current',
-              borderRadius: 'full',
-              boxSize: '2',
-              color: 'success.9',
-            })}
-          />
+          <StatusDot pulse tone="success" />
           部屋を公開中
         </span>
         <span className={css({ color: 'fg.muted', fontSize: '[13px]' })}>

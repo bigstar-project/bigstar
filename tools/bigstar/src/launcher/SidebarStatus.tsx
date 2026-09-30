@@ -3,6 +3,7 @@ import { css, cx } from 'styled-system/css';
 import { card } from 'styled-system/recipes';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
+import { StatusDot } from './StatusDot';
 import type { UpdateStatus, View } from './types';
 
 const currentAppVersion = __BIGSTAR_GUI_VERSION__;
@@ -75,20 +76,7 @@ export function SessionCard({
       type="button"
     >
       <span className={cardTitleClass}>
-        <span
-          aria-hidden="true"
-          className={cx(
-            css({
-              bg: 'current',
-              borderRadius: 'full',
-              boxShadow:
-                '[0 0 0 3px color-mix(in srgb, currentColor 18%, transparent)]',
-              boxSize: '[7px]',
-              flexShrink: '0',
-            }),
-            warn ? css({ color: 'warning.9' }) : css({ color: 'success.9' }),
-          )}
-        />
+        <StatusDot tone={warn ? 'warning' : 'success'} />
         {title}
       </span>
       {detail ? (
