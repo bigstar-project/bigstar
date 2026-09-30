@@ -8,7 +8,6 @@ import * as Dialog from '@/components/ui/dialog';
 import * as NumberField from '@/components/ui/number-field';
 import * as Select from '@/components/ui/select';
 import * as Switch from '@/components/ui/switch';
-import { Toggle, ToggleGroup } from '@/components/ui/toggle';
 import {
   clampStage,
   defaultInputDelayFrames,
@@ -18,14 +17,13 @@ import {
   rollbackInputMaxFrameLead,
   rollbackPredictionHorizonFrames,
 } from '../form';
-import type { CourseMode, FormState, Lives } from '../types';
+import type { CourseMode, FormState } from '../types';
+import { courseOptions, stageOptions } from './options';
 import {
-  bigStarsOptions,
-  courseOptions,
-  livesOptions,
-  stageOptions,
-  winsOptions,
-} from './options';
+  fieldLabelClass,
+  MatchRuleFields,
+  SegmentedField,
+} from './SegmentedField';
 import type { UpdateFormField } from './types';
 
 /** 部屋を作るダイアログの中身。Dialog.Root と開くボタンは呼び出し側に置く */
@@ -119,32 +117,15 @@ function MatchSettingsFields({
           gap: '2.5',
         })}
       >
-        <div
-          className={css({
-            display: 'grid',
-            gap: '3.5',
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-          })}
-        >
-          <SegmentedField
-            label="先取数"
-            options={winsOptions}
-            value={String(form.wins)}
-            onChange={(value) => updateField('wins', Number(value))}
-          />
-          <SegmentedField
-            label="ビッグスター"
-            options={bigStarsOptions}
-            value={String(form.bigStars)}
-            onChange={(value) => updateField('bigStars', Number(value))}
-          />
-          <SegmentedField
-            label="残機"
-            options={livesOptions}
-            value={form.lives}
-            onChange={(value) => updateField('lives', value as Lives)}
-          />
-        </div>
+        <MatchRuleFields
+          value={form}
+          onChange={(patch) => {
+            if (patch.wins !== undefined) updateField('wins', patch.wins);
+            if (patch.bigStars !== undefined)
+              updateField('bigStars', patch.bigStars);
+            if (patch.lives !== undefined) updateField('lives', patch.lives);
+          }}
+        />
         <p
           className={css({
             color: 'fg.subtle',
@@ -156,55 +137,6 @@ function MatchSettingsFields({
       </div>
 
       <NetplaySettings form={form} updateField={updateField} />
-    </div>
-  );
-}
-
-const fieldLabelClass = css({ fontWeight: 'semibold', textStyle: 'sm' });
-
-/** 選択肢が少ない設定は、押したものが反転するボタンの並びで選ぶ */
-function SegmentedField({
-  label,
-  onChange,
-  options,
-  value,
-}: {
-  label: string;
-  onChange: (value: string) => void;
-  options: { value: string; label: string }[];
-  value: string;
-}) {
-  const labelId = useId();
-  return (
-    <div
-      className={css({ display: 'flex', flexDirection: 'column', gap: '2' })}
-    >
-      <span className={fieldLabelClass} id={labelId}>
-        {label}
-      </span>
-      <ToggleGroup
-        aria-labelledby={labelId}
-        colorPalette="gray"
-        fitted
-        value={[value]}
-        variant="enclosed"
-        onValueChange={(next) => {
-          // 押し直しで選択が外れないように、空の選択は無視する
-          const [picked] = next;
-          if (picked !== undefined) onChange(picked);
-        }}
-      >
-        {options.map((option) => (
-          <Toggle
-            key={option.value}
-            pressedVariant="solid"
-            size="xs"
-            value={option.value}
-          >
-            {option.label}
-          </Toggle>
-        ))}
-      </ToggleGroup>
     </div>
   );
 }

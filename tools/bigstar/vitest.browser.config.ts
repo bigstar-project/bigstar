@@ -8,7 +8,12 @@ export default defineConfig({
     __BIGSTAR_GUI_VERSION__: JSON.stringify('test'),
   },
   optimizeDeps: {
-    include: ['@ark-ui/react/collapsible', '@tauri-apps/api/window'],
+    include: [
+      '@ark-ui/react/collapsible',
+      '@base-ui/react/radio',
+      '@base-ui/react/radio-group',
+      '@tauri-apps/api/window',
+    ],
   },
   plugins: [
     react({

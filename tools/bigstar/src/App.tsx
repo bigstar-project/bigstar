@@ -39,7 +39,21 @@ export function App() {
     launcher.currentMatch.id !== dismissedMatchId;
   // Kiso で組み直した画面だけ、無地の背景と 808px の列で表示する
   const pageLayout =
-    launcher.activeView === 'settings' || launcher.activeView === 'battle';
+    launcher.activeView === 'settings' ||
+    launcher.activeView === 'battle' ||
+    launcher.activeView === 'cpu';
+  // CPU 対戦を始められない原因が対戦画面にあるときは、そこへ移るボタンを出す
+  const cpuBlockedAction = launcher.matchmakingRooms.hostedRoom
+    ? {
+        label: '待機中の部屋を見る',
+        onClick: () => launcher.changeView('battle'),
+      }
+    : launcher.connectionStatus.active
+      ? {
+          label: '対戦画面を見る',
+          onClick: () => launcher.changeView('battle'),
+        }
+      : null;
 
   const { hostedRoomId, rooms } = launcher.matchmakingRooms;
 
@@ -84,8 +98,9 @@ export function App() {
         />
         {aiDevToolsEnabled && aiViewerMounted ? <AIReplayViewer /> : null}
         <CpuBattleView
-          controller={launcher.soloTest}
           blocked={launcher.soloTestBlocked}
+          blockedAction={cpuBlockedAction}
+          controller={launcher.soloTest}
         />
         {currentRuntimeCapabilities().soloTest ? (
           <SoloTestView

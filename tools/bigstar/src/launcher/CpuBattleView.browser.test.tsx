@@ -83,38 +83,48 @@ test.each([
       <TestView />
     </QueryClientProvider>,
   );
-  await screen.getByRole('combobox', { name: '対戦相手' }).click();
-  await screen.getByRole('option', { name: label, exact: true }).click();
+  // カード全体が選択の対象なので、名前を押して選ぶ
+  await screen.getByText(label, { exact: true }).click();
+  const radio = screen.getByRole('radio', { name: label });
+  await expect.element(radio).toBeChecked();
+  const choice = (field: string, value: string) =>
+    screen
+      .getByRole('group', { name: field })
+      .getByRole('button', { name: value, exact: true });
   for (const [field, expected] of [
-    ['勝利数', '3'],
+    ['先取数', '3'],
     ['ビッグスター', '10'],
     ['残機', '無限'],
   ] as const) {
     await expect
-      .element(screen.getByRole('combobox', { name: field }))
-      .toHaveTextContent(expected);
+      .element(choice(field, expected))
+      .toHaveAttribute('aria-pressed', 'true');
   }
   if (rules !== defaultRules) {
     for (const [field, value] of [
-      ['勝利数', String(rules.wins)],
+      ['先取数', String(rules.wins)],
       ['ビッグスター', String(rules.big_stars)],
-      ['残機', rules.lives],
+      ['残機', rules.lives === 'endless' ? '無限' : rules.lives],
     ] as const) {
-      await screen.getByRole('combobox', { name: field }).click();
-      await screen.getByRole('option', { name: value, exact: true }).click();
+      await choice(field, value).click();
     }
   }
   const start = screen.getByRole('button', { name: '対戦を始める' });
   await expect.element(start).toBeEnabled();
   await start.click();
   expect(commands.startCpuMatch).toHaveBeenCalledWith(profile, rules);
-  await expect.element(start).toBeDisabled();
+  // 対戦中は開始ボタンを隠し、選択肢は変えられない
+  await expect.element(start).not.toBeInTheDocument();
   await expect
-    .element(screen.getByRole('combobox', { name: '勝利数' }))
-    .toBeDisabled();
+    .element(screen.getByText(`${label}と対戦中`))
+    .toBeInTheDocument();
+  await expect.element(choice('先取数', '1')).toBeDisabled();
+  await expect.element(radio).toBeDisabled();
   await screen.getByRole('button', { name: '対戦を終了' }).click();
   expect(commands.stopSoloTest).toHaveBeenCalledOnce();
-  await expect.element(start).toBeEnabled();
+  await expect
+    .element(screen.getByRole('button', { name: '対戦を始める' }))
+    .toBeEnabled();
   client.clear();
 });
 

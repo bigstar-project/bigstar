@@ -11,6 +11,7 @@ import { input } from './input'
 import { kbd } from './kbd'
 import { numberField } from './number-field'
 import { progress } from './progress'
+import { radioGroup } from './radio-group'
 import { select } from './select'
 import { spinner } from './spinner'
 import { switchRecipe } from './switch'
@@ -21,4 +22,4 @@ import { toggle, toggleGroup } from './toggle'
 // prettier-ignore
 export const recipes = { badge, button, input, kbd, spinner, toggle, toggleGroup }
 // prettier-ignore
-export const slotRecipes = { alert, card, collapsible, dialog, emptyState, field, numberField, progress, select, switchRecipe, tabs, toast }
+export const slotRecipes = { alert, card, collapsible, dialog, emptyState, field, numberField, progress, radioGroup, select, switchRecipe, tabs, toast }
