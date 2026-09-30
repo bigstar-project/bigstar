@@ -22,10 +22,8 @@ export function PageHeader({
       <h1
         className={css({
           color: 'fg.default',
-          fontSize: '[26px]',
           fontWeight: 'bold',
-          letterSpacing: '[0.01em]',
-          lineHeight: '[1.2]',
+          textStyle: '2xl',
         })}
       >
         {title}

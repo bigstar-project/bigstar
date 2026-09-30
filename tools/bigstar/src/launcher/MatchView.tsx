@@ -448,8 +448,8 @@ function ScoreHero({
           pt: '8',
           px: '5',
           rowGap: '3',
+          transition: 'opacity',
           transitionDuration: 'normal',
-          transitionProperty: '[opacity]',
         }),
         dimmed ? css({ opacity: '0.45' }) : undefined,
         outcome === 'win'
@@ -466,9 +466,8 @@ function ScoreHero({
             gridColumn: '2',
             justifySelf: 'center',
             fontWeight: 'bold',
-            letterSpacing: '[0.24em]',
+            letterSpacing: 'widest',
             lineHeight: 'tight',
-            pl: '[0.24em]',
             textStyle: '3xl',
           })}
         >
@@ -503,7 +502,6 @@ function ScoreHero({
           gap: '4.5',
           gridColumn: '2',
           justifyContent: 'center',
-          letterSpacing: '[-0.01em]',
           lineHeight: 'none',
         })}
         role="img"

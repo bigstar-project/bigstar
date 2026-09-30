@@ -158,9 +158,9 @@ export function BattleView({
                 alignItems: 'center',
                 color: 'fg.subtle',
                 display: 'flex',
-                fontSize: '[13px]',
                 gap: '2',
                 mt: '-1',
+                textStyle: 'sm',
               })}
             >
               <Info size={14} weight="bold" />
@@ -261,8 +261,8 @@ function RoomsSection({
               css({
                 alignItems: 'center',
                 display: 'flex',
-                fontSize: '[12.5px]',
-                gap: '[7px]',
+                gap: '1.5',
+                textStyle: 'xs',
               }),
               error ? css({ color: 'danger.11' }) : css({ color: 'fg.subtle' }),
             )}
@@ -395,7 +395,6 @@ function RoomRow({
           alignItems: 'center',
           flexDirection: 'row',
           gap: '5',
-          minH: '[72px]',
           pl: '5',
           pr: '4',
           py: '3.5',
@@ -407,23 +406,23 @@ function RoomRow({
           display: 'flex',
           flexDirection: 'column',
           flexGrow: '1',
-          gap: '[5px]',
+          gap: '1',
           minW: '0',
         })}
       >
         <span
           className={css({
-            fontSize: '[15px]',
             fontWeight: 'semibold',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
+            textStyle: 'md',
             whiteSpace: 'nowrap',
           })}
         >
           {room.host_name}
         </span>
         <RuleList
-          className={css({ fontSize: '[13px]' })}
+          className={css({ textStyle: 'sm' })}
           parts={[course, ...rules]}
         />
       </div>
@@ -431,7 +430,7 @@ function RoomRow({
         className={css({
           color: 'fg.subtle',
           flexShrink: '0',
-          fontSize: '[12.5px]',
+          textStyle: 'xs',
           whiteSpace: 'nowrap',
         })}
       >
@@ -439,7 +438,7 @@ function RoomRow({
       </span>
       <Button
         aria-label={`${room.host_name} の部屋に参加`}
-        className={css({ flexShrink: '0', w: '[84px]' })}
+        className={css({ flexShrink: '0', w: '20' })}
         colorPalette="gray"
         disabled={disabled}
         loading={joining}
@@ -522,7 +521,7 @@ function HostingCard({
           alignItems: 'center',
           display: 'flex',
           justifyContent: 'space-between',
-          pt: '[18px]',
+          pt: '4.5',
           px: '6',
         })}
       >
@@ -538,7 +537,7 @@ function HostingCard({
           <StatusDot pulse tone="success" />
           部屋を公開中
         </span>
-        <span className={css({ color: 'fg.muted', fontSize: '[13px]' })}>
+        <span className={css({ color: 'fg.muted', textStyle: 'sm' })}>
           経過{' '}
           <span
             className={css({
@@ -556,9 +555,10 @@ function HostingCard({
         className={css({
           alignItems: 'center',
           display: 'grid',
-          gridTemplateColumns: '[minmax(0, 1fr) 72px minmax(0, 1fr)]',
+          gridTemplateColumns:
+            '[minmax(0, 1fr) token(sizes.16) minmax(0, 1fr)]',
           pb: '2',
-          pt: '[22px]',
+          pt: '5.5',
           px: '6',
         })}
       >
@@ -571,20 +571,20 @@ function HostingCard({
             display: 'flex',
             flexDirection: 'column',
             gap: '1.5',
-            h: '[104px]',
+            h: '24',
             justifyContent: 'center',
-            px: '[22px]',
+            px: '5.5',
           })}
         >
-          <span className={css({ color: 'fg.muted', fontSize: '[12.5px]' })}>
+          <span className={css({ color: 'fg.muted', textStyle: 'xs' })}>
             あなた
           </span>
           <span
             className={css({
-              fontSize: '[19px]',
               fontWeight: 'bold',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
+              textStyle: 'xl',
               whiteSpace: 'nowrap',
             })}
           >
@@ -606,13 +606,13 @@ function HostingCard({
             borderColor: 'gray.5',
             borderRadius: 'l3',
             borderStyle: 'dashed',
-            borderWidth: '[1.5px]',
+            borderWidth: '1px',
             display: 'flex',
             flexDirection: 'column',
             gap: '2',
-            h: '[104px]',
+            h: '24',
             justifyContent: 'center',
-            px: '[22px]',
+            px: '5.5',
           })}
         >
           <span
@@ -628,7 +628,7 @@ function HostingCard({
             相手を待っています
             <WaitingDots />
           </span>
-          <span className={css({ color: 'fg.subtle', fontSize: '[12.5px]' })}>
+          <span className={css({ color: 'fg.subtle', textStyle: 'xs' })}>
             参加されると melonDS が自動で起動します
           </span>
         </div>
@@ -641,20 +641,24 @@ function HostingCard({
           borderTopWidth: '1px',
           display: 'flex',
           gap: '7',
-          mt: '[18px]',
+          mt: '4.5',
           px: '6',
           py: '4',
         })}
       >
         <HostingFact label="ルール">
           <RuleList
-            className={css({ color: 'fg.default', fontSize: '[13.5px]' })}
+            className={css({ color: 'fg.default', textStyle: 'sm' })}
             parts={rules}
           />
         </HostingFact>
         <span
           aria-hidden="true"
-          className={css({ bg: 'gray.3', h: '[34px]', w: '[1px]' })}
+          className={css({
+            alignSelf: 'stretch',
+            borderColor: 'gray.3',
+            borderLeftWidth: '1px',
+          })}
         />
         <HostingFact label="部屋コード">
           <span
@@ -670,7 +674,7 @@ function HostingCard({
                 fontFamily: 'mono',
                 fontSize: 'sm',
                 fontWeight: 'semibold',
-                letterSpacing: '[0.04em]',
+                letterSpacing: 'wider',
                 wordBreak: 'break-all',
               })}
             >
@@ -765,7 +769,7 @@ function UpdateRequiredNotice({
           flexDirection: 'row',
           gap: '4',
           px: '5',
-          py: '[18px]',
+          py: '4.5',
         }),
       )}
       role="alert"
@@ -792,10 +796,10 @@ function UpdateRequiredNotice({
           gap: '1',
         })}
       >
-        <span className={css({ fontSize: '[15px]', fontWeight: 'bold' })}>
+        <span className={css({ fontWeight: 'bold', textStyle: 'md' })}>
           {version ? `v${version} への更新が必要です` : '更新が必要です'}
         </span>
-        <span className={css({ color: 'fg.muted', fontSize: '[13px]' })}>
+        <span className={css({ color: 'fg.muted', textStyle: 'sm' })}>
           更新するまで部屋の作成・参加はできません。更新後は自動で再起動します。
         </span>
       </div>

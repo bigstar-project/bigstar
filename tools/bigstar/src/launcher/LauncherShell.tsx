@@ -155,15 +155,15 @@ export function LauncherShell({
               className={css({
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '[5px]',
+                gap: '1',
               })}
               data-testid="brand"
             >
               <span
                 className={css({
                   fontFamily: 'display',
-                  fontSize: '[19px]',
-                  letterSpacing: '[0.05em]',
+                  fontSize: 'xl',
+                  letterSpacing: 'wider',
                   lineHeight: 'none',
                 })}
               >
@@ -174,9 +174,9 @@ export function LauncherShell({
                   className={css({
                     color: 'amber.9',
                     fontFamily: 'mono',
-                    fontSize: '[9.5px]',
+                    fontSize: '2xs',
                     fontWeight: 'semibold',
-                    letterSpacing: '[0.18em]',
+                    letterSpacing: 'widest',
                     lineHeight: 'none',
                     textTransform: 'uppercase',
                   })}
@@ -190,7 +190,7 @@ export function LauncherShell({
 
           <Tabs.List
             aria-label="メインメニュー"
-            className={css({ gap: '0.5', mt: '[30px]' })}
+            className={css({ gap: '0.5', mt: '8' })}
           >
             <NavTab
               icon={<PixelVersus />}

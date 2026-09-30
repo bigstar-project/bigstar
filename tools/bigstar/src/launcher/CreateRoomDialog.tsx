@@ -95,7 +95,7 @@ function MatchSettingsFields({
       className={css({
         display: 'flex',
         flexDirection: 'column',
-        gap: '[22px]',
+        gap: '5.5',
       })}
     >
       <div
@@ -148,8 +148,7 @@ function MatchSettingsFields({
         <p
           className={css({
             color: 'fg.subtle',
-            fontSize: '[12.5px]',
-            lineHeight: '[1.6]',
+            textStyle: 'xs',
           })}
         >
           1ゲームは、ビッグスターを先に集めるか相手の残機を0にすると勝ちです。
@@ -161,7 +160,7 @@ function MatchSettingsFields({
   );
 }
 
-const fieldLabelClass = css({ fontSize: '[13px]', fontWeight: 'semibold' });
+const fieldLabelClass = css({ fontWeight: 'semibold', textStyle: 'sm' });
 
 /** 選択肢が少ない設定は、押したものが反転するボタンの並びで選ぶ */
 function SegmentedField({
@@ -339,9 +338,9 @@ function NetplaySettings({
         <span
           className={css({
             color: 'fg.subtle',
-            fontSize: '[12.5px]',
             fontVariantNumeric: 'tabular-nums',
             ml: 'auto',
+            textStyle: 'xs',
           })}
         >
           {summary}
@@ -373,11 +372,11 @@ function NetplaySettings({
               <span
                 className={css({
                   color: 'fg.muted',
-                  fontSize: '[13px]',
                   fontVariantNumeric: 'tabular-nums',
                   fontWeight: 'semibold',
                   textAlign: 'center',
-                  w: '[104px]',
+                  textStyle: 'sm',
+                  w: '24',
                 })}
               >
                 {rollbackPredictionHorizonFrames} F
@@ -403,7 +402,7 @@ const rowClass = css({
   display: 'flex',
   gap: '4',
   justifyContent: 'space-between',
-  minH: '[52px]',
+  minH: '12',
 });
 
 const rowTextClass = css({
@@ -413,9 +412,9 @@ const rowTextClass = css({
   minW: '0',
 });
 
-const rowLabelClass = css({ fontSize: '[13.5px]', fontWeight: 'semibold' });
+const rowLabelClass = css({ fontWeight: 'semibold', textStyle: 'sm' });
 
-const rowDescriptionClass = css({ color: 'fg.subtle', fontSize: '[12.5px]' });
+const rowDescriptionClass = css({ color: 'fg.subtle', textStyle: 'xs' });
 
 function SettingRow({
   children,
@@ -464,7 +463,7 @@ function FrameRow({
   return (
     <SettingRow description={description} label={label} labelId={labelId}>
       <NumberField.Root
-        className={css({ flexShrink: '0', w: '[104px]' })}
+        className={css({ flexShrink: '0', w: '24' })}
         max={16}
         min={0}
         size="sm"

@@ -44,11 +44,7 @@ const cardTitleClass = css({
   textStyle: 'sm',
 });
 
-const cardBodyClass = css({
-  color: 'fg.muted',
-  fontSize: 'xs',
-  lineHeight: '[1.6]',
-});
+const cardBodyClass = css({ color: 'fg.muted', textStyle: 'xs' });
 
 export function SessionCard({
   onViewChange,
@@ -83,11 +79,8 @@ export function SessionCard({
         <span
           className={cx(
             cardBodyClass,
-            css({
-              fontSize: '[12.5px]',
-              fontVariantNumeric: 'tabular-nums',
-              pl: '[15px]',
-            }),
+            // 点（2）と間（2）のぶん下げて、見出しの文字にそろえる
+            css({ fontVariantNumeric: 'tabular-nums', pl: '4' }),
           )}
         >
           {detail}
@@ -236,10 +229,10 @@ export function SidebarFooter({
       <span
         className={css({
           color: playerName ? 'fg.default' : 'fg.subtle',
-          fontSize: '[13.5px]',
           fontWeight: 'semibold',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
+          textStyle: 'sm',
           whiteSpace: 'nowrap',
         })}
         title={playerName || undefined}
@@ -251,7 +244,7 @@ export function SidebarFooter({
           alignItems: 'center',
           display: 'flex',
           fontSize: 'xs',
-          h: '[22px]',
+          h: '5.5',
           justifyContent: 'space-between',
         })}
       >
@@ -278,7 +271,7 @@ export function SidebarFooter({
               py: '0.5',
               textDecorationColor: 'gray.7',
               textDecorationLine: 'underline',
-              textUnderlineOffset: '[3px]',
+              textUnderlineOffset: '3px',
               _hover: { color: 'fg.default' },
               _disabled: { cursor: 'default', opacity: '0.5' },
               _focusVisible: { focusVisibleRing: 'outside' },
