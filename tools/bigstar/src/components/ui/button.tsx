@@ -1,98 +1,68 @@
-'use client';
-import { ark } from '@ark-ui/react/factory';
-import { createContext, mergeProps } from '@ark-ui/react/utils';
-import { type ComponentProps, forwardRef, useMemo } from 'react';
-import { styled } from 'styled-system/jsx';
-import { type ButtonVariantProps, button } from 'styled-system/recipes';
-import { Group, type GroupProps } from './group';
-import { Loader } from './loader';
+'use client'
+import type { ReactNode } from 'react'
+import { Button as BaseButton } from '@base-ui/react/button'
+import { cx } from '../../../styled-system/css'
+import { button, type ButtonVariantProps } from '../../../styled-system/recipes'
+import { Spinner } from './spinner'
+import { mergeClassName, paletteClass, type ColorPaletteProp } from './style-context'
 
-interface ButtonLoadingProps {
-  /**
-   * If `true`, the button will show a loading spinner.
-   * @default false
-   */
-  loading?: boolean | undefined;
-  /**
-   * The text to show while loading.
-   */
-  loadingText?: React.ReactNode | undefined;
-  /**
-   * The spinner to show while loading.
-   */
-  spinner?: React.ReactNode | undefined;
-  /**
-   * The placement of the spinner
-   * @default "start"
-   */
-  spinnerPlacement?: 'start' | 'end' | undefined;
+export interface ButtonLoadingProps {
+  /** Show a spinner and block presses. Without loadingText the button keeps its width. */
+  loading?: boolean
+  /** Replaces the label while loading, next to the spinner. */
+  loadingText?: ReactNode
+  /** Replaces the default spinner. */
+  spinner?: ReactNode
+  /** Where the spinner sits next to loadingText. @default "start" */
+  spinnerPlacement?: 'start' | 'end'
 }
 
-type BaseButtonProps = ComponentProps<typeof BaseButton>;
-const BaseButton = styled(ark.button, button);
-
-export interface ButtonProps extends BaseButtonProps, ButtonLoadingProps {}
-
-export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  function Button(props, ref) {
-    const propsContext = useButtonPropsContext();
-    const buttonProps = useMemo(
-      () => mergeProps<ButtonProps>(propsContext, props),
-      [propsContext, props],
-    );
-
-    const {
-      loading,
-      loadingText,
-      children,
-      spinner,
-      spinnerPlacement,
-      ...rest
-    } = buttonProps;
-    return (
-      <BaseButton
-        type="button"
-        ref={ref}
-        {...rest}
-        data-loading={loading ? '' : undefined}
-        disabled={loading || rest.disabled}
-      >
-        {!props.asChild && loading ? (
-          <Loader
-            spinner={spinner}
-            text={loadingText}
-            spinnerPlacement={spinnerPlacement}
-          >
-            {children}
-          </Loader>
-        ) : (
-          children
-        )}
-      </BaseButton>
-    );
-  },
-);
-
-export interface ButtonGroupProps extends GroupProps, ButtonVariantProps {}
-
-export const ButtonGroup = forwardRef<HTMLDivElement, ButtonGroupProps>(
-  function ButtonGroup(props, ref) {
-    const [variantProps, otherProps] = useMemo(
-      () => button.splitVariantProps(props),
-      [props],
-    );
-    return (
-      <ButtonPropsProvider value={variantProps}>
-        <Group ref={ref} {...otherProps} />
-      </ButtonPropsProvider>
-    );
-  },
-);
-
-const [ButtonPropsProvider, useButtonPropsContext] =
-  createContext<ButtonVariantProps>({
-    name: 'ButtonPropsContext',
-    hookName: 'useButtonPropsContext',
-    providerName: '<PropsProvider />',
-    strict: false,
-  });
+export type ButtonProps = BaseButton.Props &
+  ButtonVariantProps &
+  ColorPaletteProp &
+  ButtonLoadingProps
+export function Button(props: ButtonProps) {
+  const [variants, other] = button.splitVariantProps(props)
+  const {
+    colorPalette,
+    loading,
+    loadingText,
+    // 1em like the label text, as in Park UI; inherits the label color.
+    spinner = <Spinner size="inherit" aria-hidden />,
+    spinnerPlacement = 'start',
+    children,
+    disabled,
+    focusableWhenDisabled,
+    ...rest
+  } = other
+  let content: ReactNode = children
+  if (loading && loadingText !== undefined)
+    content = (
+      <>
+        {spinnerPlacement === 'start' && spinner}
+        {loadingText}
+        {spinnerPlacement === 'end' && spinner}
+      </>
+    )
+  else if (loading)
+    // The label stays laid out (and named) but invisible, so the width does not change.
+    content = (
+      <>
+        <span data-slot="loader">{spinner}</span>
+        <span data-slot="label">{children}</span>
+      </>
+    )
+  return (
+    <BaseButton
+      {...rest}
+      disabled={disabled || loading}
+      // Keep focus on the button while it loads instead of dropping it to the page.
+      focusableWhenDisabled={focusableWhenDisabled ?? (loading && !disabled)}
+      aria-busy={loading || undefined}
+      data-loading={loading ? '' : undefined}
+      className={mergeClassName(cx(button(variants), paletteClass(colorPalette)), rest.className)}
+    >
+      {content}
+    </BaseButton>
+  )
+}

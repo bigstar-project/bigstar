@@ -1,54 +1,26 @@
-export const globalCss = {
-  extend: {
-    '*': {
-      '--global-color-border': 'colors.border',
-      '--global-color-placeholder': 'colors.fg.subtle',
-      // '--global-color-selection': 'colors.colorPalette.subtle.bg',
-      '--global-color-focus-ring': 'colors.colorPalette.solid.bg',
-    },
-    html: {
-      colorPalette: 'gray',
-      colorScheme: 'dark',
-      overscrollBehavior: 'none',
-    },
-    body: {
-      // background: 'app.bg',
-      // color: 'fg.default',
-      fontFamily: 'body',
-      // lineHeight: '1.5',
-      // margin: '0',
-      // minWidth: 'appMin',
+import { defineGlobalStyles } from '@pandacss/dev'
 
-      background: 'app.bg',
-      color: 'fg.default',
-      overscrollBehavior: 'none',
-    },
-    // 'button, input, select': {
-    //   font: 'inherit',
-    // },
-    // button: {
-    //   cursor: 'pointer',
-    // },
-    // 'h1, h2, p': {
-    //   letterSpacing: '0',
-    //   margin: '0',
-    // },
-    // 'input::selection': {
-    //   background: 'blue.a5',
-    // },
-    // '::-webkit-scrollbar': {
-    //   width: '2.5',
-    //   height: '2.5',
-    // },
-    // '::-webkit-scrollbar-track': {
-    //   background: 'app.bg',
-    // },
-    // '::-webkit-scrollbar-thumb': {
-    //   background: 'gray.6',
-    //   borderColor: 'app.bg',
-    //   borderRadius: 'full',
-    //   borderStyle: 'solid',
-    //   borderWidth: '0.5',
-    // },
+// Merge into panda.config.ts: globalCss. Panda's preflight reads the --global-color-* variables.
+export const globalCss = defineGlobalStyles({
+  '*': {
+    '--global-color-border': 'colors.border',
+    '--global-color-placeholder': 'colors.fg.subtle',
+    '--global-color-selection': 'colors.colorPalette.subtle.bg',
+    '--global-color-focus-ring': 'colors.colorPalette.solid.bg',
   },
-};
+  html: {
+    // Every component inherits the accent; set colorPalette on any ancestor to recolor a subtree.
+    colorPalette: 'accent',
+    colorScheme: 'light',
+    fontFamily: 'sans',
+    '&.dark': { colorScheme: 'dark' },
+  },
+  body: { bg: 'canvas', color: 'fg.default' },
+  '@media (prefers-reduced-motion: reduce)': {
+    '*, *::before, *::after': {
+      animationDuration: '0.01ms!',
+      transitionDuration: '0.01ms!',
+      scrollBehavior: 'auto!',
+    },
+  },
+})

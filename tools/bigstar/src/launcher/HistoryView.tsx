@@ -15,7 +15,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { css, cx } from 'styled-system/css';
 import { surface } from 'styled-system/recipes';
 import { SelectField } from '../components/Fields';
-import { Button, Tabs } from '../components/ui';
+import { Button, Tabs } from '../components/park-ui';
 import { hasPlayedResult } from '../matchHistory';
 import {
   matchHistoryDashboardOptions,

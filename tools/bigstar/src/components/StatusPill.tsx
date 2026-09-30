@@ -1,6 +1,6 @@
 import { css } from 'styled-system/css';
 import type { StatusKind } from '../types';
-import { Badge, Spinner } from './ui';
+import { Badge, Spinner } from './park-ui';
 
 export function StatusPill({
   children,

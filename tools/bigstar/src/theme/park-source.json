@@ -1,0 +1,10 @@
+{
+  "repository": "https://github.com/chakra-ui/park-ui",
+  "commit": "102769cc91a9d36753dbc5893c74b7954b495efe",
+  "paths": [
+    "packages/preset/src/theme/colors",
+    "packages/preset/src/theme/tokens",
+    "packages/preset/src/recipes"
+  ],
+  "note": "Color values and variant roles preserved; light fallback uses base rather than _light."
+}

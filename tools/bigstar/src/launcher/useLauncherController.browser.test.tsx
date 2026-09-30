@@ -67,10 +67,27 @@ test('再接続中は切断イベントより復帰待ちと残り時間を優�
     active: true,
     kind: 'warn',
     text: '再接続中… 残り30秒',
+    recoveryDeadlineMs: status.webrtc?.recovery_deadline_unix_ms,
   });
   expect(
     connectionStatusFromSession({ ...status, bridge: 'exited(1)' }),
   ).toEqual({ active: true, kind: 'error', text: '接続エラー' });
+});
+
+test('再接続の期限切れはタイムアウトとして区別する', () => {
+  const status = sessionStatus({
+    active: false,
+    webrtc: {
+      ...bridgeDiagnostics('failed', 'disconnected'),
+      last_error: 'deadline-exceeded',
+    },
+  });
+  expect(connectionStatusFromSession(status)).toEqual({
+    active: false,
+    kind: 'error',
+    text: '再接続がタイムアウトしました',
+    recoveryTimedOut: true,
+  });
 });
 
 const mocks = vi.hoisted(() => {
@@ -208,6 +225,7 @@ vi.mock('../tauriClient', () => ({
     room_code: 'test-room',
     signal_url: 'ws://127.0.0.1:8787/session',
   })),
+  previewCurrentMatch: vi.fn(() => null),
   getSessionStatus: vi.fn(async () => ({
     active: false,
     bridge: null,

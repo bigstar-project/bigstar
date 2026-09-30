@@ -1,4 +1,9 @@
-import type { Defaults, MatchHistoryRecord, MvlStageResult } from './types';
+import type {
+  Defaults,
+  MatchHistoryRecord,
+  MvlStageResult,
+  SessionStatus,
+} from './types';
 
 export const previewDefaults: Defaults = {
   signal_url: 'wss://bigstar-signaling-prod.uniunntaro.workers.dev/session',
@@ -341,4 +346,154 @@ export function previewMatchHistory(): MatchHistoryRecord[] {
       status: 'completed',
     },
   ];
+}
+
+// 対戦画面をブラウザーで確かめるための状態。?previewMatch=live などで選ぶ
+export const previewMatchScenarios = [
+  'live',
+  'reconnecting',
+  'timeout',
+  'stopped',
+  'finished',
+  'lost',
+] as const;
+
+export type PreviewMatchScenario = (typeof previewMatchScenarios)[number];
+
+const previewCurrentMatchLogDir =
+  'C:UsersSugiyamaAppDataRoamingBigstar Insiderslogspreview-current-match';
+
+function previewCurrentStages(scenario: PreviewMatchScenario) {
+  const first = previewStageResult({
+    frame: 9420,
+    gameIndex: 0,
+    luigiLives: 0,
+    luigiMatchWins: 0,
+    luigiStars: 6,
+    marioLives: 2,
+    marioMatchWins: 1,
+    marioStars: 10,
+    stage: 0,
+    winner: 0,
+  });
+  if (scenario !== 'finished' && scenario !== 'lost') {
+    return [first];
+  }
+  const won = scenario === 'finished';
+  return [
+    first,
+    previewStageResult({
+      frame: 8876,
+      gameIndex: 1,
+      luigiLives: 1,
+      luigiMatchWins: 1,
+      luigiStars: 10,
+      marioLives: 0,
+      marioMatchWins: 1,
+      marioStars: 7,
+      stage: 1,
+      winner: 1,
+    }),
+    previewStageResult({
+      frame: 10_238,
+      gameIndex: 2,
+      luigiLives: won ? 1 : 2,
+      luigiMatchWins: won ? 1 : 2,
+      luigiStars: won ? 4 : 10,
+      marioLives: won ? 3 : 0,
+      marioMatchWins: won ? 2 : 1,
+      marioStars: won ? 10 : 6,
+      stage: 2,
+      winner: won ? 0 : 1,
+    }),
+    previewStageResult({
+      frame: 9812,
+      gameIndex: 3,
+      luigiLives: 1,
+      luigiMatchWins: won ? 1 : 3,
+      luigiStars: won ? 8 : 10,
+      marioLives: won ? 1 : 0,
+      marioMatchWins: won ? 3 : 1,
+      marioStars: won ? 10 : 9,
+      stage: 4,
+      winner: won ? 0 : 1,
+    }),
+  ];
+}
+
+export function previewCurrentMatch(
+  scenario: PreviewMatchScenario,
+): MatchHistoryRecord {
+  return {
+    id: 'preview-current-match',
+    logDir: previewCurrentMatchLogDir,
+    playerIds: {
+      mario: 'preview-profile-player',
+      luigi: 'preview-profile-rival',
+    },
+    playerNames: {
+      mario: 'Preview Player',
+      luigi: 'Rival',
+    },
+    role: 'host',
+    roomCode: 'preview-room',
+    settings: {
+      ...previewMatchSettings,
+      course_mode: 'random',
+      course_stages: [0, 1, 2, 4, 3],
+    },
+    stages: previewCurrentStages(scenario),
+    startedAt: '2026-06-21T10:40:00.000Z',
+    status:
+      scenario === 'finished' || scenario === 'lost'
+        ? 'completed'
+        : scenario === 'timeout' || scenario === 'stopped'
+          ? 'stopped'
+          : 'running',
+  };
+}
+
+let previewRecoveryDeadline: number | null = null;
+
+export function previewSessionStatus(
+  scenario: PreviewMatchScenario,
+  stopped: boolean,
+): SessionStatus {
+  const running =
+    !stopped && (scenario === 'live' || scenario === 'reconnecting');
+  const webrtc = (phase: string, connectionState: string) => ({
+    role: 'host',
+    phase,
+    signal_url: null,
+    session: null,
+    ice_servers: null,
+    connection_state: connectionState,
+    gathering_state: null,
+    ice_state: null,
+    selected_candidate_pair: null,
+    stats: null,
+    last_error: scenario === 'timeout' ? 'deadline-exceeded' : null,
+    recovery_deadline_unix_ms:
+      phase === 'recovering' ? previewRecoveryDeadline : null,
+  });
+  if (scenario === 'reconnecting' && previewRecoveryDeadline === null) {
+    // 残り 42 秒から数え始める
+    previewRecoveryDeadline = Date.now() + 42_000;
+  }
+  return {
+    active: running,
+    log_dir: previewCurrentMatchLogDir,
+    melon: running ? 'running' : null,
+    bridge: running ? 'running' : null,
+    webrtc: running
+      ? scenario === 'reconnecting'
+        ? webrtc('recovering', 'disconnected')
+        : webrtc('connected', 'connected')
+      : scenario === 'timeout'
+        ? webrtc('failed', 'failed')
+        : null,
+    diagnostics_error: null,
+    game_state_mismatch: null,
+    mvl_results: previewCurrentStages(scenario),
+  };
 }

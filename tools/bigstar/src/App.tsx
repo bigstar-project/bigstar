@@ -32,6 +32,15 @@ export function App() {
       !launcher.onboarding.inputConfigOpened ||
       !launcher.onboarding.playerNameConfigured);
   const onboardingOpen = onboardingMissing && launcher.activeView !== 'ai';
+  // 終わった対戦は「ロビーに戻る」で閉じるまで対戦画面に残す
+  const [dismissedMatchId, setDismissedMatchId] = useState<string | null>(null);
+  const showMatch =
+    launcher.currentMatch !== null &&
+    launcher.currentMatch.id !== dismissedMatchId;
+  // Kiso で組み直した画面だけ、無地の背景と 808px の列で表示する
+  const pageLayout =
+    launcher.activeView === 'settings' ||
+    (launcher.activeView === 'battle' && showMatch);
 
   return (
     <div className={css({ h: 'dvh', overflow: 'hidden' })}>
@@ -45,6 +54,7 @@ export function App() {
           activeView={launcher.activeView}
           activityStatus={launcher.activityStatus}
           connectionStatus={launcher.connectionStatus}
+          layout={pageLayout ? 'page' : 'panel'}
           onCheckForUpdate={() => void launcher.actions.checkForUpdate()}
           onViewChange={launcher.changeView}
           soloTestEnabled={currentRuntimeCapabilities().soloTest}
@@ -55,9 +65,15 @@ export function App() {
         >
           <BattleView
             actions={launcher.actions}
+            connectionStatus={launcher.connectionStatus}
             form={launcher.form}
             matchmakingRooms={launcher.matchmakingRooms}
             currentMatch={launcher.currentMatch}
+            onOpenHistory={() => launcher.changeView('history')}
+            onReturnToLobby={() =>
+              setDismissedMatchId(launcher.currentMatch?.id ?? null)
+            }
+            showMatch={showMatch}
             summary={launcher.summary}
             updateField={launcher.updateField}
           />
@@ -83,6 +99,7 @@ export function App() {
           <SettingsView
             actions={launcher.actions}
             form={launcher.form}
+            romGenerationBusy={launcher.onboarding.romGenerationBusy}
             startup={launcher.startup}
             updateField={launcher.updateField}
           />

@@ -16,7 +16,7 @@ import { useState } from 'react';
 import { css, cx } from 'styled-system/css';
 import { surface } from 'styled-system/recipes';
 import { NumberField, SelectField } from '../components/Fields';
-import { Button, CloseButton, Dialog, Tabs } from '../components/ui';
+import { Button, CloseButton, Dialog, Tabs } from '../components/park-ui';
 import {
   clampStage,
   defaultInputDelayFrames,
@@ -28,7 +28,7 @@ import {
 } from '../form';
 import type { CourseMode, FormState, Lives } from '../types';
 import { LauncherCard } from './LauncherCards';
-import { MatchResultCard } from './MatchResultCard';
+import { MatchView } from './MatchView';
 import {
   bigStarsOptions,
   courseOptions,
@@ -39,6 +39,7 @@ import {
 } from './options';
 import type {
   BattleMatchRecord,
+  ConnectionStatusState,
   LauncherActions,
   LauncherSummary,
   MatchmakingRoomsState,
@@ -47,9 +48,13 @@ import type {
 
 export function BattleView({
   actions,
+  connectionStatus,
   form,
   matchmakingRooms,
   currentMatch,
+  onOpenHistory,
+  onReturnToLobby,
+  showMatch,
   summary,
   updateField,
 }: {
@@ -62,12 +67,32 @@ export function BattleView({
     | 'refreshRooms'
     | 'stopMatch'
   >;
+  connectionStatus: ConnectionStatusState;
   form: FormState;
   matchmakingRooms: MatchmakingRoomsState;
   currentMatch: BattleMatchRecord | null;
+  onOpenHistory: () => void;
+  onReturnToLobby: () => void;
+  /** 対戦中と、終わった対戦を閉じるまでは、ロビーの代わりに対戦画面を出す */
+  showMatch: boolean;
   summary: LauncherSummary;
   updateField: UpdateFormField;
 }) {
+  if (showMatch && currentMatch) {
+    return (
+      <Tabs.Content value="battle">
+        <MatchView
+          canStop={summary.connectionActive}
+          connection={connectionStatus}
+          match={currentMatch}
+          onOpenHistory={onOpenHistory}
+          onReturnToLobby={onReturnToLobby}
+          onStop={() => void actions.stopMatch()}
+        />
+      </Tabs.Content>
+    );
+  }
+
   const matchmakingDisabled =
     summary.connectionActive ||
     summary.updateRequired ||
@@ -89,10 +114,6 @@ export function BattleView({
         }}
       >
         <section className={css({ display: 'grid', gap: '3' })}>
-          {currentMatch ? (
-            <MatchResultCard match={currentMatch} title="現在の対戦状況" />
-          ) : null}
-
           <LauncherCard
             title="公開ルーム"
             icon={<Users size={24} weight="fill" />}

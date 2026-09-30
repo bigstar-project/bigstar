@@ -1,40 +1,25 @@
-import { fieldAnatomy } from '@ark-ui/react/anatomy';
-import { defineSlotRecipe } from '@pandacss/dev';
+import { defineSlotRecipe } from '@pandacss/dev'
+import { disabledLabel } from '../shared'
 
 export const field = defineSlotRecipe({
-  className: 'field',
-  slots: fieldAnatomy.keys(),
+  className: 'kiso-field',
+  jsx: ['Field', /^Field\./],
+  slots: ['root', 'item', 'label', 'description', 'error'],
   base: {
-    root: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '1.5',
-    },
+    root: { display: 'flex', flexDirection: 'column', gap: '1.5', width: 'full' },
+    // One checkbox or radio in a group, with its own label and description.
+    item: { display: 'flex', flexDirection: 'column', gap: '1' },
     label: {
-      alignItems: 'center',
-      color: 'fg.default',
       display: 'flex',
+      alignItems: 'center',
       gap: '0.5',
       textAlign: 'start',
       userSelect: 'none',
+      color: 'fg.default',
       textStyle: 'label',
-      _disabled: {
-        layerStyle: 'disabled',
-      },
+      _disabled: disabledLabel,
     },
-    requiredIndicator: {
-      color: 'colorPalette.solid',
-    },
-    helperText: {
-      color: 'fg.muted',
-      textStyle: 'sm',
-      _disabled: {
-        layerStyle: 'disabled',
-      },
-    },
-    errorText: {
-      color: 'error',
-      textStyle: 'sm',
-    },
+    description: { color: 'fg.muted', textStyle: 'sm', _disabled: { layerStyle: 'disabled' } },
+    error: { color: 'fg.error', textStyle: 'sm' },
   },
-});
+})

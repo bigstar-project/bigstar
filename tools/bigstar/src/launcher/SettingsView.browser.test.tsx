@@ -1,13 +1,55 @@
+import { useState } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import { type Locator, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
-import { Tabs } from '../components/ui';
+import { Tabs } from '../components/park-ui';
 import { initialForm } from '../form';
+import type { FormState } from '../types';
 import { SettingsView } from './SettingsView';
-import type { LauncherActions } from './types';
+import type { LauncherActions, UpdateFormField } from './types';
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+// 入力欄を離れたときの保存を確かめるため、アプリと同じようにフォームの状態を持つ
+function SettingsHarness({
+  actions,
+  onUpdateField,
+}: {
+  actions: LauncherActions;
+  onUpdateField: UpdateFormField;
+}) {
+  const [form, setForm] = useState<FormState>({
+    ...initialForm,
+    baseRomPath: 'C:\\roms\\base.nds',
+    hostName: 'Player',
+    hostRomPath: 'C:\\roms\\host.nds',
+    roomCode: 'test-room',
+    signalUrl: 'ws://127.0.0.1:8787/session',
+  });
+  const updateField: UpdateFormField = (key, value) => {
+    onUpdateField(key, value);
+    setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  return (
+    <Tabs.Root value="settings">
+      <SettingsView
+        actions={actions}
+        form={form}
+        startup={{ enabled: false, loading: false }}
+        updateField={updateField}
+      />
+    </Tabs.Root>
+  );
+}
+
+// ブラウザテストでは CSS を読み込まないので、Base UI がダイアログの背後に敷く
+// 固定配置の要素が、配置されていないダイアログの上に重なる。ダイアログ内は DOM から直接押す
+function clickInDialog(locator: Locator) {
+  (locator.element() as HTMLElement).click();
+}
 
 async function renderSettingsView(
   configurableSignalServer = true,
@@ -50,21 +92,7 @@ async function renderSettingsView(
   const updateField = vi.fn();
 
   const screen = await render(
-    <Tabs.Root value="settings">
-      <SettingsView
-        actions={launcherActions}
-        form={{
-          ...initialForm,
-          baseRomPath: 'C:\\roms\\base.nds',
-          hostName: 'Player',
-          hostRomPath: 'C:\\roms\\host.nds',
-          roomCode: 'test-room',
-          signalUrl: 'ws://127.0.0.1:8787/session',
-        }}
-        startup={{ enabled: false, loading: false }}
-        updateField={updateField}
-      />
-    </Tabs.Root>,
+    <SettingsHarness actions={launcherActions} onUpdateField={updateField} />,
   );
 
   return { launcherActions, screen, updateField };
@@ -78,23 +106,35 @@ describe('設定ビュー', () => {
       (heading) => heading.textContent?.trim(),
     );
 
-    expect(headings.slice(0, 5)).toEqual([
+    expect(headings).toEqual([
       'プロフィール',
-      '常駐・通知',
-      'melonDS設定',
-      'ROM設定',
-      '接続設定',
+      'melonDS と ROM',
+      '常駐と通知',
+      '接続',
+      '診断',
     ]);
   });
 
-  test('プレイヤーネームを更新して保存する', async () => {
+  test('プレイヤーネームは入力を確定したときに保存する', async () => {
     const { launcherActions, screen, updateField } = await renderSettingsView();
+    const input = screen.getByLabelText('プレイヤーネーム');
 
-    await screen.getByLabelText('プレイヤーネーム').fill('Alice');
-    await screen.getByRole('button', { name: '保存' }).click();
+    await input.fill('Alice');
+    expect(launcherActions.savePlayerName).not.toHaveBeenCalled();
+    await userEvent.keyboard('{Enter}');
 
     expect(updateField).toHaveBeenCalledWith('hostName', 'Alice');
     expect(launcherActions.savePlayerName).toHaveBeenCalledTimes(1);
+    await expect.element(screen.getByText('5 / 32')).toBeVisible();
+  });
+
+  test('プレイヤーネームを変えずに離れたときは保存しない', async () => {
+    const { launcherActions, screen } = await renderSettingsView();
+
+    await screen.getByLabelText('プレイヤーネーム').click();
+    await screen.getByRole('button', { name: 'melonDS を開く' }).click();
+
+    expect(launcherActions.savePlayerName).not.toHaveBeenCalled();
   });
 
   test('localではシグナリングサーバーとUDPポートを更新する', async () => {
@@ -103,7 +143,7 @@ describe('設定ビュー', () => {
     await screen
       .getByLabelText('シグナリングサーバー')
       .fill('wss://match.test/session');
-    await screen.getByLabelText('UDP ポート').fill('9000');
+    await screen.getByLabelText('UDPポート').fill('9000');
     expect(updateField).toHaveBeenCalledWith(
       'signalUrl',
       'wss://match.test/session',
@@ -119,7 +159,7 @@ describe('設定ビュー', () => {
     expect(document.body.textContent).not.toContain(
       'ws://127.0.0.1:8787/session',
     );
-    await expect.element(screen.getByLabelText('UDP ポート')).toBeVisible();
+    await expect.element(screen.getByLabelText('UDPポート')).toBeVisible();
   });
 
   test('Insiders distributionではシグナリングサーバーを更新できる', async () => {
@@ -142,15 +182,16 @@ describe('設定ビュー', () => {
     await renderSettingsView(configurableSignalServer, 'public');
 
     expect(document.body.textContent).not.toContain('パフォーマンスログ');
-    expect(document.body.textContent).not.toContain('古い詳細ログを削除');
+    expect(document.body.textContent).not.toContain('古い詳細ログ');
+    expect(document.body.textContent).not.toContain('Insiders');
   });
 
   test('Public distributionでは詳細診断設定を表示しない', async () => {
     await renderSettingsView(false, 'public');
 
-    expect(document.body.textContent).not.toContain('診断イベントログ');
+    expect(document.body.textContent).not.toContain('診断');
     expect(document.body.textContent).not.toContain(
-      '入力、通信、画面状態のログを増やして原因調査しやすくします',
+      '入力・通信・画面状態のログを増やします',
     );
     expect(document.body.textContent).not.toContain('AI用プレイログ');
   });
@@ -158,7 +199,8 @@ describe('設定ビュー', () => {
   test('ロムとmelonDS関連処理を実行する', async () => {
     const { launcherActions, screen } = await renderSettingsView();
 
-    await screen.getByRole('button', { name: '参照' }).click();
+    await expect.element(screen.getByText('C:\\roms\\base.nds')).toBeVisible();
+    await screen.getByRole('button', { name: '変更' }).click();
     await screen.getByRole('button', { name: 'melonDS を開く' }).click();
     await screen.getByRole('button', { name: '入力設定を開く' }).click();
 
@@ -181,23 +223,37 @@ describe('設定ビュー', () => {
       .not.toBeInTheDocument();
   });
 
-  test('スタートアップ起動をSwitchで切り替える', async () => {
+  test('スタートアップ起動を行のクリックで切り替える', async () => {
     const { launcherActions, screen } = await renderSettingsView();
 
-    await screen.getByText('Windowsログイン時に起動').click();
+    await expect
+      .element(screen.getByRole('switch', { name: 'Windows ログイン時に起動' }))
+      .not.toBeChecked();
+    await screen.getByText('Windows ログイン時に起動').click();
 
     expect(launcherActions.setStartupEnabled).toHaveBeenCalledWith(true);
   });
 
-  test('新規部屋通知をSwitchで切り替える', async () => {
+  test('新しい部屋の通知をSwitchで切り替える', async () => {
     const { screen, updateField } = await renderSettingsView();
 
-    await screen.getByText('新規部屋通知').click();
+    await screen.getByText('新しい部屋の通知').click();
 
     expect(updateField).toHaveBeenCalledWith(
       'newRoomNotificationsEnabled',
       false,
     );
+    await expect
+      .element(screen.getByRole('switch', { name: '新しい部屋の通知' }))
+      .not.toBeChecked();
+  });
+
+  test('診断イベントログをSwitchで切り替える', async () => {
+    const { screen, updateField } = await renderSettingsView();
+
+    await screen.getByText('診断イベントログ').click();
+
+    expect(updateField).toHaveBeenCalledWith('diagnosticEventsEnabled', true);
   });
 
   test('詳細ログをSwitchで切り替える', async () => {
@@ -227,10 +283,31 @@ describe('設定ビュー', () => {
   test('古い詳細ログの削除を確認して実行する', async () => {
     const { launcherActions, screen } = await renderSettingsView();
 
-    await screen.getByRole('button', { name: '古い詳細ログを削除' }).click();
-    await screen.getByRole('button', { name: '削除する' }).click();
+    await screen.getByRole('button', { name: '削除…' }).click();
+    await expect
+      .element(screen.getByRole('alertdialog'))
+      .toHaveTextContent('古い詳細ログを削除しますか？');
+    clickInDialog(screen.getByRole('button', { name: '削除する' }));
 
-    expect(launcherActions.cleanupDetailedLogs).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() =>
+      expect(launcherActions.cleanupDetailedLogs).toHaveBeenCalledTimes(1),
+    );
+    await expect
+      .element(screen.getByRole('alertdialog'))
+      .not.toBeInTheDocument();
+  });
+
+  test('古い詳細ログの削除はキャンセルできる', async () => {
+    const { launcherActions, screen } = await renderSettingsView();
+
+    await screen.getByRole('button', { name: '削除…' }).click();
+    await expect.element(screen.getByRole('alertdialog')).toBeVisible();
+    clickInDialog(screen.getByRole('button', { name: 'キャンセル' }));
+
+    expect(launcherActions.cleanupDetailedLogs).not.toHaveBeenCalled();
+    await expect
+      .element(screen.getByRole('alertdialog'))
+      .not.toBeInTheDocument();
   });
 
   test('現在の構成パネルを表示しない', async () => {

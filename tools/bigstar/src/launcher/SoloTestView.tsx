@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { css } from 'styled-system/css';
 import type { SoloControl, SoloTestRequest } from '../bindings';
 import { NumberField, SelectField, TextField } from '../components/Fields';
-import { Button, Switch, Tabs } from '../components/ui';
+import { Button, Switch, Tabs } from '../components/park-ui';
 import { generateSeed } from '../form';
 import { type SoloTestController, soloPresets } from '../soloTest';
 import { openLogDir } from '../tauriClient';

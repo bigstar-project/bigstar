@@ -1,0 +1,2 @@
+/* Import once in your app entry. Global rules live in src/theme/global-css.ts (Panda globalCss). */
+@layer reset, base, tokens, recipes, utilities;

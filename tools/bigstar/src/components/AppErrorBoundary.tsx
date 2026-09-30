@@ -1,7 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { css } from 'styled-system/css';
 import { recordAppError } from '../appDiagnostics';
-import { Button } from './ui';
+import { Button } from './park-ui';
 
 export class AppErrorBoundary extends Component<
   { children: ReactNode },

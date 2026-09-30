@@ -1,215 +1,99 @@
-import { dialogAnatomy } from '@ark-ui/react/anatomy';
-import { defineSlotRecipe } from '@pandacss/dev';
+import { defineSlotRecipe } from '@pandacss/dev'
+import { closeTrigger } from '../shared'
 
+// Shared by Dialog and AlertDialog. Header, Body and Footer are optional layout parts.
 export const dialog = defineSlotRecipe({
-  className: 'dialog',
-  slots: dialogAnatomy.extendWith('header', 'body', 'footer').keys(),
+  className: 'kiso-dialog',
+  jsx: ['Dialog', /^Dialog\./, 'AlertDialog', /^AlertDialog\./],
+  slots: [
+    'backdrop',
+    'popup',
+    'header',
+    'body',
+    'footer',
+    'title',
+    'description',
+    'close',
+    'closeTrigger',
+  ],
   base: {
     backdrop: {
-      background: 'black.a7',
-      backdropBlur: 'sm',
-      backdropFilter: 'auto',
-      height: 'calc(100dvh - 2rem)',
-      left: '0',
       position: 'fixed',
-      top: '8',
-      width: '100dvw',
-      zIndex: 'var(--z-index)',
-      _open: {
-        animationName: 'fade-in',
-        animationTimingFunction: 'emphasized-in',
-        animationDuration: 'normal',
-      },
-      _closed: {
-        animationName: 'fade-out',
-        animationTimingFunction: 'emphasized-out',
-        animationDuration: 'fast',
-      },
+      inset: '0',
+      bg: 'black.a7',
+      zIndex: 'overlay',
+      transitionProperty: 'opacity',
+      transitionDuration: 'normal',
+      _startingStyle: { opacity: 0 },
+      _endingStyle: { opacity: 0 },
+      // A nested dialog dims its parent instead of stacking a second backdrop under it.
+      '&[data-nested]': { bg: 'transparent' },
     },
-    positioner: {
-      '--dialog-z-index': 'zIndex.modal',
+    popup: {
+      position: 'fixed',
+      left: '50%',
+      zIndex: 'modal',
       display: 'flex',
-      height: 'calc(100dvh - 2rem)',
-      justifyContent: 'center',
-      left: 0,
-      overscrollBehaviorY: 'none',
-      position: 'fixed',
-      top: '8',
-      width: '100dvw',
-      zIndex: 'calc(var(--dialog-z-index) + var(--layer-index, 0))',
-    },
-
-    title: {
-      fontWeight: 'semibold',
-      textStyle: 'lg',
-    },
-    description: {
-      color: 'fg.muted',
-      textStyle: 'sm',
-    },
-    closeTrigger: {
-      pos: 'absolute',
-      top: '3',
-      insetEnd: '3',
-    },
-    content: {
-      '--dialog-z-index': 'zIndex.modal',
-      bg: 'app.card',
-      backdropFilter: 'auto',
-      backdropBlur: 'xl',
-      backdropSaturate: '180%',
+      flexDirection: 'column',
+      gap: { base: '4', md: '6' },
+      width: 'calc(100vw - token(spacing.8))',
+      maxHeight: 'calc(100dvh - token(spacing.12))',
+      overflowY: 'auto',
+      p: { base: '4', md: '6' },
+      bg: 'gray.surface.bg',
+      color: 'fg.default',
       borderRadius: 'l3',
       boxShadow: 'lg',
-      display: 'flex',
-      flexDirection: 'column',
-      my: 'var(--dialog-margin, var(--dialog-base-margin))',
-      outline: 0,
-      position: 'relative',
+      outline: '0',
       textStyle: 'sm',
-      width: '100%',
-      zIndex: 'calc(var(--dialog-z-index) + var(--layer-index, 0))',
-      py: { base: '4', md: '6' },
-      gap: { base: '4', md: '6' },
-      _open: {
-        animationDuration: 'slowest',
+      transitionProperty: 'opacity, scale',
+      transitionDuration: 'normal',
+      _startingStyle: { opacity: 0, scale: '0.96' },
+      _endingStyle: { opacity: 0, scale: '0.96' },
+      // While a child dialog is open, the parent steps back: slightly smaller and dimmed.
+      '&[data-nested-dialog-open]': {
+        scale: 'calc(1 - 0.04 * var(--nested-dialogs))',
+        overflow: 'hidden',
+        _after: {
+          content: '""',
+          position: 'absolute',
+          inset: '0',
+          borderRadius: 'inherit',
+          bg: 'black.a4',
+          pointerEvents: 'none',
+        },
       },
-      _closed: {
-        animationDuration: 'normal',
-      },
     },
-    header: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '0.5',
-      px: { base: '4', md: '6' },
-      flex: '0',
-    },
-    body: {
-      display: 'flex',
-      flex: '1',
-      flexDirection: 'column',
-      alignItems: 'flex-start',
-      px: { base: '4', md: '6' },
-    },
-    footer: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'flex-end',
-      flex: '0',
-      gap: '3',
-      px: { base: '4', md: '6' },
-    },
+    header: { display: 'flex', flexDirection: 'column', gap: '1' },
+    body: { display: 'flex', flexDirection: 'column', gap: '4', flex: '1' },
+    footer: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '3' },
+    title: { fontWeight: 'semibold', textStyle: 'lg', color: 'fg.default' },
+    description: { color: 'fg.muted', textStyle: 'sm' },
+    close: {},
+    closeTrigger,
   },
-  defaultVariants: {
-    size: 'md',
-    scrollBehavior: 'outside',
-    placement: 'center',
-    motionPreset: 'scale',
-  },
+  defaultVariants: { size: 'md', placement: 'center' },
   variants: {
-    motionPreset: {
-      scale: {
-        content: {
-          _open: { animationName: 'scale-in, fade-in' },
-          _closed: { animationName: 'scale-out, fade-out' },
-        },
-      },
-      'slide-in-bottom': {
-        content: {
-          _open: { animationName: 'slide-from-bottom, fade-in' },
-          _closed: { animationName: 'slide-to-bottom, fade-out' },
-        },
-      },
-      'slide-in-top': {
-        content: {
-          _open: { animationName: 'slide-from-top, fade-in' },
-          _closed: { animationName: 'slide-to-top, fade-out' },
-        },
-      },
-      'slide-in-left': {
-        content: {
-          _open: { animationName: 'slide-from-left, fade-in' },
-          _closed: { animationName: 'slide-to-left, fade-out' },
-        },
-      },
-      'slide-in-right': {
-        content: {
-          _open: { animationName: 'slide-from-right, fade-in' },
-          _closed: { animationName: 'slide-to-right, fade-out' },
-        },
-      },
-      none: {},
-    },
     size: {
-      xs: { content: { maxW: 'xs' } },
-      sm: { content: { maxW: 'sm' } },
-      md: { content: { maxW: 'md' } },
-      lg: { content: { maxW: 'lg' } },
-      xl: { content: { maxW: 'xl' } },
-      cover: {
-        positioner: { padding: '8' },
-        content: {
-          width: '100%',
-          height: '100%',
-          '--dialog-margin': '0',
-        },
-      },
+      xs: { popup: { maxWidth: 'xs' } },
+      sm: { popup: { maxWidth: 'sm' } },
+      md: { popup: { maxWidth: 'md' } },
+      lg: { popup: { maxWidth: 'lg' } },
+      xl: { popup: { maxWidth: 'xl' } },
       full: {
-        content: {
-          maxW: '100dvw',
-          minH: '100dvh',
-          '--dialog-margin': '0',
+        popup: {
+          width: '100vw',
+          maxWidth: '100vw',
+          height: '100dvh',
+          maxHeight: '100dvh',
           borderRadius: '0',
         },
       },
     },
     placement: {
-      center: {
-        positioner: {
-          alignItems: 'center',
-        },
-        content: {
-          '--dialog-base-margin': 'auto',
-          mx: 'auto',
-        },
-      },
-      top: {
-        positioner: {
-          alignItems: 'flex-start',
-        },
-        content: {
-          '--dialog-base-margin': 'spacing.16',
-          mx: 'auto',
-        },
-      },
-      bottom: {
-        positioner: {
-          alignItems: 'flex-end',
-        },
-        content: {
-          '--dialog-base-margin': 'spacing.16',
-          mx: 'auto',
-        },
-      },
-    },
-    scrollBehavior: {
-      inside: {
-        positioner: {
-          overflow: 'hidden',
-        },
-        content: {
-          maxH: 'calc(100% - 7.5rem)',
-        },
-        body: {
-          overflow: 'auto',
-        },
-      },
-      outside: {
-        positioner: {
-          overflow: 'auto',
-          pointerEvents: 'auto',
-        },
-      },
+      center: { popup: { top: '50%', translate: '-50% -50%' } },
+      top: { popup: { top: '16', translate: '-50% 0' } },
     },
   },
-});
+  compoundVariants: [{ size: 'full', css: { popup: { top: '0!', translate: '-50% 0!' } } }],
+})

@@ -8,7 +8,7 @@ import type { ReactNode } from 'react';
 import { css, cx } from 'styled-system/css';
 import { surface } from 'styled-system/recipes';
 import { TextField } from '../components/Fields';
-import { Button, Dialog } from '../components/ui';
+import { Button, Dialog } from '../components/park-ui';
 import type { FormState, StatusKind } from '../types';
 import type {
   LauncherActions,

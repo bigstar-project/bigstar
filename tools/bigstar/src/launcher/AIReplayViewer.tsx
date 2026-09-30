@@ -11,7 +11,7 @@ import {
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { css } from 'styled-system/css';
-import { Button, Input, Tabs } from '../components/ui';
+import { Button, Input, Tabs } from '../components/park-ui';
 import {
   listAiArtifacts,
   openAiReplayLog,

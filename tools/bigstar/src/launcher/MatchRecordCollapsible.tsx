@@ -22,7 +22,7 @@ import {
   CloseButton,
   Collapsible,
   Dialog,
-} from '../components/ui';
+} from '../components/park-ui';
 import type { MvlStageResult, Role } from '../types';
 import { FeedbackDialog } from './FeedbackDialog';
 import { stageLabel } from './options';

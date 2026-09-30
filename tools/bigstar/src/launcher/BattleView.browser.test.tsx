@@ -1,10 +1,11 @@
 import { describe, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
-import { Tabs } from '../components/ui';
+import { Tabs } from '../components/park-ui';
 import { initialForm } from '../form';
 import { BattleView } from './BattleView';
 import type {
   BattleMatchRecord,
+  ConnectionStatusState,
   LauncherActions,
   LauncherSummary,
   MatchmakingRoomsState,
@@ -147,17 +148,28 @@ const currentMatch: BattleMatchRecord = {
   status: 'running',
 };
 
+const connected: ConnectionStatusState = {
+  active: true,
+  kind: 'ok',
+  text: '接続済み',
+};
+
 async function renderBattleView(
   props: {
     actionOverrides?: Partial<LauncherActions>;
+    connectionStatus?: ConnectionStatusState;
     currentMatch?: BattleMatchRecord | null;
     formOverride?: Partial<typeof initialForm>;
     matchmakingRooms?: MatchmakingRoomsState;
+    showMatch?: boolean;
     summaryOverride?: Partial<LauncherSummary>;
   } = {},
 ) {
   const launcherActions = actions(props.actionOverrides);
   const updateField = vi.fn();
+  const onOpenHistory = vi.fn();
+  const onReturnToLobby = vi.fn();
+  const matchProp = props.currentMatch ?? null;
 
   const screen = await render(
     <Tabs.Root value="battle">
@@ -172,15 +184,40 @@ async function renderBattleView(
           signalUrl: 'ws://127.0.0.1:8787/session',
           ...props.formOverride,
         }}
+        connectionStatus={
+          props.connectionStatus ?? {
+            active: false,
+            kind: 'idle',
+            text: '未接続',
+          }
+        }
         matchmakingRooms={props.matchmakingRooms ?? rooms}
-        currentMatch={props.currentMatch ?? null}
+        currentMatch={matchProp}
+        onOpenHistory={onOpenHistory}
+        onReturnToLobby={onReturnToLobby}
+        showMatch={props.showMatch ?? matchProp !== null}
         summary={{ ...summary, ...props.summaryOverride }}
         updateField={updateField}
       />
     </Tabs.Root>,
   );
 
-  return { launcherActions, screen, updateField };
+  return {
+    launcherActions,
+    onOpenHistory,
+    onReturnToLobby,
+    screen,
+    updateField,
+  };
+}
+
+/** 結果表の各行を、行見出しとセルの読み上げ名で返す */
+function gameRows() {
+  return [...document.querySelectorAll('tbody tr')].map((row) =>
+    [...row.querySelectorAll('th, td')].map(
+      (cell) => cell.getAttribute('aria-label') ?? cell.textContent?.trim(),
+    ),
+  );
 }
 
 describe('対戦ビュー', () => {
@@ -200,65 +237,190 @@ describe('対戦ビュー', () => {
     expect(launcherActions.joinRoom).toHaveBeenCalledWith('room12345');
   });
 
-  test('現在の対戦状況にステージ結果を表示する', async () => {
-    const { screen } = await renderBattleView({ currentMatch });
-    const startedTime = new Date(currentMatch.startedAt).toLocaleTimeString(
-      'ja-JP',
-      {
-        hour: '2-digit',
-        minute: '2-digit',
-      },
-    );
-    const startedDate = new Date(currentMatch.startedAt).toLocaleDateString(
-      'ja-JP',
-      {
-        day: '2-digit',
-        month: '2-digit',
-      },
-    );
+  test('対戦中はロビーの代わりにスコアとゲームごとの結果を表示する', async () => {
+    const { screen } = await renderBattleView({
+      connectionStatus: connected,
+      currentMatch,
+      summaryOverride: { connectionActive: true },
+    });
 
-    await expect.element(screen.getByText('現在の対戦状況')).toBeVisible();
-    await expect.element(screen.getByText('対戦中')).toBeVisible();
-    await expect.element(screen.getByText('1 - 0')).toBeVisible();
-    await expect.element(screen.getByText(startedTime)).not.toBeInTheDocument();
-    await expect.element(screen.getByText(startedDate)).not.toBeInTheDocument();
     await expect
-      .element(screen.getByTestId('stage-dots'))
+      .element(screen.getByText('Host Player'))
       .not.toBeInTheDocument();
-    await expect.element(screen.getByText('ゲーム')).toBeVisible();
-    await expect.element(screen.getByText('雪')).toBeVisible();
-    await expect.element(screen.getByText('Game 1')).not.toBeInTheDocument();
-    await expect.element(screen.getByText('未プレイ')).not.toBeInTheDocument();
-    await expect.element(screen.getByText('勝者')).toBeVisible();
-    const headers = [...document.querySelectorAll('th')].map((header) =>
-      header.textContent?.trim(),
-    );
-    expect(headers.slice(3, 5)).toEqual(['Alice', 'Bob']);
-    await expect.element(screen.getByText('C:\\logs\\run1')).toBeVisible();
-    await expect.element(screen.getByText('5 / 0')).not.toBeInTheDocument();
-    await expect.element(screen.getByText('3 / 2')).not.toBeInTheDocument();
-    await expect.element(screen.getByText(/死亡/)).not.toBeInTheDocument();
+    await expect
+      .element(screen.getByRole('status'))
+      .toHaveTextContent('第2ゲーム 進行中');
+    await expect.element(screen.getByText('コース指定')).toBeVisible();
+    await expect.element(screen.getByText('2本先取')).toBeVisible();
+    await expect
+      .element(screen.getByRole('img', { name: '1 対 0' }))
+      .toBeVisible();
+    await expect
+      .element(screen.getByRole('columnheader', { name: '第1ゲーム 雪' }))
+      .toBeVisible();
+    await expect
+      .element(
+        screen.getByRole('columnheader', { name: '第2ゲーム 土管 プレイ中' }),
+      )
+      .toBeVisible();
+    await expect
+      .element(screen.getByRole('columnheader', { name: '第3ゲーム' }))
+      .toBeVisible();
+    expect(gameRows()).toEqual([
+      ['あなた', 'スター 5、残機 3、勝ち', 'プレイ中', '未実施'],
+      ['Bob', 'スター 0、残機 2', 'プレイ中', '未実施'],
+    ]);
+    await expect
+      .element(screen.getByText('melonDS のウィンドウでプレイしてください。'))
+      .toBeVisible();
+    await expect
+      .element(screen.getByRole('button', { name: 'ロビーに戻る' }))
+      .not.toBeInTheDocument();
   });
 
   test('参加側でも自身を左、相手を右に表示する', async () => {
     const { screen } = await renderBattleView({
+      connectionStatus: connected,
       currentMatch: { ...currentMatch, role: 'client' },
     });
 
-    await expect.element(screen.getByText('0 - 1')).toBeVisible();
-    await expect.element(screen.getByText('1 - 0')).not.toBeInTheDocument();
+    await expect
+      .element(screen.getByRole('img', { name: '0 対 1' }))
+      .toBeVisible();
+    expect(gameRows()).toEqual([
+      ['あなた', 'スター 0、残機 2', 'プレイ中', '未実施'],
+      ['Alice', 'スター 5、残機 3、勝ち', 'プレイ中', '未実施'],
+    ]);
+  });
 
-    const leftPlayer = document.querySelector('[data-player-position="left"]');
-    const rightPlayer = document.querySelector(
-      '[data-player-position="right"]',
-    );
-    expect(leftPlayer?.textContent).toContain('Bob');
-    expect(rightPlayer?.textContent).toContain('Alice');
+  test('対戦を中止する', async () => {
+    const { launcherActions, screen } = await renderBattleView({
+      connectionStatus: connected,
+      currentMatch,
+      summaryOverride: { connectionActive: true },
+    });
 
-    const headers = [...document.querySelectorAll('th')].map((header) =>
-      header.textContent?.trim(),
-    );
-    expect(headers.slice(3, 5)).toEqual(['Bob', 'Alice']);
+    await screen.getByRole('button', { name: '対戦を中止' }).click();
+
+    expect(launcherActions.stopMatch).toHaveBeenCalledTimes(1);
+  });
+
+  test('再接続中は残り時間と通信待ちを表示する', async () => {
+    const { screen } = await renderBattleView({
+      connectionStatus: {
+        active: true,
+        kind: 'warn',
+        text: '再接続中… 残り42秒',
+        recoveryDeadlineMs: Date.now() + 42_000,
+      },
+      currentMatch,
+      summaryOverride: { connectionActive: true },
+    });
+
+    await expect
+      .element(screen.getByRole('status'))
+      .toHaveTextContent('再接続中…');
+    await expect
+      .element(screen.getByRole('alert'))
+      .toHaveTextContent('相手との通信が途切れました');
+    await expect.element(screen.getByText(/^0:4[12]$/)).toBeVisible();
+    // CSS を読み込まないテストではバーに大きさが無いので、値だけを確かめる
+    await expect
+      .element(screen.getByRole('progressbar', { name: '再接続の残り時間' }))
+      .toHaveAttribute('aria-valuemax', '60');
+    await expect
+      .element(
+        screen.getByRole('columnheader', { name: '第2ゲーム 土管 通信待ち' }),
+      )
+      .toBeVisible();
+  });
+
+  test('再接続がタイムアウトしたら中断として終了後の操作を表示する', async () => {
+    const { onOpenHistory, onReturnToLobby, screen } = await renderBattleView({
+      connectionStatus: {
+        active: false,
+        kind: 'error',
+        text: '再接続がタイムアウトしました',
+        recoveryTimedOut: true,
+      },
+      currentMatch: { ...currentMatch, status: 'stopped' },
+    });
+
+    await expect
+      .element(screen.getByRole('alert'))
+      .toHaveTextContent('再接続がタイムアウトしました');
+    await expect
+      .element(
+        screen.getByRole('columnheader', { name: '第2ゲーム 土管 中断' }),
+      )
+      .toBeVisible();
+    await expect
+      .element(screen.getByRole('button', { name: '対戦を中止' }))
+      .not.toBeInTheDocument();
+
+    await screen.getByRole('button', { name: '履歴で詳しく見る' }).click();
+    await screen.getByRole('button', { name: 'ロビーに戻る' }).click();
+
+    expect(onOpenHistory).toHaveBeenCalledTimes(1);
+    expect(onReturnToLobby).toHaveBeenCalledTimes(1);
+  });
+
+  test('中止した対戦では遊んでいたゲームを中断として残す', async () => {
+    const { screen } = await renderBattleView({
+      currentMatch: { ...currentMatch, status: 'stopped' },
+    });
+
+    await expect
+      .element(screen.getByRole('status'))
+      .toHaveTextContent('対戦を中断しました');
+    await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
+    expect(gameRows()).toEqual([
+      ['あなた', 'スター 5、残機 3、勝ち', '中断', '未実施'],
+      ['Bob', 'スター 0、残機 2', '中断', '未実施'],
+    ]);
+    await expect
+      .element(screen.getByRole('button', { name: 'ロビーに戻る' }))
+      .toBeVisible();
+  });
+
+  test('対戦が終わったら勝敗を表示し、遊んだゲームだけを並べる', async () => {
+    const [firstGame] = currentMatch.stages;
+    const { screen } = await renderBattleView({
+      currentMatch: {
+        ...currentMatch,
+        stages: [
+          ...currentMatch.stages,
+          { ...firstGame, game_index: 2, mario_match_wins: 2, stage: 3 },
+        ],
+        status: 'completed',
+      },
+    });
+
+    await expect
+      .element(screen.getByRole('status'))
+      .toHaveTextContent('対戦終了');
+    await expect.element(screen.getByText('勝利')).toBeVisible();
+    await expect
+      .element(screen.getByRole('img', { name: '2 対 0' }))
+      .toBeVisible();
+    await expect
+      .element(screen.getByRole('columnheader', { name: '第2ゲーム 土管' }))
+      .toBeVisible();
+    await expect
+      .element(screen.getByRole('columnheader', { name: '第3ゲーム' }))
+      .not.toBeInTheDocument();
+  });
+
+  test('閉じた対戦の代わりにロビーを表示する', async () => {
+    const { screen } = await renderBattleView({
+      currentMatch: { ...currentMatch, status: 'completed' },
+      showMatch: false,
+    });
+
+    await expect.element(screen.getByText('Host Player')).toBeVisible();
+    await expect
+      .element(screen.getByRole('table', { name: 'ゲームごとの結果' }))
+      .not.toBeInTheDocument();
   });
 
   test('公開ルームを手動更新する', async () => {

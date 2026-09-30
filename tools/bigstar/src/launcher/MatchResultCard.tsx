@@ -1,53 +1,6 @@
-import { Clock, Trophy } from '@phosphor-icons/react';
-import { css, cx } from 'styled-system/css';
-import { surface } from 'styled-system/recipes';
-import { Card } from '../components/ui';
-import { MatchRecordCollapsible } from './MatchRecordCollapsible';
-import type { BattleMatchRecord } from './types';
-
-export function MatchResultCard({
-  match,
-  title = '対戦状況',
-}: {
-  match: BattleMatchRecord;
-  title?: string;
-}) {
-  return (
-    <section
-      className={css({
-        display: 'grid',
-        gap: '2',
-      })}
-    >
-      <div
-        className={css({
-          alignItems: 'center',
-          color: 'fg.default',
-          display: 'flex',
-          fontWeight: 'black',
-          gap: '1.5',
-          px: '0.5',
-          textStyle: 'md',
-        })}
-      >
-        <Trophy
-          className={css({ color: 'yellow.plain.fg' })}
-          size={20}
-          weight="fill"
-        />
-        {title}
-      </div>
-      <div className={cx(surface(), css({ overflow: 'hidden' }))}>
-        <MatchRecordCollapsible
-          defaultOpen
-          match={match}
-          showStageDots={false}
-          showStartedAt={false}
-        />
-      </div>
-    </section>
-  );
-}
+import { Clock } from '@phosphor-icons/react';
+import { css } from 'styled-system/css';
+import { Card } from '../components/park-ui';
 
 export function EmptyMatchResultCard({
   message,

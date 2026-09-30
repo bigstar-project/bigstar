@@ -13,8 +13,8 @@ import { css, cx } from 'styled-system/css';
 import { token } from 'styled-system/tokens';
 import launcherBg from '../assets/launcher-bg.png';
 import { currentEditionConfig } from '../buildProfile';
+import { Badge, Button, Kbd, Tabs } from '../components/park-ui';
 import { StatusPill } from '../components/StatusPill';
-import { Badge, Button, Kbd, Tabs } from '../components/ui';
 import type { StatusKind } from '../types';
 import type { UpdateStatus, View } from './types';
 
@@ -160,6 +160,7 @@ export function LauncherShell({
   soloTestEnabled = false,
   children,
   connectionStatus,
+  layout = 'panel',
   onCheckForUpdate,
   onViewChange,
   romStatus,
@@ -172,6 +173,8 @@ export function LauncherShell({
   soloTestEnabled?: boolean;
   children: ReactNode;
   connectionStatus: { text: string; kind: StatusKind };
+  /** page: Kiso で組んだ画面。背景を無地にして、本文を 808px の列に収める */
+  layout?: 'panel' | 'page';
   onCheckForUpdate: () => void;
   onViewChange: (view: View) => void;
   romStatus: { text: string; kind: StatusKind } | null;
@@ -179,6 +182,7 @@ export function LauncherShell({
   updateStatus: UpdateStatus;
 }) {
   const edition = currentEditionConfig();
+  const pageLayout = layout === 'page';
 
   useHotkeys(
     viewShortcuts,
@@ -518,53 +522,82 @@ export function LauncherShell({
         </aside>
 
         <div
-          className={css({
-            backgroundImage:
-              'linear-gradient(180deg, rgba(7, 17, 31, 0.5) 0%, rgba(10, 21, 38, 0.38) 58%, rgba(6, 11, 20, 0.58) 100%)',
-            h: 'full',
-            minW: '0',
-            overflowY: 'auto',
-          })}
+          className={cx(
+            css({ h: 'full', minW: '0', overflowY: 'auto' }),
+            pageLayout
+              ? css({ bg: 'canvas' })
+              : css({
+                  backgroundImage:
+                    'linear-gradient(180deg, rgba(7, 17, 31, 0.5) 0%, rgba(10, 21, 38, 0.38) 58%, rgba(6, 11, 20, 0.58) 100%)',
+                }),
+          )}
         >
           <div
-            className={css({
-              display: 'grid',
-              gap: '4',
-              maxW: 'contentMax',
-              mx: 'auto',
-              px: { base: '3', md: '4', xl: '5' },
-              py: '4',
-              w: 'full',
-            })}
+            className={
+              pageLayout
+                ? css({
+                    // 余白の内側で 808px を確保する
+                    boxSizing: 'content-box',
+                    display: 'grid',
+                    gap: '6',
+                    maxW: 'page',
+                    mx: 'auto',
+                    pb: '10',
+                    pt: '3',
+                    px: { base: '6', lg: '12' },
+                  })
+                : css({
+                    display: 'grid',
+                    gap: '4',
+                    maxW: 'contentMax',
+                    mx: 'auto',
+                    px: { base: '3', md: '4', xl: '5' },
+                    py: '4',
+                    w: 'full',
+                  })
+            }
           >
             <header
               className={css({
-                alignItems: 'flex-start',
+                alignItems: pageLayout ? 'center' : 'flex-start',
                 display: { base: 'grid', md: 'flex' },
                 gap: '3',
                 justifyContent: 'space-between',
+                minH: pageLayout ? '11' : undefined,
               })}
             >
-              <div>
-                <div
+              {pageLayout ? (
+                <h1
                   className={css({
-                    alignItems: 'center',
-                    display: 'flex',
-                    gap: '2.5',
+                    color: 'fg.default',
+                    fontWeight: 'bold',
+                    textStyle: '2xl',
                   })}
                 >
-                  {viewIcon(activeView)}
-                  <h1
+                  {viewTitle(activeView)}
+                </h1>
+              ) : (
+                <div>
+                  <div
                     className={css({
-                      color: 'fg.default',
-                      fontWeight: 'bold',
-                      textStyle: '2xl',
+                      alignItems: 'center',
+                      display: 'flex',
+                      gap: '2.5',
                     })}
                   >
-                    {viewTitle(activeView)}
-                  </h1>
+                    {viewIcon(activeView)}
+                    <h1
+                      className={css({
+                        color: 'fg.default',
+                        fontWeight: 'bold',
+                        textStyle: '2xl',
+                      })}
+                    >
+                      {viewTitle(activeView)}
+                    </h1>
+                  </div>
                 </div>
-              </div>
+              )}
               <div
                 className={css({
                   alignItems: 'center',

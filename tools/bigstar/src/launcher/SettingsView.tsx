@@ -1,51 +1,53 @@
-import { Portal } from '@ark-ui/react';
-import {
-  BellRinging,
-  Broadcast,
-  GameController,
-  HardDrives,
-  Play,
-  Trash,
-  UserCircle,
-  WarningCircle,
-} from '@phosphor-icons/react';
-import { useState } from 'react';
+import { type ReactNode, useId, useState } from 'react';
 import { css, cx } from 'styled-system/css';
-import { surface } from 'styled-system/recipes';
+import * as AlertDialog from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import * as Card from '@/components/ui/card';
+import * as Field from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import * as NumberField from '@/components/ui/number-field';
+import * as Switch from '@/components/ui/switch';
 import { currentEdition, currentRuntimeCapabilities } from '../buildProfile';
-import {
-  FilePathField,
-  NumberField,
-  SelectField,
-  TextField,
-} from '../components/Fields';
-import { Button, CloseButton, Dialog, Switch, Tabs } from '../components/ui';
+import { Tabs } from '../components/park-ui';
 import type { FormState } from '../types';
-import { SettingsPanel } from './LauncherCards';
 import type { LauncherActions, StartupState, UpdateFormField } from './types';
 
-const diagnosticEventOptions = [
-  { value: 'off', label: 'Off' },
-  { value: 'on', label: 'On' },
-];
+const playerNameMaxLength = 32;
 
-const settingsSwitchClassName = cx(
-  surface({ variant: 'inset' }),
-  css({
-    alignItems: 'center',
-    colorPalette: 'blue',
-    display: 'flex',
-    gap: '3',
-    justifyContent: 'space-between',
-    minH: '16',
-    p: '3',
-    w: 'full',
-  }),
-);
+// 左に説明、右に操作を置く 1 行。行どうしは Card の中で罫線で区切る
+const rowClass = css({
+  alignItems: 'center',
+  columnGap: '6',
+  display: 'grid',
+  gridTemplateColumns: 'minmax(0, 1fr) auto',
+  px: '5',
+  py: '3.5',
+  w: 'full',
+});
+
+const rowTextClass = css({
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '1',
+  minW: '0',
+});
+
+const rowLabelClass = css({
+  color: 'fg.default',
+  fontWeight: 'semibold',
+  textStyle: 'sm',
+});
+
+const rowDescriptionClass = css({
+  color: 'fg.muted',
+  textStyle: 'sm',
+});
 
 export function SettingsView({
   actions,
   form,
+  romGenerationBusy = false,
   startup,
   updateField,
 }: {
@@ -59,11 +61,10 @@ export function SettingsView({
     | 'setStartupEnabled'
   >;
   form: FormState;
+  romGenerationBusy?: boolean;
   startup: StartupState;
   updateField: UpdateFormField;
 }) {
-  const [cleanupConfirmOpen, setCleanupConfirmOpen] = useState(false);
-  const [cleanupBusy, setCleanupBusy] = useState(false);
   const { configurableSignalServer } = currentRuntimeCapabilities();
   const insidersEdition = currentEdition() === 'insiders';
   const advancedDiagnostics = insidersEdition || configurableSignalServer;
@@ -71,342 +72,411 @@ export function SettingsView({
   return (
     <Tabs.Content value="settings">
       <div
-        className={css({
-          maxW: { base: 'xl', xl: 'mainPanel' },
-          mx: 'auto',
-          w: 'full',
-        })}
+        className={css({ display: 'flex', flexDirection: 'column', gap: '8' })}
       >
-        <section
-          className={css({
-            alignContent: 'start',
-            display: 'grid',
-            gap: '3',
-          })}
-        >
-          <SettingsPanel
-            icon={<UserCircle size={24} weight="fill" />}
-            title="プロフィール"
-          >
-            <div
-              className={css({
-                display: 'grid',
-                gap: '2',
-                gridTemplateColumns: {
-                  base: '1fr',
-                  md: 'minmax(0, 1fr) auto',
-                },
-              })}
-            >
-              <TextField
-                label="プレイヤーネーム"
-                value={form.hostName}
-                maxLength={32}
-                placeholder="Player"
-                onChange={(value) => updateField('hostName', value)}
-              />
-              <Button
-                className={css({ alignSelf: 'end' })}
-                variant="outline"
-                onClick={() => void actions.savePlayerName()}
-              >
-                保存
-              </Button>
-            </div>
-          </SettingsPanel>
+        <SettingsSection title="プロフィール">
+          <PlayerNameRow
+            value={form.hostName}
+            onChange={(value) => updateField('hostName', value)}
+            onCommit={() => void actions.savePlayerName()}
+          />
+        </SettingsSection>
 
-          <SettingsPanel
-            icon={<BellRinging size={24} weight="fill" />}
-            title="常駐・通知"
-          >
-            <Switch.Root
-              checked={startup.enabled}
-              disabled={startup.loading}
-              onCheckedChange={(details) =>
-                void actions.setStartupEnabled(details.checked)
-              }
-              className={settingsSwitchClassName}
-            >
-              <Switch.HiddenInput />
-              <div
+        <SettingsSection title="melonDS と ROM">
+          <div className={rowClass}>
+            <div className={rowTextClass}>
+              <span className={rowLabelClass}>ベースROM</span>
+              <span
                 className={css({
-                  display: 'grid',
-                  gap: '1',
-                  minW: '0',
+                  color: 'fg.muted',
+                  fontFamily: 'mono',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  textStyle: 'xs',
+                  whiteSpace: 'nowrap',
                 })}
+                title={form.baseRomPath || undefined}
               >
-                <Switch.Label className={css({ fontSize: 'sm' })}>
-                  Windowsログイン時に起動
-                </Switch.Label>
-                <div
-                  className={css({
-                    color: 'fg.muted',
-                    textStyle: 'xs',
-                  })}
-                >
-                  タスクトレイに最小化された状態で起動します
-                </div>
-              </div>
-              <Switch.Control />
-            </Switch.Root>
-            <Switch.Root
-              checked={form.newRoomNotificationsEnabled}
-              onCheckedChange={(details) =>
-                updateField('newRoomNotificationsEnabled', details.checked)
-              }
-              className={settingsSwitchClassName}
-            >
-              <Switch.HiddenInput />
-              <div
-                className={css({
-                  display: 'grid',
-                  gap: '1',
-                  minW: '0',
-                })}
-              >
-                <Switch.Label className={css({ fontSize: 'sm' })}>
-                  新規部屋通知
-                </Switch.Label>
-                <div
-                  className={css({
-                    color: 'fg.muted',
-                    textStyle: 'xs',
-                  })}
-                >
-                  新しい部屋が作られたときに通知を受け取ることができます
-                </div>
-              </div>
-              <Switch.Control />
-            </Switch.Root>
-          </SettingsPanel>
-
-          <SettingsPanel
-            icon={<GameController size={24} weight="fill" />}
-            title="melonDS設定"
-          >
-            <div
-              className={css({
-                display: 'grid',
-                gap: '2',
-                gridTemplateColumns: {
-                  base: '1fr',
-                  md: 'repeat(2, minmax(0, 1fr))',
-                },
-              })}
-            >
-              <Button
-                variant="outline"
-                onClick={() => void actions.openMelonds()}
-              >
-                <Play size={20} weight="fill" />
-                melonDS を開く
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => void actions.openMelondsInputConfig()}
-              >
-                <GameController size={20} weight="fill" />
-                入力設定を開く
-              </Button>
+                {form.baseRomPath || '未選択'}
+              </span>
+              {romGenerationBusy ? (
+                <span className={rowDescriptionClass}>
+                  オンライン対戦用ROMを生成しています…
+                </span>
+              ) : null}
             </div>
-            {advancedDiagnostics ? (
-              <SelectField
-                icon={<WarningCircle size={18} weight="fill" />}
-                label="診断イベントログ"
-                options={diagnosticEventOptions}
-                value={form.diagnosticEventsEnabled ? 'on' : 'off'}
-                onChange={(value) =>
-                  updateField('diagnosticEventsEnabled', value === 'on')
-                }
-              />
-            ) : null}
-            {insidersEdition ? (
-              <Switch.Root
-                checked={form.performanceLogsEnabled}
-                onCheckedChange={(details) =>
-                  updateField('performanceLogsEnabled', details.checked)
-                }
-                className={settingsSwitchClassName}
-              >
-                <Switch.HiddenInput />
-                <div
-                  className={css({
-                    display: 'grid',
-                    gap: '1',
-                    minW: '0',
-                  })}
-                >
-                  <Switch.Label className={css({ fontSize: 'sm' })}>
-                    パフォーマンスログ
-                  </Switch.Label>
-                  <div
-                    className={css({
-                      color: 'fg.muted',
-                      textStyle: 'xs',
-                    })}
-                  >
-                    FPS低下時の処理時間、音声待ち、CPU時間を低負荷で記録します
-                  </div>
-                </div>
-                <Switch.Control />
-              </Switch.Root>
-            ) : null}
-            {advancedDiagnostics ? (
-              <Switch.Root
-                checked={form.detailedLogsEnabled}
-                onCheckedChange={(details) =>
-                  updateField('detailedLogsEnabled', details.checked)
-                }
-                className={settingsSwitchClassName}
-              >
-                <Switch.HiddenInput />
-                <div
-                  className={css({
-                    display: 'grid',
-                    gap: '1',
-                    minW: '0',
-                  })}
-                >
-                  <Switch.Label className={css({ fontSize: 'sm' })}>
-                    詳細ログ
-                  </Switch.Label>
-                  <div
-                    className={css({
-                      color: 'fg.muted',
-                      textStyle: 'xs',
-                    })}
-                  >
-                    入力、通信、画面状態のログを増やして原因調査しやすくします
-                  </div>
-                </div>
-                <Switch.Control />
-              </Switch.Root>
-            ) : null}
-            {advancedDiagnostics ? (
-              <Switch.Root
-                checked={form.aiPlayLogEnabled}
-                onCheckedChange={(details) =>
-                  updateField('aiPlayLogEnabled', details.checked)
-                }
-                className={settingsSwitchClassName}
-              >
-                <Switch.HiddenInput />
-                <div
-                  className={css({
-                    display: 'grid',
-                    gap: '1',
-                    minW: '0',
-                  })}
-                >
-                  <Switch.Label className={css({ fontSize: 'sm' })}>
-                    AI用プレイログ
-                  </Switch.Label>
-                  <div
-                    className={css({
-                      color: 'fg.muted',
-                      textStyle: 'xs',
-                    })}
-                  >
-                    stage 0の対戦中だけcompact observation v3ログを保存します
-                  </div>
-                </div>
-                <Switch.Control />
-              </Switch.Root>
-            ) : null}
-            {insidersEdition ? (
-              <Dialog.Root
-                open={cleanupConfirmOpen}
-                onOpenChange={(details) => setCleanupConfirmOpen(details.open)}
-              >
-                <Dialog.Trigger asChild>
-                  <Button variant="outline">
-                    <Trash size={18} weight="bold" />
-                    古い詳細ログを削除
-                  </Button>
-                </Dialog.Trigger>
-                <Portal>
-                  <Dialog.Backdrop />
-                  <Dialog.Positioner>
-                    <Dialog.Content
-                      className={css({
-                        maxW: 'md',
-                        w: 'full',
-                      })}
-                    >
-                      <Dialog.CloseTrigger>
-                        <CloseButton />
-                      </Dialog.CloseTrigger>
-                      <Dialog.Header>
-                        <Dialog.Title>
-                          古い詳細ログを削除しますか？
-                        </Dialog.Title>
-                        <Dialog.Description>
-                          対戦履歴、作成済みzip、現在実行中の対戦ログは残ります。
-                        </Dialog.Description>
-                      </Dialog.Header>
-                      <Dialog.Footer>
-                        <Dialog.ActionTrigger asChild>
-                          <Button disabled={cleanupBusy} variant="outline">
-                            キャンセル
-                          </Button>
-                        </Dialog.ActionTrigger>
-                        <Button
-                          colorPalette="red"
-                          loading={cleanupBusy}
-                          onClick={async () => {
-                            setCleanupBusy(true);
-                            try {
-                              await actions.cleanupDetailedLogs();
-                              setCleanupConfirmOpen(false);
-                            } finally {
-                              setCleanupBusy(false);
-                            }
-                          }}
-                          variant="solid"
-                        >
-                          <Trash size={18} weight="bold" />
-                          削除する
-                        </Button>
-                      </Dialog.Footer>
-                    </Dialog.Content>
-                  </Dialog.Positioner>
-                </Portal>
-              </Dialog.Root>
-            ) : null}
-          </SettingsPanel>
+            <Button
+              colorPalette="gray"
+              size="sm"
+              variant="subtle"
+              onClick={() => void actions.selectRomPath('baseRomPath')}
+            >
+              {form.baseRomPath ? '変更' : '選択'}
+            </Button>
+          </div>
+          <ActionRow
+            label="ボタン割り当て"
+            description="melonDS の入力設定で変更します"
+            action="入力設定を開く"
+            onClick={() => void actions.openMelondsInputConfig()}
+          />
+          <ActionRow
+            label="melonDS"
+            description="対戦せずに melonDS だけを起動します"
+            action="melonDS を開く"
+            onClick={() => void actions.openMelonds()}
+          />
+        </SettingsSection>
 
-          <SettingsPanel
-            icon={<HardDrives size={24} weight="fill" />}
-            title="ROM設定"
-          >
-            <FilePathField
-              label="ベース ROM"
-              value={form.baseRomPath}
-              onBrowse={() => void actions.selectRomPath('baseRomPath')}
-            />
-          </SettingsPanel>
+        <SettingsSection title="常駐と通知">
+          <SwitchRow
+            label="Windows ログイン時に起動"
+            description="タスクトレイに最小化した状態で起動します"
+            checked={startup.enabled}
+            disabled={startup.loading}
+            onCheckedChange={(checked) =>
+              void actions.setStartupEnabled(checked)
+            }
+          />
+          <SwitchRow
+            label="新しい部屋の通知"
+            description="だれかが部屋を作ると、デスクトップに通知します"
+            checked={form.newRoomNotificationsEnabled}
+            onCheckedChange={(checked) =>
+              updateField('newRoomNotificationsEnabled', checked)
+            }
+          />
+        </SettingsSection>
 
-          <SettingsPanel
-            icon={<Broadcast size={24} weight="bold" />}
-            title="接続設定"
-          >
-            {configurableSignalServer ? (
-              <TextField
-                label="シグナリングサーバー"
+        <SettingsSection title="接続">
+          {configurableSignalServer ? (
+            <Field.Root className={rowClass}>
+              <div className={rowTextClass}>
+                <Field.Label className={rowLabelClass}>
+                  シグナリングサーバー
+                </Field.Label>
+                <Field.Description>
+                  ws:// または wss:// で始まるURL
+                </Field.Description>
+              </div>
+              <Input
+                className={css({
+                  fontFamily: 'mono',
+                  textStyle: 'xs',
+                  // 最小幅のウィンドウでも左の説明が折り返さない幅にする
+                  w: { base: '80', lg: '96' },
+                })}
+                size="sm"
+                spellCheck={false}
                 value={form.signalUrl}
-                onChange={(value) => updateField('signalUrl', value)}
+                onChange={(event) =>
+                  updateField('signalUrl', event.target.value)
+                }
+              />
+            </Field.Root>
+          ) : null}
+          <Field.Root className={rowClass}>
+            <div className={rowTextClass}>
+              <Field.Label className={rowLabelClass}>UDPポート</Field.Label>
+              <Field.Description>
+                通常は変更不要です（1〜65535）
+              </Field.Description>
+            </div>
+            <NumberField.Root
+              className={css({ w: '24' })}
+              format={{ useGrouping: false }}
+              max={65535}
+              min={1}
+              size="sm"
+              value={form.port}
+              onValueChange={(value) => {
+                if (value !== null) updateField('port', value);
+              }}
+            >
+              <NumberField.Group>
+                <NumberField.Input
+                  className={css({
+                    fontWeight: 'semibold',
+                    px: '3',
+                    textAlign: 'end',
+                  })}
+                />
+              </NumberField.Group>
+            </NumberField.Root>
+          </Field.Root>
+        </SettingsSection>
+
+        {advancedDiagnostics ? (
+          <SettingsSection
+            title="診断"
+            badge={
+              insidersEdition ? (
+                <Badge colorPalette="gray" variant="subtle">
+                  Insiders
+                </Badge>
+              ) : null
+            }
+            description="不具合の調査用です。ふだんはオフのままで問題ありません。"
+          >
+            <SwitchRow
+              label="診断イベントログ"
+              description="接続や同期の診断イベントを記録します"
+              checked={form.diagnosticEventsEnabled}
+              onCheckedChange={(checked) =>
+                updateField('diagnosticEventsEnabled', checked)
+              }
+            />
+            <SwitchRow
+              label="詳細ログ"
+              description="入力・通信・画面状態のログを増やします"
+              checked={form.detailedLogsEnabled}
+              onCheckedChange={(checked) =>
+                updateField('detailedLogsEnabled', checked)
+              }
+            />
+            {insidersEdition ? (
+              <SwitchRow
+                label="パフォーマンスログ"
+                description="FPS低下時の処理時間・音声待ち・CPU時間を記録します"
+                checked={form.performanceLogsEnabled}
+                onCheckedChange={(checked) =>
+                  updateField('performanceLogsEnabled', checked)
+                }
               />
             ) : null}
-            <NumberField
-              label="UDP ポート"
-              value={form.port}
-              min={1}
-              max={65535}
-              onChange={(value) => updateField('port', value)}
+            <SwitchRow
+              label="AI用プレイログ"
+              description="草原（stage 0）の対戦中だけ AI 学習用の観測ログを保存します"
+              checked={form.aiPlayLogEnabled}
+              onCheckedChange={(checked) =>
+                updateField('aiPlayLogEnabled', checked)
+              }
             />
-          </SettingsPanel>
-        </section>
+            {insidersEdition ? (
+              <CleanupLogsRow onCleanup={actions.cleanupDetailedLogs} />
+            ) : null}
+          </SettingsSection>
+        ) : null}
       </div>
     </Tabs.Content>
+  );
+}
+
+function SettingsSection({
+  badge,
+  children,
+  description,
+  title,
+}: {
+  badge?: ReactNode;
+  children: ReactNode;
+  description?: string;
+  title: string;
+}) {
+  return (
+    <section
+      className={css({ display: 'flex', flexDirection: 'column', gap: '2.5' })}
+    >
+      <div
+        className={css({ display: 'flex', flexDirection: 'column', gap: '1' })}
+      >
+        <div
+          className={css({ alignItems: 'center', display: 'flex', gap: '2.5' })}
+        >
+          <h2 className={css({ fontWeight: 'bold', textStyle: 'md' })}>
+            {title}
+          </h2>
+          {badge}
+        </div>
+        {description ? (
+          <p className={css({ color: 'fg.subtle', textStyle: 'sm' })}>
+            {description}
+          </p>
+        ) : null}
+      </div>
+      <Card.Root
+        className={css({
+          bg: 'gray.2',
+          '& > * + *': { borderTopWidth: '1px' },
+        })}
+      >
+        {children}
+      </Card.Root>
+    </section>
+  );
+}
+
+function ActionRow({
+  action,
+  description,
+  label,
+  onClick,
+}: {
+  action: string;
+  description: string;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <div className={rowClass}>
+      <div className={rowTextClass}>
+        <span className={rowLabelClass}>{label}</span>
+        <span className={rowDescriptionClass}>{description}</span>
+      </div>
+      <Button colorPalette="gray" size="sm" variant="subtle" onClick={onClick}>
+        {action}
+      </Button>
+    </div>
+  );
+}
+
+function SwitchRow({
+  checked,
+  description,
+  disabled,
+  label,
+  onCheckedChange,
+}: {
+  checked: boolean;
+  description: string;
+  disabled?: boolean;
+  label: string;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  const labelId = useId();
+  const descriptionId = useId();
+
+  // 行のどこを押しても切り替わるように、行全体を Switch.Label にする
+  return (
+    <Switch.Label className={cx(rowClass, css({ gap: '0' }))}>
+      <span className={rowTextClass}>
+        <span id={labelId} className={rowLabelClass}>
+          {label}
+        </span>
+        <span id={descriptionId} className={rowDescriptionClass}>
+          {description}
+        </span>
+      </span>
+      <Switch.Root
+        aria-describedby={descriptionId}
+        aria-labelledby={labelId}
+        checked={checked}
+        colorPalette="gray"
+        disabled={disabled}
+        onCheckedChange={(next) => onCheckedChange(next)}
+      >
+        <Switch.Thumb />
+      </Switch.Root>
+    </Switch.Label>
+  );
+}
+
+function PlayerNameRow({
+  onChange,
+  onCommit,
+  value,
+}: {
+  onChange: (value: string) => void;
+  onCommit: () => void;
+  value: string;
+}) {
+  // 保存ボタンは置かず、入力欄を離れたときに変わっていれば保存する
+  const [valueOnFocus, setValueOnFocus] = useState(value);
+
+  return (
+    <Field.Root className={rowClass}>
+      <div className={rowTextClass}>
+        <Field.Label className={rowLabelClass}>プレイヤーネーム</Field.Label>
+        <Field.Description>
+          公開ルームの一覧で相手に表示されます
+        </Field.Description>
+      </div>
+      <div className={css({ alignItems: 'center', display: 'flex', gap: '3' })}>
+        <span
+          aria-hidden="true"
+          className={css({
+            color: 'fg.subtle',
+            fontVariantNumeric: 'tabular-nums',
+            textStyle: 'xs',
+          })}
+        >
+          {value.length} / {playerNameMaxLength}
+        </span>
+        <Input
+          className={css({ w: '64' })}
+          maxLength={playerNameMaxLength}
+          placeholder="Player"
+          size="sm"
+          value={value}
+          onBlur={() => {
+            if (value !== valueOnFocus) onCommit();
+          }}
+          onChange={(event) => onChange(event.target.value)}
+          onFocus={() => setValueOnFocus(value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur();
+          }}
+        />
+      </div>
+    </Field.Root>
+  );
+}
+
+function CleanupLogsRow({ onCleanup }: { onCleanup: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <div className={rowClass}>
+      <div className={rowTextClass}>
+        <span className={rowLabelClass}>古い詳細ログ</span>
+        <span className={rowDescriptionClass}>
+          対戦履歴・作成済みzip・実行中の対戦ログは残ります
+        </span>
+      </div>
+      <AlertDialog.Root open={open} onOpenChange={(next) => setOpen(next)}>
+        <AlertDialog.Trigger
+          render={<Button colorPalette="danger" size="sm" variant="outline" />}
+        >
+          削除…
+        </AlertDialog.Trigger>
+        <AlertDialog.Portal>
+          <AlertDialog.Backdrop />
+          <AlertDialog.Popup>
+            <AlertDialog.Header>
+              <AlertDialog.Title>
+                古い詳細ログを削除しますか？
+              </AlertDialog.Title>
+              <AlertDialog.Description>
+                対戦履歴、作成済みzip、実行中の対戦ログは残ります。
+              </AlertDialog.Description>
+            </AlertDialog.Header>
+            <AlertDialog.Footer>
+              <AlertDialog.Close
+                disabled={busy}
+                render={<Button colorPalette="gray" variant="outline" />}
+              >
+                キャンセル
+              </AlertDialog.Close>
+              <Button
+                colorPalette="danger"
+                loading={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await onCleanup();
+                    setOpen(false);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                削除する
+              </Button>
+            </AlertDialog.Footer>
+          </AlertDialog.Popup>
+        </AlertDialog.Portal>
+      </AlertDialog.Root>
+    </div>
   );
 }

@@ -6,10 +6,14 @@ import {
   queryPreviewMatchHistory,
 } from './matchHistory';
 import {
+  type PreviewMatchScenario,
+  previewCurrentMatch as previewCurrentMatchFor,
   previewDefaults,
   previewMatchHistory,
   previewMatchHistoryKey,
+  previewMatchScenarios,
   previewRomIdentity,
+  previewSessionStatus,
   readyPreviewDefaults,
 } from './previewData';
 import type {
@@ -228,6 +232,24 @@ function previewScenario() {
   return value === 'ready' || value === 'main' ? 'ready' : 'onboarding';
 }
 
+function previewMatchScenario(): PreviewMatchScenario | null {
+  const search =
+    typeof window.location?.search === 'string' ? window.location.search : '';
+  const value = new URLSearchParams(search).get('previewMatch');
+  return previewMatchScenarios.find((scenario) => scenario === value) ?? null;
+}
+
+let previewMatchStopped = false;
+
+/** ブラウザーのプレビューで ?previewMatch= を付けたときだけ、対戦中の記録を返す */
+export function previewCurrentMatch() {
+  if (isTauriRuntime()) {
+    return null;
+  }
+  const scenario = previewMatchScenario();
+  return scenario ? previewCurrentMatchFor(scenario) : null;
+}
+
 function previewDefaultsForCurrentUrl() {
   return previewScenario() === 'ready' ? readyPreviewDefaults : previewDefaults;
 }
@@ -376,12 +398,17 @@ export function startMatch(request: LaunchRequest) {
 
 export function stopMatch() {
   if (!isTauriRuntime()) {
+    previewMatchStopped = true;
     return Promise.resolve();
   }
   return unwrapCommand(commands.stopMatch());
 }
 
 export function getSessionStatus() {
+  const scenario = isTauriRuntime() ? null : previewMatchScenario();
+  if (scenario) {
+    return Promise.resolve(previewSessionStatus(scenario, previewMatchStopped));
+  }
   if (!isTauriRuntime()) {
     return Promise.resolve<SessionStatus>({
       active: false,

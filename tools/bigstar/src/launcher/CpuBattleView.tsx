@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { css } from 'styled-system/css';
 import type { CpuMatchRules, CpuOpponent, Lives } from '../bindings';
 import { SelectField } from '../components/Fields';
-import { Button, Tabs } from '../components/ui';
+import { Button, Tabs } from '../components/park-ui';
 import type { SoloTestController } from '../soloTest';
 import { LauncherCard } from './LauncherCards';
 import { bigStarsOptions, livesOptions, winsOptions } from './options';

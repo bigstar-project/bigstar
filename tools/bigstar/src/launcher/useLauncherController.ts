@@ -46,6 +46,7 @@ import {
   openLogDir as openLogDirCommand,
   openMelonds as openMelondsCommand,
   openMelondsInputConfig as openMelondsInputConfigCommand,
+  previewCurrentMatch,
   runPreflightCheck,
   saveAiPlayLogEnabled,
   saveDetailedLogsEnabled,
@@ -75,6 +76,7 @@ import type {
 import {
   type BattleMatchRecord,
   type BattleMatchStatus,
+  type ConnectionStatusState,
   type FeedbackInput,
   isUpdateRequired,
   type LauncherActions,
@@ -89,12 +91,6 @@ import {
 } from './useMatchmakingSubscriptions';
 
 const ACTIVITY_STATUS_VISIBLE_MS = 5000;
-
-type ConnectionStatusState = {
-  active: boolean;
-  kind: StatusKind;
-  text: string;
-};
 
 const TERMINAL_WEBRTC_STATES = new Set(['closed', 'disconnected', 'failed']);
 
@@ -116,6 +112,7 @@ export function connectionStatusFromSession(
       active: response.active,
       kind: 'error',
       text: '再接続がタイムアウトしました',
+      recoveryTimedOut: true,
     };
   }
   if (
@@ -133,6 +130,7 @@ export function connectionStatusFromSession(
       active: true,
       kind: 'warn',
       text: remaining === null ? '再接続中…' : `再接続中… 残り${remaining}秒`,
+      recoveryDeadlineMs: deadline ?? null,
     };
   }
   if (
@@ -389,9 +387,9 @@ export function useLauncherController() {
   const lobbySeenRoomIdsRef = useRef<Set<string> | null>(null);
   const [hostedRoom, setHostedRoom] = useState<HostedRoom | null>(null);
   const [currentMatch, setCurrentMatch] = useState<BattleMatchRecord | null>(
-    null,
+    previewCurrentMatch,
   );
-  const currentMatchRef = useRef<BattleMatchRecord | null>(null);
+  const currentMatchRef = useRef<BattleMatchRecord | null>(currentMatch);
   const [playerProfileId, setPlayerProfileId] = useState('');
   const defaultsInitializedRef = useRef(false);
 

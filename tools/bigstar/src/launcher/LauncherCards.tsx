@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { css } from 'styled-system/css';
-import { Badge, Card } from '../components/ui';
+import { Badge, Card } from '../components/park-ui';
 
 export function LauncherCard({
   badge,

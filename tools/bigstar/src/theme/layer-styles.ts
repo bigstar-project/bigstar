@@ -1,11 +1,8 @@
-import { defineLayerStyles } from '@pandacss/dev';
+// Adapted from Park UI. See ./PARK-UI-LICENSE.
+import { defineLayerStyles } from '@pandacss/dev'
 
 export const layerStyles = defineLayerStyles({
   disabled: {
-    value: {
-      cursor: 'not-allowed',
-      opacity: '0.67',
-      filter: 'grayscale(100%)',
-    },
+    value: { cursor: 'not-allowed', opacity: '0.67', filter: 'grayscale(100%)' },
   },
-});
+})

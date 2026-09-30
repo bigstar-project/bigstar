@@ -10,7 +10,7 @@ import {
   Field,
   Switch,
   Textarea,
-} from '../components/ui';
+} from '../components/park-ui';
 import type { FeedbackCategory } from '../types';
 import type { FeedbackInput } from './types';
 

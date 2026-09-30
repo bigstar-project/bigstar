@@ -1,5 +1,10 @@
 import type { RoomSummary } from '../matchmakingClient';
-import type { FeedbackCategory, FormState, MatchHistoryRecord } from '../types';
+import type {
+  FeedbackCategory,
+  FormState,
+  MatchHistoryRecord,
+  StatusKind,
+} from '../types';
 
 export type View =
   | 'battle'
@@ -35,6 +40,16 @@ export type UpdateFormField = <K extends keyof FormState>(
 ) => void;
 
 export type SelectRomKey = 'baseRomPath';
+
+export type ConnectionStatusState = {
+  active: boolean;
+  kind: StatusKind;
+  text: string;
+  /** 再接続中だけ入る。相手の復帰を待つ締め切り（Unix ms、未取得なら null） */
+  recoveryDeadlineMs?: number | null;
+  /** 再接続の待ち時間を過ぎて対戦が終わった */
+  recoveryTimedOut?: boolean;
+};
 
 export type LauncherSummary = {
   connectionActive: boolean;
