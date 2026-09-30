@@ -174,7 +174,8 @@ export function LauncherShell({
                   className={css({
                     color: 'amber.9',
                     fontFamily: 'mono',
-                    fontSize: '2xs',
+                    // 2xs（8px）だと読みにくいので、ロゴのこの文字だけトークン外の大きさにする
+                    fontSize: '[9.5px]',
                     fontWeight: 'semibold',
                     letterSpacing: 'widest',
                     lineHeight: 'none',
