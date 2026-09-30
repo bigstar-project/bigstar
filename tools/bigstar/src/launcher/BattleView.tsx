@@ -9,7 +9,7 @@ import {
 } from '@phosphor-icons/react';
 import { type ReactNode, useState } from 'react';
 import { css, cx } from 'styled-system/css';
-import { button, card } from 'styled-system/recipes';
+import { card } from 'styled-system/recipes';
 import * as Alert from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -112,11 +112,8 @@ export function BattleView({
   } else if (!hostedRoom) {
     headerAction = (
       <Dialog.Trigger
-        className={cx(
-          button({ size: 'md' }),
-          css({ colorPalette: 'amber', fontWeight: 'bold', pl: '4', pr: '5' }),
-        )}
         disabled={matchmakingDisabled || matchmakingRooms.busy}
+        render={<Button colorPalette="amber" />}
       >
         <Plus weight="bold" />
         部屋を作る
@@ -275,12 +272,12 @@ function RoomsSection({
           </span>
           <Button
             aria-label="一覧を再読み込み"
-            className={css({ color: 'fg.muted' })}
             colorPalette="gray"
             disabled={refreshDisabled}
             loading={loading}
             onClick={onRefresh}
             size="xs"
+            square
             variant="outline"
           >
             <ArrowClockwise weight="bold" />
@@ -681,11 +678,11 @@ function HostingCard({
             </code>
             <Button
               aria-label="部屋コードをコピー"
-              className={css({ boxSize: '[26px]', minW: '[26px]', px: '0' })}
               colorPalette="gray"
               disabled={busy}
               onClick={onCopy}
               size="2xs"
+              square
               variant="subtle"
             >
               <Copy weight="bold" />
