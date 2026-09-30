@@ -3,15 +3,21 @@ import { alert } from './alert'
 import { badge } from './badge'
 import { button } from './button'
 import { card } from './card'
+import { collapsible } from './collapsible'
 import { dialog } from './dialog'
 import { field } from './field'
 import { input } from './input'
+import { kbd } from './kbd'
 import { numberField } from './number-field'
 import { progress } from './progress'
+import { select } from './select'
 import { spinner } from './spinner'
 import { switchRecipe } from './switch'
+import { tabs } from './tabs'
+import { toast } from './toast'
+import { toggle, toggleGroup } from './toggle'
 
 // prettier-ignore
-export const recipes = { badge, button, input, spinner }
+export const recipes = { badge, button, input, kbd, spinner, toggle, toggleGroup }
 // prettier-ignore
-export const slotRecipes = { alert, card, dialog, field, numberField, progress, switchRecipe }
+export const slotRecipes = { alert, card, collapsible, dialog, field, numberField, progress, select, switchRecipe, tabs, toast }

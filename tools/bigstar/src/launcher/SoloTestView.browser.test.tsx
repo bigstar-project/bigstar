@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
+import * as Tabs from '@/components/ui/tabs';
 import { commands, type SoloTestStatus } from '../bindings';
-import { Tabs } from '../components/park-ui';
 import { useSoloTest } from '../soloTest';
 import { LauncherShell } from './LauncherShell';
 import { SoloTestView } from './SoloTestView';
@@ -110,7 +110,6 @@ test.each([
       activityStatus={null}
       aiDevToolsEnabled={false}
       soloTestEnabled={enabled}
-      connectionStatus={{ kind: 'idle', text: '未接続' }}
       onCheckForUpdate={vi.fn()}
       onViewChange={vi.fn()}
       romStatus={null}

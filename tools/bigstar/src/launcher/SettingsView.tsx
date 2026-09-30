@@ -8,8 +8,8 @@ import * as Field from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import * as NumberField from '@/components/ui/number-field';
 import * as Switch from '@/components/ui/switch';
+import * as Tabs from '@/components/ui/tabs';
 import { currentEdition, currentRuntimeCapabilities } from '../buildProfile';
-import { Tabs } from '../components/park-ui';
 import type { FormState } from '../types';
 import type { LauncherActions, StartupState, UpdateFormField } from './types';
 
@@ -70,7 +70,7 @@ export function SettingsView({
   const advancedDiagnostics = insidersEdition || configurableSignalServer;
 
   return (
-    <Tabs.Content value="settings">
+    <Tabs.Panel keepMounted value="settings">
       <div
         className={css({ display: 'flex', flexDirection: 'column', gap: '8' })}
       >
@@ -258,7 +258,7 @@ export function SettingsView({
           </SettingsSection>
         ) : null}
       </div>
-    </Tabs.Content>
+    </Tabs.Panel>
   );
 }
 

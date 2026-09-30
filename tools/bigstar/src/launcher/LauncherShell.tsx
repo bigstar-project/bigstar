@@ -1,156 +1,40 @@
-import {
-  Brain,
-  ClockCounterClockwise,
-  Flag,
-  FlagCheckered,
-  Flask,
-  Gear,
-  Wrench,
-} from '@phosphor-icons/react';
+import { Brain, Flask } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { css, cx } from 'styled-system/css';
-import { token } from 'styled-system/tokens';
+import { Kbd } from '@/components/ui/kbd';
+import * as Tabs from '@/components/ui/tabs';
 import launcherBg from '../assets/launcher-bg.png';
 import { currentEditionConfig } from '../buildProfile';
-import { Badge, Button, Kbd, Tabs } from '../components/park-ui';
-import { StatusPill } from '../components/StatusPill';
-import type { StatusKind } from '../types';
+import { AppTitlebar } from '../components/AppTitlebar';
+import { type ActivityStatus, ActivityToasts } from './ActivityToasts';
+import { PageHeader } from './PageHeader';
+import {
+  PixelClock,
+  PixelRobot,
+  PixelSliders,
+  PixelStar,
+  PixelVersus,
+} from './PixelIcons';
+import {
+  RomCard,
+  SessionCard,
+  SidebarFooter,
+  type SidebarSession,
+  UpdateCard,
+} from './SidebarStatus';
 import type { UpdateStatus, View } from './types';
 
-const currentAppVersion = __BIGSTAR_GUI_VERSION__;
 const viewOrder: View[] = ['battle', 'cpu', 'history', 'settings'];
 const viewShortcuts = viewOrder.map((_, index) => `ctrl+${index + 1}`);
-
-const sidebarTabClass = css({
-  borderRadius: 'l2',
-  justifyContent: 'flex-start',
-  textAlign: 'left',
-  transition: 'colors',
-  transitionProperty: 'colors',
-  w: 'full',
-  _hover: {
-    bg: 'blue.outline.bg.hover',
-  },
-  '&:hover [data-sidebar-shortcut]': {
-    opacity: '1',
-  },
-  '&[data-selected] svg': {
-    color: 'yellow.plain.fg',
-  },
-  '&[data-selected]': {
-    color: 'fg.default',
-  },
-});
-
-const sidebarShortcutClass = css({
-  color: 'fg.subtle',
-  ml: 'auto',
-  opacity: '0',
-  pointerEvents: 'none',
-  transition: 'common',
-});
-
-function updateButtonLabel(updateStatus: UpdateStatus) {
-  if (updateStatus.phase === 'checking') {
-    return '確認中';
-  }
-  if (updateStatus.phase === 'available') {
-    return '更新あり';
-  }
-  if (updateStatus.phase === 'downloading') {
-    return '取得中';
-  }
-  if (updateStatus.phase === 'installed') {
-    return '再起動中';
-  }
-  if (updateStatus.phase === 'error') {
-    return '更新失敗';
-  }
-  return '更新確認';
-}
-
-function updateButtonClass(updateStatus: UpdateStatus) {
-  if (updateStatus.phase === 'available') {
-    return css({
-      bg: 'yellow.solid.bg',
-      borderColor: 'yellow.outline.border',
-      color: 'gray.1',
-      _hover: { bg: 'yellow.solid.bg.hover' },
-    });
-  }
-  if (updateStatus.phase === 'error') {
-    return css({
-      bg: 'red.subtle.bg',
-      borderColor: 'red.outline.border',
-      color: 'red.subtle.fg',
-    });
-  }
-  if (
-    updateStatus.phase === 'checking' ||
-    updateStatus.phase === 'downloading'
-  ) {
-    return css({
-      bg: 'blue.subtle.bg',
-      borderColor: 'blue.outline.border',
-      color: 'blue.subtle.fg',
-    });
-  }
-  return css({
-    bg: 'gray.surface.bg',
-    borderColor: 'gray.surface.border',
-    color: 'fg.default',
-  });
-}
 
 function viewTitle(view: View) {
   if (view === 'cpu') return 'CPU対戦';
   if (view === 'solo-test') return 'ひとり検証';
-  if (view === 'battle') {
-    return '対戦';
-  }
-  if (view === 'ai') {
-    return 'AI';
-  }
-  if (view === 'history') {
-    return '対戦履歴';
-  }
+  if (view === 'battle') return '対戦';
+  if (view === 'ai') return 'AI';
+  if (view === 'history') return '対戦履歴';
   return '設定';
-}
-
-function viewIcon(view: View) {
-  if (view === 'cpu') return <Brain size={28} weight="fill" />;
-  if (view === 'solo-test') return <Flask size={28} weight="fill" />;
-  if (view === 'battle') {
-    return (
-      <Flag
-        className={css({ color: 'blue.plain.fg' })}
-        size={28}
-        weight="fill"
-      />
-    );
-  }
-  if (view === 'ai') {
-    return (
-      <Brain
-        className={css({ color: 'yellow.plain.fg' })}
-        size={28}
-        weight="fill"
-      />
-    );
-  }
-  if (view === 'history') {
-    return (
-      <ClockCounterClockwise
-        className={css({ color: 'blue.plain.fg' })}
-        size={28}
-        weight="fill"
-      />
-    );
-  }
-  return (
-    <Gear className={css({ color: 'blue.plain.fg' })} size={28} weight="fill" />
-  );
 }
 
 export function LauncherShell({
@@ -159,30 +43,41 @@ export function LauncherShell({
   aiDevToolsEnabled = true,
   soloTestEnabled = false,
   children,
-  connectionStatus,
+  inert = false,
   layout = 'panel',
   onCheckForUpdate,
   onViewChange,
+  playerName = '',
+  roomCount = 0,
   romStatus,
+  session = null,
   updateBusy,
   updateStatus,
 }: {
   activeView: View;
-  activityStatus: { text: string; kind: StatusKind } | null;
+  activityStatus: ActivityStatus | null;
   aiDevToolsEnabled?: boolean;
   soloTestEnabled?: boolean;
   children: ReactNode;
-  connectionStatus: { text: string; kind: StatusKind };
+  /** 初回セットアップ中は、タイトルバー以外を操作できなくする */
+  inert?: boolean;
   /** page: Kiso で組んだ画面。背景を無地にして、本文を 808px の列に収める */
   layout?: 'panel' | 'page';
   onCheckForUpdate: () => void;
   onViewChange: (view: View) => void;
-  romStatus: { text: string; kind: StatusKind } | null;
+  playerName?: string;
+  /** 募集中の部屋の数。0 なら対戦タブに数を出さない */
+  roomCount?: number;
+  romStatus: ActivityStatus | null;
+  session?: SidebarSession | null;
   updateBusy: boolean;
   updateStatus: UpdateStatus;
 }) {
   const edition = currentEditionConfig();
   const pageLayout = layout === 'page';
+  const inertProps = inert
+    ? ({ 'aria-hidden': true, inert: true } as const)
+    : undefined;
 
   useHotkeys(
     viewShortcuts,
@@ -208,425 +103,301 @@ export function LauncherShell({
   );
 
   return (
-    <Tabs.Root
-      colorPalette="gray"
-      className={css({
-        backgroundImage: `linear-gradient(180deg, rgba(3, 10, 20, 0.36) 0%, rgba(3, 10, 20, 0.22) 42%, rgba(3, 10, 20, 0.58) 100%), url(${launcherBg})`,
-        backgroundAttachment: 'fixed',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        backgroundSize: 'cover',
-        color: 'fg.default',
-        h: 'full',
-        overflow: 'hidden',
-        w: 'full',
-      })}
-      orientation="vertical"
-      size="md"
-      value={activeView}
-      variant="subtle"
-      onValueChange={(details) => onViewChange(details.value as View)}
-    >
-      <main
+    <ActivityToasts status={activityStatus}>
+      <Tabs.Root
         className={css({
           display: 'grid',
-          gridTemplateColumns: `${token('sizes.sidebar')} minmax(0, 1fr)`,
+          gap: '0',
+          gridTemplateColumns: '[token(sizes.sidebar) minmax(0, 1fr)]',
           h: 'full',
-          minH: '0',
-          w: 'full',
+          overflow: 'hidden',
         })}
-        style={{
-          backgroundAttachment: 'fixed',
-          backgroundImage: `linear-gradient(180deg, rgba(3, 10, 20, 0.36) 0%, rgba(3, 10, 20, 0.22) 42%, rgba(3, 10, 20, 0.58) 100%), url(${launcherBg})`,
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat',
-          backgroundSize: 'cover',
-        }}
+        orientation="vertical"
+        value={activeView}
+        // line だとリストの左に線が出るので、背景で選択を示す subtle にする
+        variant="subtle"
+        onValueChange={(value) => onViewChange(value as View)}
       >
         <aside
           className={css({
-            backdropBlur: 'sm',
-            backdropFilter: 'auto',
             bg: 'app.sidebar',
+            borderRightColor: 'gray.3',
             borderRightWidth: '1px',
-            display: 'grid',
+            display: 'flex',
+            flexDirection: 'column',
             h: 'full',
+            minH: '0',
+            overflowY: 'auto',
+            pb: '4',
+            pt: '5',
             px: '3',
-            py: '4',
           })}
+          {...inertProps}
         >
           <div
             className={css({
-              alignContent: 'space-between',
-              display: 'grid',
+              alignItems: 'center',
+              display: 'flex',
+              gap: '2.5',
+              pt: '0.5',
+              px: '2.5',
+              userSelect: 'none',
+              '& > *': { pointerEvents: 'none' },
             })}
+            data-tauri-drag-region
           >
-            <div
+            <PixelStar
+              className={css({ color: 'amber.9', flexShrink: '0' })}
+              eyeColor="var(--colors-app-sidebar)"
+            />
+            <span
               className={css({
-                display: 'grid',
-                gap: '5',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '[5px]',
               })}
+              data-testid="brand"
             >
-              <div
+              <span
                 className={css({
-                  px: '2',
+                  fontFamily: 'display',
+                  fontSize: '[19px]',
+                  letterSpacing: '[0.05em]',
+                  lineHeight: 'none',
                 })}
               >
-                <div
-                  className={css({
-                    display: 'grid',
-                    gap: '1',
-                  })}
-                >
-                  <div
-                    className={css({
-                      color: 'fg.default',
-                      fontWeight: 'black',
-                      lineHeight: 'none',
-                      textStyle: '2xl',
-                    })}
-                  >
-                    BIG
-                  </div>
-                  <div
-                    data-testid="brand-star-row"
-                    className={css({
-                      alignItems: 'flex-end',
-                      color: 'fg.default',
-                      display: 'flex',
-                      fontWeight: 'black',
-                      gap: '2',
-                      lineHeight: 'none',
-                      textStyle: '2xl',
-                    })}
-                  >
-                    <span className={css({ color: 'yellow.plain.fg' })}>
-                      STAR
-                    </span>
-                    {edition.edition === 'insiders' ? (
-                      <Badge
-                        className={css({
-                          borderRadius: 'full',
-                          fontWeight: 'bold',
-                        })}
-                        colorPalette="yellow"
-                        data-testid="edition-badge"
-                        size="sm"
-                        variant="subtle"
-                      >
-                        {edition.badge}
-                      </Badge>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-
-              <Tabs.List
-                className={css({
-                  display: 'grid',
-                  gap: '2',
-                  position: 'relative',
-                })}
-              >
-                <Tabs.Trigger
-                  aria-label="対戦"
-                  className={sidebarTabClass}
-                  value="battle"
-                >
-                  <FlagCheckered
-                    className={css({
-                      flexShrink: '0',
-                    })}
-                    size={22}
-                    weight="fill"
-                  />
-                  <span
-                    className={css({
-                      textStyle: 'sm',
-                    })}
-                  >
-                    対戦
-                  </span>
-                  <Kbd
-                    className={sidebarShortcutClass}
-                    colorPalette="gray"
-                    data-sidebar-shortcut
-                    size="sm"
-                    variant="surface"
-                  >
-                    Ctrl+{viewOrder.indexOf('battle') + 1}
-                  </Kbd>
-                </Tabs.Trigger>
-                <Tabs.Trigger
-                  aria-label="CPU対戦"
-                  className={sidebarTabClass}
-                  value="cpu"
-                >
-                  <Brain size={22} weight="fill" />
-                  <span>CPU対戦</span>
-                  <Kbd
-                    className={sidebarShortcutClass}
-                    colorPalette="gray"
-                    data-sidebar-shortcut
-                    size="sm"
-                    variant="surface"
-                  >
-                    Ctrl+{viewOrder.indexOf('cpu') + 1}
-                  </Kbd>
-                </Tabs.Trigger>
-                <Tabs.Trigger
-                  aria-label="対戦履歴"
-                  className={sidebarTabClass}
-                  value="history"
-                >
-                  <ClockCounterClockwise
-                    className={css({
-                      flexShrink: '0',
-                    })}
-                    size={22}
-                    weight="fill"
-                  />
-                  <span
-                    className={css({
-                      textStyle: 'sm',
-                    })}
-                  >
-                    履歴
-                  </span>
-                  <Kbd
-                    className={sidebarShortcutClass}
-                    colorPalette="gray"
-                    data-sidebar-shortcut
-                    size="sm"
-                    variant="surface"
-                  >
-                    Ctrl+{viewOrder.indexOf('history') + 1}
-                  </Kbd>
-                </Tabs.Trigger>
-                <Tabs.Trigger
-                  aria-label="設定"
-                  className={sidebarTabClass}
-                  value="settings"
-                >
-                  <Gear
-                    className={css({
-                      flexShrink: '0',
-                    })}
-                    size={22}
-                    weight="fill"
-                  />
-                  <span
-                    className={css({
-                      textStyle: 'sm',
-                    })}
-                  >
-                    設定
-                  </span>
-                  <Kbd
-                    className={sidebarShortcutClass}
-                    colorPalette="gray"
-                    data-sidebar-shortcut
-                    size="sm"
-                    variant="surface"
-                  >
-                    Ctrl+{viewOrder.indexOf('settings') + 1}
-                  </Kbd>
-                </Tabs.Trigger>
-                {/* ローカル限定のタブは、通常タブと区別できるよう設定の下に置く。 */}
-                {soloTestEnabled ? (
-                  <Tabs.Trigger
-                    aria-label="ひとり検証"
-                    className={sidebarTabClass}
-                    value="solo-test"
-                  >
-                    <Flask size={22} weight="fill" />
-                    <span>ひとり検証</span>
-                  </Tabs.Trigger>
-                ) : null}
-                {aiDevToolsEnabled ? (
-                  <Tabs.Trigger
-                    aria-label="AI"
-                    className={sidebarTabClass}
-                    value="ai"
-                  >
-                    <Brain
-                      className={css({
-                        flexShrink: '0',
-                      })}
-                      size={22}
-                      weight="fill"
-                    />
-                    <span
-                      className={css({
-                        textStyle: 'sm',
-                      })}
-                    >
-                      AI
-                    </span>
-                  </Tabs.Trigger>
-                ) : null}
-                <Tabs.Indicator className={css({ bg: 'blue.subtle.bg' })} />
-              </Tabs.List>
-            </div>
-            <div
-              className={css({
-                display: 'grid',
-                gap: '2',
-                justifyItems: 'stretch',
-              })}
-            >
-              <Button
-                type="button"
-                className={cx(
-                  css({
-                    fontWeight: 'black',
-                    maxW: 'full',
-                  }),
-                  updateButtonClass(updateStatus),
-                )}
-                disabled={updateBusy}
-                title={
-                  updateStatus.version
-                    ? `v${updateStatus.version}`
-                    : '更新を確認'
-                }
-                onClick={onCheckForUpdate}
-              >
-                <Wrench
-                  className={css({ flexShrink: '0' })}
-                  size={16}
-                  weight="bold"
-                />
+                BIGSTAR
+              </span>
+              {edition.edition === 'insiders' ? (
                 <span
                   className={css({
-                    textStyle: 'sm',
+                    color: 'amber.9',
+                    fontFamily: 'mono',
+                    fontSize: '[9.5px]',
+                    fontWeight: 'semibold',
+                    letterSpacing: '[0.18em]',
+                    lineHeight: 'none',
+                    textTransform: 'uppercase',
                   })}
+                  data-testid="edition-badge"
                 >
-                  {updateButtonLabel(updateStatus)}
+                  {edition.badge}
                 </span>
-              </Button>
-              <div
-                className={css({
-                  color: 'fg.muted',
-                  display: 'flex',
-                  fontWeight: 'bold',
-                  justifyContent: 'center',
-                  textStyle: 'xs',
-                })}
-                title={`現在のバージョン v${currentAppVersion}`}
-              >
-                <span>v{currentAppVersion}</span>
-              </div>
-            </div>
+              ) : null}
+            </span>
           </div>
+
+          <Tabs.List
+            aria-label="メインメニュー"
+            className={css({ gap: '0.5', mt: '[30px]' })}
+          >
+            <NavTab
+              icon={<PixelVersus />}
+              label="対戦"
+              shortcut={1}
+              value="battle"
+            >
+              {roomCount > 0 ? (
+                // タブの名前は「対戦」のままにし、部屋の数は対戦画面で読み上げる
+                <span
+                  aria-hidden="true"
+                  className={css({
+                    bg: 'gray.4',
+                    borderRadius: 'full',
+                    color: 'fg.default',
+                    fontSize: 'xs',
+                    fontVariantNumeric: 'tabular-nums',
+                    fontWeight: 'semibold',
+                    lineHeight: '[20px]',
+                    minW: '5',
+                    px: '1.5',
+                    textAlign: 'center',
+                  })}
+                  data-nav-count
+                >
+                  {roomCount}
+                </span>
+              ) : null}
+            </NavTab>
+            <NavTab
+              icon={<PixelRobot />}
+              label="CPU対戦"
+              shortcut={2}
+              value="cpu"
+            />
+            <NavTab
+              ariaLabel="対戦履歴"
+              icon={<PixelClock />}
+              label="履歴"
+              shortcut={3}
+              value="history"
+            />
+            <NavTab
+              icon={<PixelSliders />}
+              label="設定"
+              shortcut={4}
+              value="settings"
+            />
+            {/* ローカル限定のタブは、通常タブと区別できるよう設定の下に置く。 */}
+            {soloTestEnabled ? (
+              <NavTab
+                icon={<Flask size={18} weight="fill" />}
+                label="ひとり検証"
+                value="solo-test"
+              />
+            ) : null}
+            {aiDevToolsEnabled ? (
+              <NavTab
+                icon={<Brain size={18} weight="fill" />}
+                label="AI"
+                value="ai"
+              />
+            ) : null}
+          </Tabs.List>
+
+          <div className={css({ flexGrow: '1', minH: '6' })} />
+
+          {session ? (
+            <SessionCard onViewChange={onViewChange} session={session} />
+          ) : null}
+          {romStatus ? <RomCard /> : null}
+          <UpdateCard
+            busy={updateBusy}
+            onCheckForUpdate={onCheckForUpdate}
+            updateStatus={updateStatus}
+          />
+          <SidebarFooter
+            busy={updateBusy}
+            onCheckForUpdate={onCheckForUpdate}
+            playerName={playerName}
+            updateStatus={updateStatus}
+          />
         </aside>
 
         <div
           className={cx(
-            css({ h: 'full', minW: '0', overflowY: 'auto' }),
-            pageLayout
-              ? css({ bg: 'canvas' })
-              : css({
-                  backgroundImage:
-                    'linear-gradient(180deg, rgba(7, 17, 31, 0.5) 0%, rgba(10, 21, 38, 0.38) 58%, rgba(6, 11, 20, 0.58) 100%)',
-                }),
+            css({
+              display: 'flex',
+              flexDirection: 'column',
+              h: 'full',
+              minH: '0',
+              minW: '0',
+            }),
+            pageLayout ? css({ bg: 'canvas' }) : undefined,
           )}
+          style={
+            pageLayout
+              ? undefined
+              : {
+                  backgroundImage: `linear-gradient(180deg, rgba(7, 17, 31, 0.62) 0%, rgba(10, 21, 38, 0.5) 58%, rgba(6, 11, 20, 0.7) 100%), url(${launcherBg})`,
+                  backgroundPosition: 'center',
+                  backgroundRepeat: 'no-repeat',
+                  backgroundSize: 'cover',
+                }
+          }
         >
+          <AppTitlebar />
           <div
-            className={
-              pageLayout
-                ? css({
-                    // 余白の内側で 808px を確保する
-                    boxSizing: 'content-box',
-                    display: 'grid',
-                    gap: '6',
-                    maxW: 'page',
-                    mx: 'auto',
-                    pb: '10',
-                    pt: '3',
-                    px: { base: '6', lg: '12' },
-                  })
-                : css({
-                    display: 'grid',
-                    gap: '4',
-                    maxW: 'contentMax',
-                    mx: 'auto',
-                    px: { base: '3', md: '4', xl: '5' },
-                    py: '4',
-                    w: 'full',
-                  })
-            }
+            className={css({ flex: '1', minH: '0', overflowY: 'auto' })}
+            {...inertProps}
           >
-            <header
-              className={css({
-                alignItems: pageLayout ? 'center' : 'flex-start',
-                display: { base: 'grid', md: 'flex' },
-                gap: '3',
-                justifyContent: 'space-between',
-                minH: pageLayout ? '11' : undefined,
-              })}
+            <div
+              className={
+                pageLayout
+                  ? css({
+                      // 余白の内側で 808px を確保する
+                      boxSizing: 'content-box',
+                      display: 'grid',
+                      gap: '6',
+                      maxW: 'page',
+                      mx: 'auto',
+                      pb: '10',
+                      pt: '3',
+                      px: { base: '6', lg: '12' },
+                    })
+                  : css({
+                      display: 'grid',
+                      gap: '4',
+                      maxW: 'contentMax',
+                      mx: 'auto',
+                      pb: '4',
+                      pt: '3',
+                      px: { base: '3', md: '4', xl: '5' },
+                      w: 'full',
+                    })
+              }
             >
-              {pageLayout ? (
-                <h1
-                  className={css({
-                    color: 'fg.default',
-                    fontWeight: 'bold',
-                    textStyle: '2xl',
-                  })}
-                >
-                  {viewTitle(activeView)}
-                </h1>
-              ) : (
-                <div>
-                  <div
-                    className={css({
-                      alignItems: 'center',
-                      display: 'flex',
-                      gap: '2.5',
-                    })}
-                  >
-                    {viewIcon(activeView)}
-                    <h1
-                      className={css({
-                        color: 'fg.default',
-                        fontWeight: 'bold',
-                        textStyle: '2xl',
-                      })}
-                    >
-                      {viewTitle(activeView)}
-                    </h1>
-                  </div>
-                </div>
+              {/* 対戦画面は見出しの横に部屋を作るボタンを置くので、自分で見出しを出す */}
+              {activeView === 'battle' ? null : (
+                <PageHeader title={viewTitle(activeView)} />
               )}
-              <div
-                className={css({
-                  alignItems: 'center',
-                  display: 'flex',
-                  flexWrap: { base: 'wrap', md: 'nowrap' },
-                  gap: '3',
-                  justifyContent: { md: 'flex-end' },
-                })}
-              >
-                <StatusPill kind={connectionStatus.kind}>
-                  {connectionStatus.text}
-                </StatusPill>
-                {romStatus ? (
-                  <StatusPill kind={romStatus.kind} loading>
-                    {romStatus.text}
-                  </StatusPill>
-                ) : null}
-                {activityStatus ? (
-                  <StatusPill kind={activityStatus.kind}>
-                    {activityStatus.text}
-                  </StatusPill>
-                ) : null}
-              </div>
-            </header>
-
-            {children}
+              {children}
+            </div>
           </div>
         </div>
-      </main>
-    </Tabs.Root>
+      </Tabs.Root>
+    </ActivityToasts>
   );
 }
+
+function NavTab({
+  ariaLabel,
+  children,
+  icon,
+  label,
+  shortcut,
+  value,
+}: {
+  ariaLabel?: string;
+  children?: ReactNode;
+  icon: ReactNode;
+  label: string;
+  shortcut?: number;
+  value: View;
+}) {
+  return (
+    <Tabs.Tab
+      aria-label={ariaLabel ?? label}
+      className={navTabClass}
+      value={value}
+    >
+      <span className={css({ display: 'flex', flexShrink: '0' })}>{icon}</span>
+      <span className={css({ flexGrow: '1', textAlign: 'left' })}>{label}</span>
+      {children}
+      {shortcut ? (
+        <Kbd className={shortcutClass} data-nav-shortcut size="sm">
+          Ctrl+{shortcut}
+        </Kbd>
+      ) : null}
+    </Tabs.Tab>
+  );
+}
+
+const navTabClass = css({
+  borderRadius: 'l2',
+  color: 'fg.muted',
+  fontSize: 'sm',
+  fontWeight: 'medium',
+  gap: '3',
+  h: '10',
+  justifyContent: 'flex-start',
+  px: '3',
+  transition: 'colors',
+  w: 'full',
+  '& svg': { color: 'fg.subtle' },
+  _hover: { bg: 'gray.a2', color: 'fg.default' },
+  _selected: {
+    bg: 'gray.2',
+    color: 'white',
+    fontWeight: 'semibold',
+    _hover: { bg: 'gray.2' },
+    '& svg': { color: 'amber.9' },
+  },
+  '&:hover [data-nav-count]': { display: 'none' },
+  '&:hover [data-nav-shortcut]': { display: 'inline-flex' },
+});
+
+const shortcutClass = css({
+  display: 'none',
+  pointerEvents: 'none',
+});

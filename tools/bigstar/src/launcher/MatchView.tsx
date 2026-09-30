@@ -269,7 +269,10 @@ function gameSlots(match: BattleMatchRecord, phase: MatchPhase): GameSlot[] {
   });
 }
 
-function matchWinsFor(result: MvlStageResult | undefined, side: PlayerSide) {
+export function matchWinsFor(
+  result: MvlStageResult | undefined,
+  side: PlayerSide,
+) {
   return side === 'mario'
     ? (result?.mario_match_wins ?? 0)
     : (result?.luigi_match_wins ?? 0);

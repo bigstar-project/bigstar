@@ -40,6 +40,8 @@ export function useLobbyRoomsSubscription({
         onClose: () => {
           unsubscribe = null;
           if (!disposed) {
+            // つながらずに閉じたときも、再接続を待つ間は読み込み中にしない
+            onLoadingChange(false);
             reconnectTimer = window.setTimeout(connect, RECONNECT_DELAY_MS);
           }
         },

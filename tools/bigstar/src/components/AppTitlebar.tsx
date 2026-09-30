@@ -176,12 +176,12 @@ function WindowButton({
       aria-label={ariaLabel}
       className={css({
         alignItems: 'center',
-        color: 'fg.muted',
+        color: 'fg.subtle',
         cursor: 'pointer',
         display: 'flex',
         justifyContent: 'center',
         transition: 'common',
-        w: '11',
+        w: '[46px]',
         _hover: close
           ? { bg: 'red.solid.bg', color: 'white' }
           : { bg: 'white.a2', color: 'fg.default' },
@@ -194,21 +194,15 @@ function WindowButton({
   );
 }
 
+// 本文の列の上端に置く。背景は本文と同じにして、サイドバーを上端まで伸ばす
 const titlebarClassName = css({
   alignItems: 'center',
-  backdropBlur: 'md',
-  backdropFilter: 'auto',
-  bg: 'app.sidebar',
-  borderBottomColor: 'gray.surface.border',
-  borderBottomWidth: '1px',
   display: 'grid',
+  flexShrink: '0',
   gridTemplateColumns: 'auto minmax(0, 1fr) auto',
   h: '8',
   pl: '1.5',
-  position: 'sticky',
-  top: '0',
   userSelect: 'none',
-  zIndex: 'banner',
 });
 
 const navigationButtonClassName = css({

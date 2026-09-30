@@ -5,7 +5,6 @@ import {
   areAiDevToolsEnabled,
   currentRuntimeCapabilities,
 } from './buildProfile';
-import { AppTitlebar } from './components/AppTitlebar';
 import { BattleView } from './launcher/BattleView';
 import { CpuBattleView } from './launcher/CpuBattleView';
 import { HistoryView } from './launcher/HistoryView';
@@ -13,6 +12,7 @@ import { LauncherShell } from './launcher/LauncherShell';
 import { OnboardingGate } from './launcher/OnboardingGate';
 import { SettingsView } from './launcher/SettingsView';
 import { SoloTestView } from './launcher/SoloTestView';
+import { sidebarSession } from './launcher/sidebarSession';
 import { useLauncherController } from './launcher/useLauncherController';
 
 export function App() {
@@ -39,72 +39,76 @@ export function App() {
     launcher.currentMatch.id !== dismissedMatchId;
   // Kiso で組み直した画面だけ、無地の背景と 808px の列で表示する
   const pageLayout =
-    launcher.activeView === 'settings' ||
-    (launcher.activeView === 'battle' && showMatch);
+    launcher.activeView === 'settings' || launcher.activeView === 'battle';
+
+  const { hostedRoomId, rooms } = launcher.matchmakingRooms;
 
   return (
     <div className={css({ h: 'dvh', overflow: 'hidden' })}>
-      <AppTitlebar />
-      <div
-        aria-hidden={onboardingOpen ? true : undefined}
-        className={css({ h: '[calc(100dvh - 2rem)]', overflow: 'hidden' })}
-        inert={onboardingOpen ? true : undefined}
+      <LauncherShell
+        activeView={launcher.activeView}
+        // 初回セットアップの間は、セットアップの画面の中で状態を伝える
+        activityStatus={onboardingOpen ? null : launcher.activityStatus}
+        inert={onboardingOpen}
+        layout={pageLayout ? 'page' : 'panel'}
+        onCheckForUpdate={() => void launcher.actions.checkForUpdate()}
+        onViewChange={launcher.changeView}
+        playerName={launcher.form.hostName.trim()}
+        roomCount={rooms.filter((room) => room.room_id !== hostedRoomId).length}
+        session={sidebarSession({
+          connectionStatus: launcher.connectionStatus,
+          currentMatch: launcher.currentMatch,
+          hostedRoom: launcher.matchmakingRooms.hostedRoom,
+          soloStatus: launcher.soloTest.status,
+        })}
+        soloTestEnabled={currentRuntimeCapabilities().soloTest}
+        aiDevToolsEnabled={aiDevToolsEnabled}
+        romStatus={launcher.romStatus}
+        updateBusy={launcher.updateBusy}
+        updateStatus={launcher.updateStatus}
       >
-        <LauncherShell
-          activeView={launcher.activeView}
-          activityStatus={launcher.activityStatus}
+        <BattleView
+          actions={launcher.actions}
           connectionStatus={launcher.connectionStatus}
-          layout={pageLayout ? 'page' : 'panel'}
-          onCheckForUpdate={() => void launcher.actions.checkForUpdate()}
-          onViewChange={launcher.changeView}
-          soloTestEnabled={currentRuntimeCapabilities().soloTest}
-          aiDevToolsEnabled={aiDevToolsEnabled}
-          romStatus={launcher.romStatus}
+          form={launcher.form}
+          matchmakingRooms={launcher.matchmakingRooms}
+          currentMatch={launcher.currentMatch}
+          onOpenHistory={() => launcher.changeView('history')}
+          onReturnToLobby={() =>
+            setDismissedMatchId(launcher.currentMatch?.id ?? null)
+          }
+          showMatch={showMatch}
+          summary={launcher.summary}
           updateBusy={launcher.updateBusy}
-          updateStatus={launcher.updateStatus}
-        >
-          <BattleView
-            actions={launcher.actions}
-            connectionStatus={launcher.connectionStatus}
-            form={launcher.form}
-            matchmakingRooms={launcher.matchmakingRooms}
-            currentMatch={launcher.currentMatch}
-            onOpenHistory={() => launcher.changeView('history')}
-            onReturnToLobby={() =>
-              setDismissedMatchId(launcher.currentMatch?.id ?? null)
-            }
-            showMatch={showMatch}
-            summary={launcher.summary}
-            updateField={launcher.updateField}
-          />
-          {aiDevToolsEnabled && aiViewerMounted ? <AIReplayViewer /> : null}
-          <CpuBattleView
+          updateField={launcher.updateField}
+        />
+        {aiDevToolsEnabled && aiViewerMounted ? <AIReplayViewer /> : null}
+        <CpuBattleView
+          controller={launcher.soloTest}
+          blocked={launcher.soloTestBlocked}
+        />
+        {currentRuntimeCapabilities().soloTest ? (
+          <SoloTestView
             controller={launcher.soloTest}
             blocked={launcher.soloTestBlocked}
           />
-          {currentRuntimeCapabilities().soloTest ? (
-            <SoloTestView
-              controller={launcher.soloTest}
-              blocked={launcher.soloTestBlocked}
-            />
-          ) : null}
-          <HistoryView
-            onOpenLogDir={launcher.actions.openLogDir}
-            onUploadLogArchive={
-              feedbackSubmissionEnabled
-                ? launcher.actions.uploadLogArchive
-                : undefined
-            }
-          />
-          <SettingsView
-            actions={launcher.actions}
-            form={launcher.form}
-            romGenerationBusy={launcher.onboarding.romGenerationBusy}
-            startup={launcher.startup}
-            updateField={launcher.updateField}
-          />
-        </LauncherShell>
-      </div>
+        ) : null}
+        <HistoryView
+          onOpenLogDir={launcher.actions.openLogDir}
+          onUploadLogArchive={
+            feedbackSubmissionEnabled
+              ? launcher.actions.uploadLogArchive
+              : undefined
+          }
+        />
+        <SettingsView
+          actions={launcher.actions}
+          form={launcher.form}
+          romGenerationBusy={launcher.onboarding.romGenerationBusy}
+          startup={launcher.startup}
+          updateField={launcher.updateField}
+        />
+      </LauncherShell>
       <OnboardingGate
         actions={launcher.actions}
         activeView={launcher.activeView}

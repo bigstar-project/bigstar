@@ -61,14 +61,16 @@ export default defineConfig({
           },
           // 日本語の Windows で既定の等幅フォントに落ちると、\ が ¥ で表示される
           mono: { value: "'Cascadia Mono', Consolas, monospace" },
+          // ロゴの BIGSTAR だけに使う。英字のサブセットだけを読み込む
+          display: { value: "'Dela Gothic One', 'IBM Plex Sans JP', sans-serif" },
         },
         sizes: {
           appMin: { value: '920px' },
           contentMax: { value: '982px' },
-          contentWide: { value: 'min(982px, calc(100vw - 244px))' },
+          contentWide: { value: 'min(982px, calc(100vw - 256px))' },
           contentCompact: { value: 'calc(100vw - 92px)' },
           statusMax: { value: '42ch' },
-          sidebar: { value: '204px' },
+          sidebar: { value: '216px' },
           sidebarCompact: { value: '92px' },
           mainPanel: { value: '616px' },
           cta: { value: '60px' },
@@ -105,7 +107,8 @@ export default defineConfig({
             card: {
               value: { base: '#0f0f1694', _dark: '#292a2e73' },
             },
-            sidebar: { value: '#06101de0' },
+            // 本文の gray.1 より一段暗くして、サイドバーを区切る
+            sidebar: { value: '#0a0c0f' },
             pageText: { value: '{colors.gray.12}' },
           },
         },

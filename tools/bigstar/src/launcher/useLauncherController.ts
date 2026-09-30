@@ -243,6 +243,8 @@ type PreparedRomCache = {
 
 type HostedRoom = {
   roomId: string;
+  /** 部屋を作った時刻（Unix ms）。公開中の経過時間に使う */
+  createdAtMs: number;
   form: FormState;
   playerIds: BattleMatchRecord['playerIds'];
   playerNames: BattleMatchRecord['playerNames'];
@@ -1185,6 +1187,7 @@ export function useLauncherController() {
       setForm(nextForm);
       setHostedRoom({
         roomId: response.room_id,
+        createdAtMs: Date.now(),
         form: nextForm,
         playerIds: {
           mario: playerProfileId,
@@ -1662,6 +1665,13 @@ export function useLauncherController() {
         joinRoomMutation.isPending,
       error: roomsError,
       hostedRoomId: hostedRoom?.roomId ?? null,
+      hostedRoom: hostedRoom
+        ? {
+            roomId: hostedRoom.roomId,
+            createdAtMs: hostedRoom.createdAtMs,
+            form: hostedRoom.form,
+          }
+        : null,
     },
     onboarding: {
       loaded: defaultsLoaded,

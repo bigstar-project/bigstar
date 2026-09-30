@@ -11,7 +11,8 @@ import {
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { css } from 'styled-system/css';
-import { Button, Input, Tabs } from '../components/park-ui';
+import * as Tabs from '@/components/ui/tabs';
+import { Button, Input } from '../components/park-ui';
 import {
   listAiArtifacts,
   openAiReplayLog,
@@ -1522,7 +1523,7 @@ export function AIReplayViewer() {
   }
 
   return (
-    <Tabs.Content value="ai">
+    <Tabs.Panel keepMounted value="ai">
       <div className={css({ display: 'grid', gap: '5' })}>
         <div
           className={css({
@@ -2306,6 +2307,6 @@ export function AIReplayViewer() {
           </div>
         ) : null}
       </div>
-    </Tabs.Content>
+    </Tabs.Panel>
   );
 }

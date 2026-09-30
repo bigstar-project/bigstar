@@ -330,7 +330,8 @@ async function e2eCalls(page: Page) {
 }
 
 async function waitForGuiReady(page: Page) {
-  await expect(page.getByText('未接続').first()).toBeVisible();
+  // 初回セットアップ中はサイドバーが読み上げ対象から外れるので、役割ではなく表示で待つ
+  await expect(page.getByTestId('brand')).toBeVisible();
 }
 
 async function callNames(page: Page) {
@@ -355,10 +356,13 @@ test('初回セットアップでロム生成と入力設定を完了できる',
   await expect(
     page.getByRole('heading', { name: '初回セットアップ' }),
   ).toBeVisible();
+  const onboardingDialog = page.getByRole('dialog', {
+    name: '初回セットアップ',
+  });
+  // サイドバーの下端に今のバージョンを出す
   await expect(
     page.getByText(`v${packageJson.version}`, { exact: true }),
   ).toBeVisible();
-  const onboardingDialog = page.getByRole('dialog');
   await onboardingDialog.getByLabel('プレイヤーネーム').fill('Alice');
   await onboardingDialog.getByRole('button', { name: '保存' }).click();
   await expect.poll(() => callNames(page)).toContain('save_player_name');
@@ -389,7 +393,7 @@ test('公開ルーム参加でサーバー側の対戦設定を引き継いで�
   await page.goto('/');
   await waitForGuiReady(page);
   await expect(page.getByText('Host Player')).toBeVisible();
-  await page.getByRole('button', { name: '参加' }).first().click();
+  await page.getByRole('button', { name: 'Host Player の部屋に参加' }).click();
 
   await expect.poll(() => callNames(page)).toContain('start_match');
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { render } from 'vitest-browser-react';
-import { Tabs } from '../components/park-ui';
+import * as Tabs from '@/components/ui/tabs';
 import { AIReplayViewer } from './AIReplayViewer';
 
 const playlogLine = JSON.stringify({

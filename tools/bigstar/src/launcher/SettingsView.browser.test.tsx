@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { type Locator, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
-import { Tabs } from '../components/park-ui';
+import * as Tabs from '@/components/ui/tabs';
 import { initialForm } from '../form';
 import type { FormState } from '../types';
 import { SettingsView } from './SettingsView';

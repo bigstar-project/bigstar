@@ -348,8 +348,7 @@ test('Bigstarの版名・識別子・保存先を使用する', () => {
   assert.match(publicEdition.defaultSignalUrl, /bigstar-signaling-public/);
   assert.match(insiders.defaultSignalUrl, /bigstar-signaling-insiders/);
   assert.doesNotMatch(launcherShell, /\bNSMB\b|Mario vs Luigi Online/);
-  assert.match(launcherShell, />\s*BIG\s*</);
-  assert.match(launcherShell, />\s*STAR\s*</);
+  assert.match(launcherShell, />\s*BIGSTAR\s*</);
 });
 
 test('ウィンドウ状態を版別のアプリデータへ保存する', () => {

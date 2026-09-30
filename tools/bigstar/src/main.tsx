@@ -9,6 +9,7 @@ import '@fontsource/ibm-plex-sans-jp/400.css';
 import '@fontsource/ibm-plex-sans-jp/500.css';
 import '@fontsource/ibm-plex-sans-jp/600.css';
 import '@fontsource/ibm-plex-sans-jp/700.css';
+import '@fontsource/dela-gothic-one/latin-400.css';
 import './theme/global.css';
 
 const app = document.querySelector<HTMLDivElement>('#app');

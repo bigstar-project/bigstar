@@ -1,9 +1,10 @@
 import { Flask, FolderOpen, Play, Stop } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { css } from 'styled-system/css';
+import * as Tabs from '@/components/ui/tabs';
 import type { SoloControl, SoloTestRequest } from '../bindings';
 import { NumberField, SelectField, TextField } from '../components/Fields';
-import { Button, Switch, Tabs } from '../components/park-ui';
+import { Button, Switch } from '../components/park-ui';
 import { generateSeed } from '../form';
 import { type SoloTestController, soloPresets } from '../soloTest';
 import { openLogDir } from '../tauriClient';
@@ -44,7 +45,8 @@ export function SoloTestView({
   ) => setRequest((current) => ({ ...current, [key]: value }));
 
   return (
-    <Tabs.Content
+    <Tabs.Panel
+      keepMounted
       value="solo-test"
       className={css({ overflowY: 'auto', h: 'full', p: '4' })}
     >
@@ -262,6 +264,6 @@ export function SoloTestView({
           </p>
         </LauncherCard>
       </div>
-    </Tabs.Content>
+    </Tabs.Panel>
   );
 }

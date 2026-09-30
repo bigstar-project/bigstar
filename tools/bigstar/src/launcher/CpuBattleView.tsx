@@ -1,9 +1,10 @@
 import { Heart, Play, Star, Stop, Trophy } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { css } from 'styled-system/css';
+import * as Tabs from '@/components/ui/tabs';
 import type { CpuMatchRules, CpuOpponent, Lives } from '../bindings';
 import { SelectField } from '../components/Fields';
-import { Button, Tabs } from '../components/park-ui';
+import { Button } from '../components/park-ui';
 import type { SoloTestController } from '../soloTest';
 import { LauncherCard } from './LauncherCards';
 import { bigStarsOptions, livesOptions, winsOptions } from './options';
@@ -37,7 +38,7 @@ export function CpuBattleView({
   const name = cpuOpponents.find((entry) => entry.value === displayed)?.label;
   const error = controller.error ? String(controller.error) : status.error;
   return (
-    <Tabs.Content value="cpu">
+    <Tabs.Panel keepMounted value="cpu">
       <div
         className={css({
           display: 'grid',
@@ -144,6 +145,6 @@ export function CpuBattleView({
           {error ? <p role="alert">{error}</p> : null}
         </LauncherCard>
       </div>
-    </Tabs.Content>
+    </Tabs.Panel>
   );
 }

@@ -1,7 +1,12 @@
 import { describe, expect, test, vi } from 'vitest';
+import type { Locator } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
-import { Tabs } from '../components/park-ui';
-import { initialForm } from '../form';
+import * as Tabs from '@/components/ui/tabs';
+import {
+  initialForm,
+  rollbackInputDelayFrames,
+  rollbackInputMaxFrameLead,
+} from '../form';
 import { BattleView } from './BattleView';
 import type {
   BattleMatchRecord,
@@ -62,11 +67,12 @@ const rooms: MatchmakingRoomsState = {
   error: null,
   loading: false,
   refreshDisabled: false,
+  hostedRoom: null,
   hostedRoomId: null,
   rooms: [
     {
       can_join: true,
-      created_at: 1,
+      created_at: Date.now() - 2 * 60_000,
       expires_at: Date.now() + 600_000,
       host_name: 'Host Player',
       peer_count: 1,
@@ -211,6 +217,12 @@ async function renderBattleView(
   };
 }
 
+// ブラウザテストでは CSS を読み込まないので、Base UI がダイアログの背後に敷く
+// 固定配置の要素が、配置されていないダイアログの上に重なる。ダイアログ内は DOM から直接押す
+function clickInDialog(locator: Locator) {
+  (locator.element() as HTMLElement).click();
+}
+
 /** 結果表の各行を、行見出しとセルの読み上げ名で返す */
 function gameRows() {
   return [...document.querySelectorAll('tbody tr')].map((row) =>
@@ -221,20 +233,35 @@ function gameRows() {
 }
 
 describe('対戦ビュー', () => {
-  test('公開ルームを表示して選択した部屋 ID で参加する', async () => {
+  test('公開ルームをルールの要約付きで表示して選択した部屋 ID で参加する', async () => {
     const { launcherActions, screen } = await renderBattleView();
 
-    await expect.element(screen.getByText('Host Player')).toBeVisible();
+    const list = screen.getByRole('region', { name: '公開ルーム' });
+    await expect.element(list).toHaveTextContent('募集中 1 件');
+    await expect.element(list.getByText('Host Player')).toBeVisible();
     await expect
-      .element(
-        screen.getByText(
-          'room12345 / Course=random[0/1/2/3/4] Wins=3 Star=10 Lives=3 Delay=4 Lead=4 RB=off',
-        ),
-      )
-      .toBeVisible();
-    await screen.getByRole('button', { name: '参加' }).click();
+      .element(list.getByRole('listitem'))
+      .toHaveTextContent('ランダム·3本先取·スター10·残機3');
+    await expect.element(list.getByText('2分前')).toBeVisible();
+    await screen
+      .getByRole('button', { name: 'Host Player の部屋に参加' })
+      .click();
 
     expect(launcherActions.joinRoom).toHaveBeenCalledWith('room12345');
+  });
+
+  test('募集中の部屋が無いときは、部屋を作って待つよう案内する', async () => {
+    const { screen } = await renderBattleView({
+      matchmakingRooms: { ...rooms, rooms: [] },
+    });
+
+    await expect
+      .element(screen.getByText('いま募集中の部屋はありません'))
+      .toBeVisible();
+    await screen.getByRole('button', { name: '部屋を作って待つ' }).click();
+    await expect
+      .element(screen.getByRole('dialog', { name: '部屋を作る' }))
+      .toBeVisible();
   });
 
   test('対戦中はロビーの代わりにスコアとゲームごとの結果を表示する', async () => {
@@ -426,42 +453,61 @@ describe('対戦ビュー', () => {
   test('公開ルームを手動更新する', async () => {
     const { launcherActions, screen } = await renderBattleView();
 
-    await screen.getByRole('button', { name: '更新' }).click();
+    await screen.getByRole('button', { name: '一覧を再読み込み' }).click();
 
     expect(launcherActions.refreshRooms).toHaveBeenCalledTimes(1);
   });
 
-  test('部屋作成ダイアログを開いて作成処理に送信する', async () => {
-    const { launcherActions, screen } = await renderBattleView();
+  test('部屋作成ダイアログでルールを選んで作成処理に送信する', async () => {
+    const { launcherActions, screen, updateField } = await renderBattleView();
 
     await screen.getByRole('button', { name: '部屋を作る' }).click();
-    await expect.element(screen.getByRole('dialog')).toBeVisible();
+    const dialog = screen.getByRole('dialog', { name: '部屋を作る' });
+    await expect.element(dialog).toBeVisible();
     await expect
       .element(screen.getByLabelText('プレイヤーネーム'))
       .not.toBeInTheDocument();
-    await screen.getByRole('combobox', { name: 'コース' }).click();
-    const openSelect = document.querySelector<HTMLElement>(
-      '[data-scope="select"][data-part="content"][data-state="open"]',
+    await expect
+      .element(
+        dialog
+          .getByRole('group', { name: '先取数' })
+          .getByRole('button', { name: '3' }),
+      )
+      .toHaveAttribute('aria-pressed', 'true');
+
+    clickInDialog(
+      dialog
+        .getByRole('group', { name: 'コース' })
+        .getByRole('button', { name: '事前に選ぶ' }),
     );
-    const dialog = document.querySelector<HTMLElement>(
-      '[data-scope="dialog"][data-part="content"]',
+    clickInDialog(
+      dialog
+        .getByRole('group', { name: '残機' })
+        .getByRole('button', { name: '無限' }),
     );
-    expect(openSelect).not.toBeNull();
-    expect(dialog).not.toBeNull();
-    if (!openSelect || !dialog) throw new Error('浮遊レイヤーが見つかりません');
-    const selectRect = openSelect.getBoundingClientRect();
-    const topElement = document.elementFromPoint(
-      selectRect.left + selectRect.width / 2,
-      selectRect.top + selectRect.height / 2,
-    );
-    expect(openSelect.contains(topElement)).toBe(true);
-    await screen.getByRole('combobox', { name: 'コース' }).click();
-    await screen.getByRole('button', { name: '作成して待機' }).click();
+    expect(updateField).toHaveBeenCalledWith('courseMode', 'select');
+    expect(updateField).toHaveBeenCalledWith('lives', 'endless');
+
+    clickInDialog(dialog.getByRole('button', { name: '作成して待機' }));
 
     expect(launcherActions.createRoom).toHaveBeenCalledTimes(1);
+    await expect.element(dialog).not.toBeInTheDocument();
   });
 
-  test('ロールバック時は旧Leadではなく予測上限7を表示する', async () => {
+  test('コースを事前に選ぶときは、ゲームごとのステージをダイアログの上で選べる', async () => {
+    const { screen, updateField } = await renderBattleView({
+      formOverride: { courseMode: 'select', courseStages: [0, 1, 2, 3, 4] },
+    });
+
+    await screen.getByRole('button', { name: '部屋を作る' }).click();
+    clickInDialog(screen.getByRole('combobox', { name: 'ゲーム 2' }));
+    await expect.element(screen.getByRole('listbox')).toBeVisible();
+    clickInDialog(screen.getByRole('option', { name: '城' }));
+
+    expect(updateField).toHaveBeenCalledWith('courseStages', [0, 4, 2, 3, 4]);
+  });
+
+  test('ロールバック時は先行フレーム上限の代わりに予測フレーム7を表示する', async () => {
     const { screen } = await renderBattleView({
       formOverride: {
         inputDelayFrames: 2,
@@ -471,59 +517,105 @@ describe('対戦ビュー', () => {
     });
 
     await screen.getByRole('button', { name: '部屋を作る' }).click();
+    const details = screen.getByRole('button', { name: /通信の詳細設定/ });
     await expect
-      .element(screen.getByLabelText('PredictionHorizonFrames'))
-      .toHaveValue(7);
+      .element(details)
+      .toHaveTextContent('遅延 2F · 予測 7F · RB 有効');
+    clickInDialog(details);
+
     await expect
-      .element(screen.getByLabelText('PredictionHorizonFrames'))
-      .toBeDisabled();
+      .element(screen.getByRole('textbox', { name: '入力遅延' }))
+      .toHaveValue('2');
+    await expect.element(screen.getByText('予測フレーム')).toBeVisible();
+    await expect.element(screen.getByText('7 F')).toBeVisible();
     await expect
-      .element(screen.getByLabelText('InputMaxFrameLead'))
+      .element(screen.getByText('先行フレーム上限'))
       .not.toBeInTheDocument();
+    await expect
+      .element(screen.getByRole('switch', { name: 'ロールバック' }))
+      .toBeChecked();
   });
 
-  test('部屋作成後の待機状態で部屋コード操作を表示する', async () => {
+  test('ロールバックを切り替えると遅延と先行フレームを推奨値に戻す', async () => {
+    const { screen, updateField } = await renderBattleView();
+
+    await screen.getByRole('button', { name: '部屋を作る' }).click();
+    clickInDialog(screen.getByRole('button', { name: /通信の詳細設定/ }));
+    const rollback = screen.getByRole('switch', { name: 'ロールバック' });
+    await expect.element(rollback).not.toBeChecked();
+    clickInDialog(rollback);
+
+    expect(updateField).toHaveBeenCalledWith('rollbackEnabled', true);
+    expect(updateField).toHaveBeenCalledWith(
+      'inputDelayFrames',
+      rollbackInputDelayFrames,
+    );
+    expect(updateField).toHaveBeenCalledWith(
+      'inputMaxFrameLead',
+      rollbackInputMaxFrameLead,
+    );
+  });
+
+  test('部屋を公開中は相手待ちのカードと部屋コード操作を表示する', async () => {
     const { launcherActions, screen } = await renderBattleView({
+      formOverride: { hostName: 'Me' },
       matchmakingRooms: {
         ...rooms,
+        hostedRoom: {
+          createdAtMs: Date.now() - 65_000,
+          form: { ...initialForm, bigStars: 5, lives: 'endless', wins: 2 },
+          roomId: 'host-room-1',
+        },
         hostedRoomId: 'host-room-1',
-        rooms: [],
       },
     });
 
+    const card = screen.getByRole('region', { name: 'あなたの部屋' });
+    await expect.element(card.getByText('相手を待っています')).toBeVisible();
+    await expect.element(card.getByText('Me', { exact: true })).toBeVisible();
+    await expect.element(card.getByText('host-room-1')).toBeVisible();
+    await expect.element(card).toHaveTextContent('経過 1:05');
+    await expect.element(card).toHaveTextContent('2本先取');
+    await expect.element(card).toHaveTextContent('残機無限');
+    // 自分の部屋を公開している間は、ほかの部屋に参加させない
     await expect
-      .element(screen.getByText('参加者を待っています'))
+      .element(screen.getByText(/ほかに 1 部屋が募集中です。/))
       .toBeVisible();
-    await expect.element(screen.getByText('host-room-1')).toBeVisible();
+    await expect
+      .element(screen.getByRole('button', { name: /の部屋に参加/ }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(screen.getByRole('button', { name: '部屋を作る' }))
+      .not.toBeInTheDocument();
 
-    await screen.getByRole('button', { name: '部屋コードをコピー' }).click();
-    await screen.getByRole('button', { name: '部屋を閉じる' }).click();
+    await card.getByRole('button', { name: '部屋コードをコピー' }).click();
+    await card.getByRole('button', { name: '部屋を閉じる' }).click();
 
     expect(launcherActions.copyRoomCode).toHaveBeenCalledTimes(1);
     expect(launcherActions.cancelHostedRoom).toHaveBeenCalledTimes(1);
   });
 
-  test('GUI更新が必要なときは公開ルームの作成と参加を無効化する', async () => {
-    const { screen } = await renderBattleView({
+  test('GUI更新が必要なときは公開ルームの作成と参加を無効化し、その場で更新できる', async () => {
+    const { launcherActions, screen } = await renderBattleView({
       summaryOverride: { updateRequired: true, updateVersion: '0.4.0' },
     });
 
+    const notice = screen.getByRole('alert');
+    await expect.element(notice).toHaveTextContent('v0.4.0 への更新が必要です');
     await expect
-      .element(screen.getByText('GUI の更新が必要です'))
-      .toBeVisible();
-    await expect
-      .element(
-        screen.getByText(
-          'v0.4.0 に更新するまで、部屋の作成・参加はできません。画面左下の更新ボタンから更新してください。',
-        ),
-      )
-      .toBeVisible();
+      .element(notice)
+      .toHaveTextContent(
+        '更新するまで部屋の作成・参加はできません。更新後は自動で再起動します。',
+      );
     await expect
       .element(screen.getByRole('button', { name: '部屋を作る' }))
       .toBeDisabled();
     await expect
-      .element(screen.getByRole('button', { name: '参加' }))
+      .element(screen.getByRole('button', { name: 'Host Player の部屋に参加' }))
       .toBeDisabled();
+
+    await notice.getByRole('button', { name: '更新して再起動' }).click();
+    expect(launcherActions.checkForUpdate).toHaveBeenCalledTimes(1);
   });
 
   test('接続中の取得エラーでは参加操作を表示しない', async () => {
@@ -536,14 +628,10 @@ describe('対戦ビュー', () => {
     });
 
     await expect
-      .element(
-        screen.getByText(
-          '公開ルームを取得できませんでした。更新をお試しください。',
-        ),
-      )
-      .toBeVisible();
+      .element(screen.getByRole('alert'))
+      .toHaveTextContent('公開ルームを取得できませんでした');
     await expect
-      .element(screen.getByRole('button', { name: '参加' }))
+      .element(screen.getByRole('button', { name: /の部屋に参加/ }))
       .not.toBeInTheDocument();
     await expect
       .element(screen.getByRole('button', { name: '停止' }))

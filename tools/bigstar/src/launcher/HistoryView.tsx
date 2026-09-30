@@ -14,8 +14,9 @@ import { parseAsString, parseAsStringLiteral, useQueryStates } from 'nuqs';
 import { useEffect, useMemo, useRef } from 'react';
 import { css, cx } from 'styled-system/css';
 import { surface } from 'styled-system/recipes';
+import * as Tabs from '@/components/ui/tabs';
 import { SelectField } from '../components/Fields';
-import { Button, Tabs } from '../components/park-ui';
+import { Button } from '../components/park-ui';
 import { hasPlayedResult } from '../matchHistory';
 import {
   matchHistoryDashboardOptions,
@@ -204,7 +205,7 @@ export function HistoryView({
   ]);
 
   return (
-    <Tabs.Content value="history">
+    <Tabs.Panel keepMounted value="history">
       <section
         className={css({
           display: 'grid',
@@ -403,7 +404,7 @@ export function HistoryView({
           ) : null}
         </section>
       </section>
-    </Tabs.Content>
+    </Tabs.Panel>
   );
 }
 

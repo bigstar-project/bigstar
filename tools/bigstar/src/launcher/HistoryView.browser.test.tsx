@@ -3,7 +3,7 @@ import { NuqsAdapter } from 'nuqs/adapters/react';
 import { type ReactNode, useState } from 'react';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
-import { Tabs } from '../components/park-ui';
+import * as Tabs from '@/components/ui/tabs';
 import { previewMatchHistory } from '../previewData';
 import { HistoryView } from './HistoryView';
 

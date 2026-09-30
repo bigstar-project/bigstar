@@ -104,6 +104,12 @@ export type MatchmakingRoomsState = {
   busy: boolean;
   error: string | null;
   hostedRoomId: string | null;
+  /** 自分が公開中の部屋。部屋を作ったときの設定と時刻を持つ */
+  hostedRoom: {
+    roomId: string;
+    createdAtMs: number;
+    form: FormState;
+  } | null;
 };
 
 export type StartupState = {

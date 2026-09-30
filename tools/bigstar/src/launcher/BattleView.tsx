@@ -1,42 +1,25 @@
-import { Portal } from '@ark-ui/react';
 import {
-  ArrowsClockwise,
-  Crown,
-  Flag,
-  Heart,
-  RadioButton,
-  Rewind,
-  Star,
+  ArrowClockwise,
+  Copy,
+  DownloadSimple,
+  Info,
+  Plus,
   Stop,
-  Trophy,
-  Users,
-  WarningCircle,
+  Warning,
 } from '@phosphor-icons/react';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { css, cx } from 'styled-system/css';
-import { surface } from 'styled-system/recipes';
-import { NumberField, SelectField } from '../components/Fields';
-import { Button, CloseButton, Dialog, Tabs } from '../components/park-ui';
-import {
-  clampStage,
-  defaultInputDelayFrames,
-  defaultInputMaxFrameLead,
-  maxGamesForWins,
-  rollbackInputDelayFrames,
-  rollbackInputMaxFrameLead,
-  rollbackPredictionHorizonFrames,
-} from '../form';
-import type { CourseMode, FormState, Lives } from '../types';
-import { LauncherCard } from './LauncherCards';
+import { button } from 'styled-system/recipes';
+import { Button } from '@/components/ui/button';
+import * as Dialog from '@/components/ui/dialog';
+import * as Tabs from '@/components/ui/tabs';
+import type { FormState } from '../types';
+import { CreateRoomDialog } from './CreateRoomDialog';
 import { MatchView } from './MatchView';
-import {
-  bigStarsOptions,
-  courseOptions,
-  livesOptions,
-  rollbackOptions,
-  stageOptions,
-  winsOptions,
-} from './options';
+import { PageHeader } from './PageHeader';
+import { PixelStar, PixelVersus } from './PixelIcons';
+import { formatRoomAge, roomRuleParts } from './roomRules';
+import { formatElapsed, useNow } from './SidebarStatus';
 import type {
   BattleMatchRecord,
   ConnectionStatusState,
@@ -45,6 +28,8 @@ import type {
   MatchmakingRoomsState,
   UpdateFormField,
 } from './types';
+
+type Room = MatchmakingRoomsState['rooms'][number];
 
 export function BattleView({
   actions,
@@ -56,10 +41,12 @@ export function BattleView({
   onReturnToLobby,
   showMatch,
   summary,
+  updateBusy = false,
   updateField,
 }: {
   actions: Pick<
     LauncherActions,
+    | 'checkForUpdate'
     | 'copyRoomCode'
     | 'cancelHostedRoom'
     | 'createRoom'
@@ -76,11 +63,15 @@ export function BattleView({
   /** 対戦中と、終わった対戦を閉じるまでは、ロビーの代わりに対戦画面を出す */
   showMatch: boolean;
   summary: LauncherSummary;
+  updateBusy?: boolean;
   updateField: UpdateFormField;
 }) {
+  const [createOpen, setCreateOpen] = useState(false);
+
   if (showMatch && currentMatch) {
     return (
-      <Tabs.Content value="battle">
+      <Tabs.Panel className={panelClass} keepMounted value="battle">
+        <PageHeader title="対戦" />
         <MatchView
           canStop={summary.connectionActive}
           connection={connectionStatus}
@@ -89,565 +80,824 @@ export function BattleView({
           onReturnToLobby={onReturnToLobby}
           onStop={() => void actions.stopMatch()}
         />
-      </Tabs.Content>
+      </Tabs.Panel>
     );
   }
 
+  const { hostedRoom } = matchmakingRooms;
   const matchmakingDisabled =
     summary.connectionActive ||
     summary.updateRequired ||
     Boolean(matchmakingRooms.hostedRoomId);
+  const otherRooms = matchmakingRooms.rooms.filter(
+    (room) => room.room_id !== matchmakingRooms.hostedRoomId,
+  );
 
-  return (
-    <Tabs.Content value="battle">
-      <form
-        className={css({
-          maxW: {
-            base: 'xl',
-            xl: 'mainPanel',
-          },
-          mx: 'auto',
-          w: 'full',
-        })}
-        onSubmit={(event) => {
-          event.preventDefault();
-        }}
+  let headerAction: ReactNode = null;
+  if (summary.connectionActive) {
+    headerAction = (
+      <Button
+        colorPalette="gray"
+        onClick={() => void actions.stopMatch()}
+        variant="subtle"
       >
-        <section className={css({ display: 'grid', gap: '3' })}>
-          <LauncherCard
-            title="公開ルーム"
-            icon={<Users size={24} weight="fill" />}
-            badge={matchmakingRooms.loading ? '更新中' : undefined}
-          >
-            <div className={css({ display: 'grid', gap: '2.5' })}>
-              <div
-                className={css({
-                  alignItems: { base: 'stretch', md: 'center' },
-                  display: 'flex',
-                  flexDirection: { base: 'column', md: 'row' },
-                  gap: '2',
-                  justifyContent: 'space-between',
-                })}
-              >
-                <div
-                  className={css({
-                    alignItems: 'center',
-                    color: 'fg.muted',
-                    display: 'flex',
-                    gap: '2',
-                    fontWeight: 'bold',
-                    textStyle: 'sm',
-                  })}
-                >
-                  <span>{matchmakingRooms.rooms.length} 件</span>
-                  <Button
-                    variant="outline"
-                    loading={matchmakingRooms.loading}
-                    disabled={matchmakingRooms.refreshDisabled}
-                    onClick={() => void actions.refreshRooms()}
-                  >
-                    <ArrowsClockwise size={16} weight="bold" />
-                    更新
-                  </Button>
-                </div>
-                <div
-                  className={css({
-                    display: 'flex',
-                    flexDirection: { base: 'column', md: 'row' },
-                    gap: '2',
-                  })}
-                >
-                  {summary.connectionActive ? (
-                    <Button
-                      variant="outline"
-                      onClick={() => void actions.stopMatch()}
-                    >
-                      <Stop size={18} weight="fill" />
-                      停止
-                    </Button>
-                  ) : null}
-                  <CreateRoomDialog
-                    busy={matchmakingRooms.busy}
-                    disabled={matchmakingDisabled}
-                    form={form}
-                    onCreate={actions.createRoom}
-                    updateField={updateField}
-                  />
-                </div>
-              </div>
-              {matchmakingRooms.error ? (
-                <div
-                  className={css({
-                    color: 'red.subtle.fg',
-                    fontWeight: 'bold',
-                    textStyle: 'sm',
-                  })}
-                >
-                  公開ルームを取得できませんでした。更新をお試しください。
-                </div>
-              ) : null}
-              {summary.updateRequired ? (
-                <UpdateRequiredNotice version={summary.updateVersion} />
-              ) : null}
-              {matchmakingRooms.hostedRoomId ? (
-                <HostedRoomNotice
-                  busy={matchmakingRooms.busy}
-                  roomId={matchmakingRooms.hostedRoomId}
-                  onCancel={() => void actions.cancelHostedRoom()}
-                  onCopy={() => void actions.copyRoomCode()}
-                />
-              ) : null}
-              {!matchmakingRooms.error ? (
-                <RoomList
-                  busy={matchmakingRooms.busy}
-                  disabled={matchmakingDisabled}
-                  rooms={matchmakingRooms.rooms}
-                  onJoin={(roomId) => void actions.joinRoom(roomId)}
-                />
-              ) : null}
-            </div>
-          </LauncherCard>
-        </section>
-      </form>
-    </Tabs.Content>
-  );
-}
-
-function CreateRoomDialog({
-  busy,
-  disabled,
-  form,
-  onCreate,
-  updateField,
-}: {
-  busy: boolean;
-  disabled: boolean;
-  form: FormState;
-  onCreate: () => Promise<void>;
-  updateField: UpdateFormField;
-}) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Dialog.Root open={open} onOpenChange={(details) => setOpen(details.open)}>
-      <Dialog.Trigger asChild>
-        <Button
-          disabled={disabled}
-          loading={busy}
-          variant="solid"
-          colorPalette="yellow"
-        >
-          <Crown size={18} weight="fill" />
-          部屋を作る
-        </Button>
-      </Dialog.Trigger>
-      <Portal>
-        <Dialog.Backdrop />
-        <Dialog.Positioner>
-          <Dialog.Content
-            className={css({
-              maxW: 'xl',
-              w: 'full',
-            })}
-          >
-            <Dialog.CloseTrigger>
-              <CloseButton />
-            </Dialog.CloseTrigger>
-            <Dialog.Header>
-              <Dialog.Title>部屋を作る</Dialog.Title>
-            </Dialog.Header>
-            <Dialog.Body>
-              <div className={css({ display: 'grid', gap: '3' })}>
-                <MatchSettingsFields form={form} updateField={updateField} />
-              </div>
-            </Dialog.Body>
-            <Dialog.Footer>
-              <Dialog.ActionTrigger asChild>
-                <Button variant="outline">キャンセル</Button>
-              </Dialog.ActionTrigger>
-              <Button
-                loading={busy}
-                variant="solid"
-                colorPalette="yellow"
-                disabled={disabled}
-                onClick={async () => {
-                  await onCreate();
-                  setOpen(false);
-                }}
-              >
-                <Crown size={18} weight="fill" />
-                作成して待機
-              </Button>
-            </Dialog.Footer>
-          </Dialog.Content>
-        </Dialog.Positioner>
-      </Portal>
-    </Dialog.Root>
-  );
-}
-
-function HostedRoomNotice({
-  busy,
-  onCancel,
-  onCopy,
-  roomId,
-}: {
-  busy: boolean;
-  onCancel: () => void;
-  onCopy: () => void;
-  roomId: string;
-}) {
-  return (
-    <div
-      className={css({
-        bg: 'yellow.subtle.bg',
-        borderColor: 'yellow.outline.border',
-        borderRadius: 'l2',
-        borderWidth: '1px',
-        display: 'grid',
-        gap: '2',
-        gridTemplateColumns: {
-          base: '1fr',
-          md: 'minmax(0, 1fr) auto auto',
-        },
-        p: '2.5',
-        alignItems: { base: 'stretch', md: 'center' },
-      })}
-    >
-      <div className={css({ display: 'grid', gap: '1', minW: '0' })}>
-        <div
-          className={css({
-            color: 'yellow.subtle.fg',
-            fontWeight: 'black',
-            textStyle: 'sm',
-          })}
-        >
-          参加者を待っています
-        </div>
-        <code
-          className={css({
-            color: 'yellow.subtle.fg',
-            fontFamily: 'mono',
-            fontWeight: 'bold',
-            overflowWrap: 'anywhere',
-            textStyle: 'sm',
-          })}
-        >
-          {roomId}
-        </code>
-      </div>
-      <Button variant="outline" disabled={busy} onClick={onCopy}>
-        部屋コードをコピー
+        <Stop weight="fill" />
+        停止
       </Button>
-      <Button variant="outline" loading={busy} onClick={onCancel}>
-        部屋を閉じる
-      </Button>
-    </div>
-  );
-}
-
-function MatchSettingsFields({
-  form,
-  updateField,
-}: {
-  form: FormState;
-  updateField: UpdateFormField;
-}) {
-  const updateRollback = (value: string) => {
-    const enabled = value === 'on';
-    updateField('rollbackEnabled', enabled);
-    updateField(
-      'inputDelayFrames',
-      enabled ? rollbackInputDelayFrames : defaultInputDelayFrames,
     );
-    updateField(
-      'inputMaxFrameLead',
-      enabled ? rollbackInputMaxFrameLead : defaultInputMaxFrameLead,
-    );
-  };
-
-  return (
-    <div className={css({ display: 'grid', gap: '2.5' })}>
-      <div
-        className={css({
-          display: 'grid',
-          gap: '2',
-          gridTemplateColumns: {
-            base: '1fr',
-            md: 'repeat(2, minmax(0, 1fr))',
-            xl: 'repeat(4, minmax(0, 1fr))',
-          },
-        })}
-      >
-        <SelectField
-          icon={<RadioButton size={18} />}
-          label="コース"
-          options={courseOptions}
-          value={form.courseMode}
-          onChange={(value) => updateField('courseMode', value as CourseMode)}
-        />
-        <SelectField
-          icon={<Trophy size={18} weight="fill" />}
-          label="勝利数"
-          options={winsOptions}
-          value={String(form.wins)}
-          onChange={(value) => updateField('wins', Number(value))}
-        />
-        <SelectField
-          icon={<Star size={18} weight="fill" />}
-          label="ビッグスター"
-          options={bigStarsOptions}
-          value={String(form.bigStars)}
-          onChange={(value) => updateField('bigStars', Number(value))}
-        />
-        <SelectField
-          icon={<Heart size={18} weight="fill" />}
-          label="残機"
-          options={livesOptions}
-          value={form.lives}
-          onChange={(value) => updateField('lives', value as Lives)}
-        />
-      </div>
-      {form.courseMode === 'select' ? (
-        <CourseSequenceFields form={form} updateField={updateField} />
-      ) : null}
-      <div
-        className={css({
-          display: 'grid',
-          gap: '2',
-          gridTemplateColumns: {
-            base: '1fr',
-            sm: 'repeat(2, minmax(0, 1fr))',
-            lg: 'repeat(3, minmax(0, 1fr))',
-          },
-        })}
-      >
-        <SelectField
-          icon={<Rewind size={18} weight="fill" />}
-          label="ロールバック"
-          options={rollbackOptions}
-          value={form.rollbackEnabled ? 'on' : 'off'}
-          onChange={updateRollback}
-        />
-        <NumberField
-          label="InputDelayFrames"
-          min={0}
-          max={16}
-          value={form.inputDelayFrames}
-          onChange={(value) =>
-            updateField('inputDelayFrames', clampNetplaySetting(value))
-          }
-        />
-        {form.rollbackEnabled ? (
-          <NumberField
-            disabled
-            label="PredictionHorizonFrames"
-            min={rollbackPredictionHorizonFrames}
-            max={rollbackPredictionHorizonFrames}
-            value={rollbackPredictionHorizonFrames}
-            onChange={() => undefined}
-          />
-        ) : (
-          <NumberField
-            label="InputMaxFrameLead"
-            min={0}
-            max={16}
-            value={form.inputMaxFrameLead}
-            onChange={(value) =>
-              updateField('inputMaxFrameLead', clampNetplaySetting(value))
-            }
-          />
+  } else if (!hostedRoom) {
+    headerAction = (
+      <Dialog.Trigger
+        className={cx(
+          button({ size: 'md' }),
+          css({ colorPalette: 'amber', fontWeight: 'bold', pl: '4', pr: '5' }),
         )}
-      </div>
-    </div>
-  );
-}
-
-function CourseSequenceFields({
-  form,
-  updateField,
-}: {
-  form: FormState;
-  updateField: UpdateFormField;
-}) {
-  const games = maxGamesForWins(form.wins);
-  const stages = Array.from({ length: games }, (_, index) =>
-    clampStage(form.courseStages[index] ?? 0),
-  );
-  return (
-    <div
-      className={css({
-        display: 'grid',
-        gap: '2',
-        gridTemplateColumns: {
-          base: '1fr',
-          lg: 'repeat(3, minmax(0, 1fr))',
-        },
-      })}
-    >
-      {stages.map((stage, index) => (
-        <SelectField
-          key={`game-${index + 1}`}
-          icon={<Flag size={18} weight="fill" />}
-          label={`ゲーム ${index + 1}`}
-          options={stageOptions}
-          value={String(stage)}
-          onChange={(value) => {
-            const next = [...stages];
-            next[index] = clampStage(Number(value));
-            updateField('courseStages', next);
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function clampNetplaySetting(value: number) {
-  if (!Number.isFinite(value)) {
-    return 0;
+        disabled={matchmakingDisabled || matchmakingRooms.busy}
+      >
+        <Plus weight="bold" />
+        部屋を作る
+      </Dialog.Trigger>
+    );
   }
-  return Math.min(16, Math.max(0, Math.trunc(value)));
+
+  return (
+    <Tabs.Panel className={panelClass} keepMounted value="battle">
+      <Dialog.Root open={createOpen} onOpenChange={setCreateOpen}>
+        <PageHeader actions={headerAction} title="対戦" />
+        <CreateRoomDialog
+          busy={matchmakingRooms.busy}
+          disabled={matchmakingDisabled}
+          form={form}
+          onClose={() => setCreateOpen(false)}
+          onCreate={actions.createRoom}
+          updateField={updateField}
+        />
+      </Dialog.Root>
+
+      {summary.updateRequired ? (
+        <UpdateRequiredNotice
+          busy={updateBusy}
+          onUpdate={() => void actions.checkForUpdate()}
+          version={summary.updateVersion}
+        />
+      ) : null}
+
+      {hostedRoom ? (
+        <>
+          <HostingCard
+            busy={matchmakingRooms.busy}
+            hostedRoom={hostedRoom}
+            onCancel={() => void actions.cancelHostedRoom()}
+            onCopy={() => void actions.copyRoomCode()}
+            playerName={form.hostName.trim()}
+          />
+          {otherRooms.length > 0 ? (
+            <p
+              className={css({
+                alignItems: 'center',
+                color: 'fg.subtle',
+                display: 'flex',
+                fontSize: '[13px]',
+                gap: '2',
+                mt: '-1',
+              })}
+            >
+              <Info size={14} weight="bold" />
+              ほかに {otherRooms.length}{' '}
+              部屋が募集中です。部屋を閉じると参加できます。
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <RoomsSection
+          busy={matchmakingRooms.busy}
+          canCreate={!matchmakingDisabled && !matchmakingRooms.busy}
+          disabled={matchmakingDisabled}
+          error={matchmakingRooms.error}
+          loading={matchmakingRooms.loading}
+          onCreate={() => setCreateOpen(true)}
+          onJoin={(roomId) => void actions.joinRoom(roomId)}
+          onRefresh={() => void actions.refreshRooms()}
+          refreshDisabled={matchmakingRooms.refreshDisabled}
+          rooms={otherRooms}
+        />
+      )}
+    </Tabs.Panel>
+  );
 }
 
-function RoomList({
+const panelClass = css({
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '6',
+  outline: 'none',
+});
+
+const cardClass = css({
+  bg: 'gray.2',
+  borderColor: 'gray.4',
+  borderRadius: 'l3',
+  borderWidth: '1px',
+});
+
+function RoomsSection({
   busy,
+  canCreate,
   disabled,
+  error,
+  loading,
+  onCreate,
   onJoin,
+  onRefresh,
+  refreshDisabled,
   rooms,
 }: {
   busy: boolean;
+  canCreate: boolean;
   disabled: boolean;
-  rooms: MatchmakingRoomsState['rooms'];
+  error: string | null;
+  loading: boolean;
+  onCreate: () => void;
   onJoin: (roomId: string) => void;
+  onRefresh: () => void;
+  refreshDisabled: boolean;
+  rooms: Room[];
 }) {
-  if (rooms.length === 0) {
-    return (
-      <div
-        className={cx(
-          surface({ variant: 'inset' }),
-          css({
-            color: 'fg.muted',
-            fontWeight: 'semibold',
-            p: '3',
-            textStyle: 'sm',
-          }),
-        )}
-      >
-        募集中の部屋はありません
-      </div>
-    );
-  }
+  const [joiningRoomId, setJoiningRoomId] = useState<string | null>(null);
+  const now = useNow(rooms.length > 0, 30_000);
 
   return (
-    <div
-      className={cx(
-        surface({ variant: 'inset' }),
-        css({ display: 'grid', overflow: 'hidden' }),
-      )}
+    <section
+      aria-labelledby="public-rooms-title"
+      className={css({ display: 'flex', flexDirection: 'column', mt: '3' })}
     >
-      {rooms.map((room) => (
+      <div
+        className={css({
+          alignItems: 'center',
+          display: 'flex',
+          justifyContent: 'space-between',
+          pb: '3.5',
+        })}
+      >
         <div
-          key={room.room_id}
-          className={css({
-            borderBottomColor: 'gray.surface.border',
-            borderBottomWidth: '1px',
-            display: 'grid',
-            gap: '2',
-            gridTemplateColumns: {
-              base: '1fr',
-              md: 'minmax(0, 1fr) auto',
-            },
-            p: '2.5',
-            _last: {
-              borderBottomWidth: '0',
-            },
-            alignItems: { base: 'stretch', md: 'center' },
-          })}
+          className={css({ alignItems: 'center', display: 'flex', gap: '2.5' })}
         >
-          <div className={css({ display: 'grid', gap: '1', minW: '0' })}>
-            <div
-              className={css({
-                color: 'fg.default',
-                fontWeight: 'black',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                textStyle: 'md',
-                whiteSpace: 'nowrap',
-              })}
-            >
-              {room.host_name}
-            </div>
-            <div
-              className={css({
-                color: 'fg.muted',
-                fontWeight: 'semibold',
-                overflowWrap: 'anywhere',
-                textStyle: 'sm',
-              })}
-            >
-              {room.room_id} / {formatRoomSettings(room)}
-            </div>
-          </div>
-          <Button
-            variant="outline"
-            loading={busy}
-            disabled={disabled || !room.can_join}
-            onClick={() => onJoin(room.room_id)}
+          <h2
+            className={css({ fontSize: 'md', fontWeight: 'bold' })}
+            id="public-rooms-title"
           >
-            <Users size={18} weight="fill" />
-            参加
+            公開ルーム
+          </h2>
+          {error ? null : (
+            <span
+              className={css({
+                bg: 'gray.4',
+                borderRadius: 'full',
+                fontSize: '[12.5px]',
+                fontVariantNumeric: 'tabular-nums',
+                fontWeight: 'semibold',
+                lineHeight: '[22px]',
+                minW: '[22px]',
+                px: '[7px]',
+                textAlign: 'center',
+              })}
+            >
+              <span aria-hidden="true">{rooms.length}</span>
+              <span className={css({ srOnly: true })}>
+                募集中 {rooms.length} 件
+              </span>
+            </span>
+          )}
+        </div>
+        <div
+          className={css({ alignItems: 'center', display: 'flex', gap: '3.5' })}
+        >
+          <span
+            className={cx(
+              css({
+                alignItems: 'center',
+                display: 'flex',
+                fontSize: '[12.5px]',
+                gap: '[7px]',
+              }),
+              error ? css({ color: 'danger.11' }) : css({ color: 'fg.subtle' }),
+            )}
+          >
+            <span
+              aria-hidden="true"
+              className={cx(
+                css({ borderRadius: 'full', boxSize: '1.5' }),
+                error ? css({ bg: 'danger.9' }) : css({ bg: 'success.9' }),
+              )}
+            />
+            {error ? '接続できません' : '自動で反映'}
+          </span>
+          <Button
+            aria-label="一覧を再読み込み"
+            className={css({ color: 'fg.muted' })}
+            colorPalette="gray"
+            disabled={refreshDisabled}
+            loading={loading}
+            onClick={onRefresh}
+            size="xs"
+            variant="outline"
+          >
+            <ArrowClockwise weight="bold" />
           </Button>
         </div>
-      ))}
-    </div>
+      </div>
+
+      {error ? (
+        <div
+          className={css({
+            alignItems: 'center',
+            bg: 'danger.2',
+            borderColor: 'danger.6',
+            borderRadius: 'l3',
+            borderWidth: '1px',
+            display: 'flex',
+            gap: '3.5',
+            px: '5',
+            py: '[18px]',
+          })}
+          role="alert"
+        >
+          <Warning
+            className={css({ color: 'danger.11', flexShrink: '0' })}
+            size={18}
+            weight="bold"
+          />
+          <div
+            className={css({
+              display: 'flex',
+              flexDirection: 'column',
+              flexGrow: '1',
+              gap: '1',
+            })}
+          >
+            <span className={css({ fontSize: '[15px]', fontWeight: 'bold' })}>
+              公開ルームを取得できませんでした
+            </span>
+            <span className={css({ color: 'fg.muted', fontSize: '[13px]' })}>
+              インターネット接続を確認して、再読み込みしてください。
+            </span>
+          </div>
+          <Button
+            colorPalette="gray"
+            disabled={refreshDisabled}
+            loading={loading}
+            onClick={onRefresh}
+            size="sm"
+            variant="subtle"
+          >
+            再読み込み
+          </Button>
+        </div>
+      ) : rooms.length === 0 ? (
+        <div
+          className={css({
+            alignItems: 'center',
+            borderColor: 'gray.4',
+            borderRadius: 'l3',
+            borderStyle: 'dashed',
+            borderWidth: '1px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2.5',
+            pb: '[60px]',
+            pt: '14',
+            px: '6',
+            textAlign: 'center',
+          })}
+        >
+          <PixelStar
+            className={css({ color: 'gray.4' })}
+            eyeColor="var(--colors-canvas)"
+            size={48}
+          />
+          <span
+            className={css({
+              fontSize: '[17px]',
+              fontWeight: 'bold',
+              mt: '2.5',
+            })}
+          >
+            いま募集中の部屋はありません
+          </span>
+          <span
+            className={css({
+              color: 'fg.muted',
+              display: 'flex',
+              flexDirection: 'column',
+              fontSize: '[13.5px]',
+              lineHeight: '[1.75]',
+            })}
+          >
+            <span>部屋を作ると、ここに表示されて相手を待てます。</span>
+            <span>
+              設定で「新しい部屋の通知」をオンにすると、部屋ができたときにお知らせします。
+            </span>
+          </span>
+          {canCreate ? (
+            <Button
+              className={css({ mt: '3.5' })}
+              colorPalette="gray"
+              onClick={onCreate}
+              size="sm"
+              variant="subtle"
+            >
+              部屋を作って待つ
+            </Button>
+          ) : null}
+        </div>
+      ) : (
+        <ul
+          className={css({
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2',
+          })}
+        >
+          {rooms.map((room) => (
+            <RoomRow
+              key={room.room_id}
+              disabled={disabled || busy || !room.can_join}
+              joining={busy && joiningRoomId === room.room_id}
+              now={now}
+              room={room}
+              onJoin={() => {
+                setJoiningRoomId(room.room_id);
+                onJoin(room.room_id);
+              }}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
-function UpdateRequiredNotice({ version }: { version?: string }) {
+function RoomRow({
+  disabled,
+  joining,
+  now,
+  onJoin,
+  room,
+}: {
+  disabled: boolean;
+  joining: boolean;
+  now: number;
+  onJoin: () => void;
+  room: Room;
+}) {
+  const [course, ...rules] = roomRuleParts({
+    bigStars: room.settings.big_stars,
+    courseMode: room.settings.course_mode,
+    lives: room.settings.lives,
+    stageCount: room.settings.course_stages.length,
+    wins: room.settings.wins,
+  });
+  return (
+    <li
+      className={cx(
+        cardClass,
+        css({
+          alignItems: 'center',
+          display: 'flex',
+          gap: '5',
+          minH: '[72px]',
+          pl: '5',
+          pr: '4',
+          py: '3.5',
+        }),
+      )}
+    >
+      <div
+        className={css({
+          display: 'flex',
+          flexDirection: 'column',
+          flexGrow: '1',
+          gap: '[5px]',
+          minW: '0',
+        })}
+      >
+        <span
+          className={css({
+            fontSize: '[15px]',
+            fontWeight: 'semibold',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          })}
+        >
+          {room.host_name}
+        </span>
+        <RuleList
+          className={css({ fontSize: '[13px]' })}
+          parts={[course, ...rules]}
+        />
+      </div>
+      <span
+        className={css({
+          color: 'fg.subtle',
+          flexShrink: '0',
+          fontSize: '[12.5px]',
+          whiteSpace: 'nowrap',
+        })}
+      >
+        {formatRoomAge(room.created_at, now)}
+      </span>
+      <Button
+        aria-label={`${room.host_name} の部屋に参加`}
+        className={css({ flexShrink: '0', w: '[84px]' })}
+        colorPalette="gray"
+        disabled={disabled}
+        loading={joining}
+        onClick={onJoin}
+        size="sm"
+        variant="subtle"
+      >
+        参加
+      </Button>
+    </li>
+  );
+}
+
+/** 「ランダム · 3本先取 · スター10 · 残機3」。最初の項目（コース）を少し明るくする */
+function RuleList({
+  className,
+  parts,
+}: {
+  className?: string;
+  parts: string[];
+}) {
+  return (
+    <span
+      className={cx(
+        css({
+          alignItems: 'center',
+          color: 'fg.muted',
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '2',
+        }),
+        className,
+      )}
+    >
+      {parts.map((part, index) => (
+        <span
+          key={part}
+          className={css({ alignItems: 'center', display: 'flex', gap: '2' })}
+        >
+          {index > 0 ? (
+            <span aria-hidden="true" className={css({ color: 'gray.7' })}>
+              ·
+            </span>
+          ) : null}
+          <span className={index === 0 ? css({ color: 'gray.12' }) : undefined}>
+            {part}
+          </span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function HostingCard({
+  busy,
+  hostedRoom,
+  onCancel,
+  onCopy,
+  playerName,
+}: {
+  busy: boolean;
+  hostedRoom: NonNullable<MatchmakingRoomsState['hostedRoom']>;
+  onCancel: () => void;
+  onCopy: () => void;
+  playerName: string;
+}) {
+  const now = useNow(true);
+  const { form } = hostedRoom;
+  const rules = roomRuleParts({
+    bigStars: form.bigStars,
+    courseMode: form.courseMode,
+    lives: form.lives,
+    stageCount: form.courseStages.length,
+    wins: form.wins,
+  });
+  return (
+    <section
+      aria-label="あなたの部屋"
+      className={cx(
+        cardClass,
+        css({
+          borderRadius: '[14px]',
+          display: 'flex',
+          flexDirection: 'column',
+        }),
+      )}
+    >
+      <div
+        className={css({
+          alignItems: 'center',
+          display: 'flex',
+          justifyContent: 'space-between',
+          pt: '[18px]',
+          px: '6',
+        })}
+      >
+        <span
+          className={css({
+            alignItems: 'center',
+            display: 'flex',
+            fontSize: 'sm',
+            fontWeight: 'semibold',
+            gap: '2.5',
+          })}
+        >
+          <span
+            aria-hidden="true"
+            className={css({
+              animation: '[status-ring 1.8s ease-out infinite]',
+              bg: 'current',
+              borderRadius: 'full',
+              boxSize: '2',
+              color: 'success.9',
+            })}
+          />
+          部屋を公開中
+        </span>
+        <span className={css({ color: 'fg.muted', fontSize: '[13px]' })}>
+          経過{' '}
+          <span
+            className={css({
+              color: 'fg.default',
+              fontVariantNumeric: 'tabular-nums',
+              fontWeight: 'semibold',
+            })}
+          >
+            {formatElapsed(now - hostedRoom.createdAtMs)}
+          </span>
+        </span>
+      </div>
+
+      <div
+        className={css({
+          alignItems: 'center',
+          display: 'grid',
+          gridTemplateColumns: '[minmax(0, 1fr) 72px minmax(0, 1fr)]',
+          pb: '2',
+          pt: '[22px]',
+          px: '6',
+        })}
+      >
+        <div
+          className={css({
+            bg: 'gray.3',
+            borderColor: 'gray.5',
+            borderRadius: 'l3',
+            borderWidth: '1px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.5',
+            h: '[104px]',
+            justifyContent: 'center',
+            px: '[22px]',
+          })}
+        >
+          <span className={css({ color: 'fg.muted', fontSize: '[12.5px]' })}>
+            あなた
+          </span>
+          <span
+            className={css({
+              fontSize: '[19px]',
+              fontWeight: 'bold',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            })}
+          >
+            {playerName || 'プレイヤー'}
+          </span>
+        </div>
+        <span
+          className={css({
+            color: 'gray.6',
+            display: 'flex',
+            justifyContent: 'center',
+          })}
+        >
+          <PixelVersus size={36} />
+        </span>
+        <div
+          className={css({
+            animation: '[slot-sweep 2.4s ease-in-out infinite]',
+            borderColor: 'gray.5',
+            borderRadius: 'l3',
+            borderStyle: 'dashed',
+            borderWidth: '[1.5px]',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2',
+            h: '[104px]',
+            justifyContent: 'center',
+            px: '[22px]',
+          })}
+        >
+          <span
+            className={css({
+              alignItems: 'center',
+              color: 'gray.12',
+              display: 'flex',
+              fontSize: 'md',
+              fontWeight: 'semibold',
+              gap: '2.5',
+            })}
+          >
+            相手を待っています
+            <WaitingDots />
+          </span>
+          <span className={css({ color: 'fg.subtle', fontSize: '[12.5px]' })}>
+            参加されると melonDS が自動で起動します
+          </span>
+        </div>
+      </div>
+
+      <div
+        className={css({
+          alignItems: 'center',
+          borderTopColor: 'gray.3',
+          borderTopWidth: '1px',
+          display: 'flex',
+          gap: '7',
+          mt: '[18px]',
+          px: '6',
+          py: '4',
+        })}
+      >
+        <HostingFact label="ルール">
+          <RuleList
+            className={css({ color: 'fg.default', fontSize: '[13.5px]' })}
+            parts={rules}
+          />
+        </HostingFact>
+        <span
+          aria-hidden="true"
+          className={css({ bg: 'gray.3', h: '[34px]', w: '[1px]' })}
+        />
+        <HostingFact label="部屋コード">
+          <span
+            className={css({
+              alignItems: 'center',
+              display: 'flex',
+              gap: '2',
+              minW: '0',
+            })}
+          >
+            <code
+              className={css({
+                fontFamily: 'mono',
+                fontSize: 'sm',
+                fontWeight: 'semibold',
+                letterSpacing: '[0.04em]',
+                wordBreak: 'break-all',
+              })}
+            >
+              {hostedRoom.roomId}
+            </code>
+            <Button
+              aria-label="部屋コードをコピー"
+              className={css({ boxSize: '[26px]', minW: '[26px]', px: '0' })}
+              colorPalette="gray"
+              disabled={busy}
+              onClick={onCopy}
+              size="2xs"
+              variant="subtle"
+            >
+              <Copy weight="bold" />
+            </Button>
+          </span>
+        </HostingFact>
+        <Button
+          className={css({ flexShrink: '0', ml: 'auto' })}
+          colorPalette="danger"
+          loading={busy}
+          onClick={onCancel}
+          size="sm"
+          variant="outline"
+        >
+          部屋を閉じる
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function HostingFact({
+  children,
+  label,
+}: {
+  children: ReactNode;
+  label: string;
+}) {
   return (
     <div
       className={css({
-        alignItems: 'flex-start',
-        bg: 'yellow.subtle.bg',
-        borderColor: 'yellow.outline.border',
-        borderRadius: 'l2',
-        borderWidth: '1px',
-        color: 'yellow.subtle.fg',
         display: 'flex',
-        gap: '2',
-        p: '2.5',
+        flexDirection: 'column',
+        gap: '1',
+        minW: '0',
       })}
     >
-      <WarningCircle
-        className={css({ flexShrink: '0', mt: '0.5' })}
-        size={20}
-        weight="fill"
-      />
-      <div className={css({ display: 'grid', gap: '1' })}>
-        <div className={css({ fontWeight: 'black', textStyle: 'sm' })}>
-          GUI の更新が必要です
-        </div>
-        <div
-          className={css({
-            fontWeight: 'bold',
-            overflowWrap: 'anywhere',
-            textStyle: 'sm',
-          })}
-        >
-          {version
-            ? `v${version} に更新するまで、部屋の作成・参加はできません。画面左下の更新ボタンから更新してください。`
-            : '更新を適用するまで、部屋の作成・参加はできません。画面左下の更新ボタンから更新してください。'}
-        </div>
-      </div>
+      <span className={css({ color: 'fg.subtle', fontSize: 'xs' })}>
+        {label}
+      </span>
+      {children}
     </div>
   );
 }
 
-function formatRoomSettings(room: MatchmakingRoomsState['rooms'][number]) {
-  const netplay = room.settings.rollback_enabled
-    ? `Delay=${room.settings.input_delay_frames} P=${rollbackPredictionHorizonFrames} RB=ROM-loop`
-    : `Delay=${room.settings.input_delay_frames} Lead=${room.settings.input_max_frame_lead} RB=off`;
-  const stages = room.settings.course_stages.join('/');
-  return `Course=${room.settings.course_mode}[${stages}] Wins=${room.settings.wins} Star=${room.settings.big_stars} Lives=${room.settings.lives} ${netplay}`;
+function WaitingDots() {
+  return (
+    <span aria-hidden="true" className={css({ display: 'flex', gap: '1' })}>
+      {[0, 0.2, 0.4].map((delay) => (
+        <span
+          key={delay}
+          className={css({
+            animation: '[waiting-dot 1.4s ease-in-out infinite]',
+            bg: 'fg.muted',
+            borderRadius: 'full',
+            boxSize: '1.5',
+          })}
+          style={{ animationDelay: `${delay}s` }}
+        />
+      ))}
+    </span>
+  );
+}
+
+function UpdateRequiredNotice({
+  busy,
+  onUpdate,
+  version,
+}: {
+  busy: boolean;
+  onUpdate: () => void;
+  version?: string;
+}) {
+  return (
+    <div
+      className={cx(
+        cardClass,
+        css({
+          alignItems: 'center',
+          borderColor: 'gray.5',
+          display: 'flex',
+          gap: '4',
+          px: '5',
+          py: '[18px]',
+        }),
+      )}
+      role="alert"
+    >
+      <span
+        className={css({
+          alignItems: 'center',
+          bg: 'amber.3',
+          borderRadius: 'l2',
+          boxSize: '10',
+          color: 'amber.9',
+          display: 'flex',
+          flexShrink: '0',
+          justifyContent: 'center',
+        })}
+      >
+        <DownloadSimple size={18} weight="bold" />
+      </span>
+      <div
+        className={css({
+          display: 'flex',
+          flexDirection: 'column',
+          flexGrow: '1',
+          gap: '1',
+        })}
+      >
+        <span className={css({ fontSize: '[15px]', fontWeight: 'bold' })}>
+          {version ? `v${version} への更新が必要です` : '更新が必要です'}
+        </span>
+        <span className={css({ color: 'fg.muted', fontSize: '[13px]' })}>
+          更新するまで部屋の作成・参加はできません。更新後は自動で再起動します。
+        </span>
+      </div>
+      <Button
+        className={css({ flexShrink: '0' })}
+        colorPalette="amber"
+        loading={busy}
+        onClick={onUpdate}
+        size="sm"
+      >
+        更新して再起動
+      </Button>
+    </div>
+  );
 }
