@@ -326,7 +326,7 @@ function RulesSummary({ match }: { match: BattleMatchRecord }) {
 const alertStripClass = css({
   borderBottomWidth: '1px',
   borderColor: 'colorPalette.a5',
-  borderRadius: '[0]',
+  borderRadius: 'none',
   px: '5',
 });
 

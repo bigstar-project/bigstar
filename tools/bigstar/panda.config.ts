@@ -77,6 +77,10 @@ export default defineConfig({
           // Kiso で組んだ画面の本文の幅
           page: { value: '808px' },
         },
+        // Panda 標準の角丸には none がなく、strictTokens では 0 を直接書けない
+        radii: {
+          none: { value: '0' },
+        },
       },
 
       semanticTokens: {
