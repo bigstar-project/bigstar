@@ -808,8 +808,9 @@ function WinRateChart({
           className={css({
             columnGap: '2.5',
             display: 'grid',
-            // 右の列は最新の勝率を出す場所。線は最新の点より右へ伸びないので、どんな推移でも重ならない
-            gridTemplateColumns: '2.25rem minmax(0, 1fr) 3rem',
+            // 右の列は最新の勝率を出す場所。線は最新の点より右へ伸びないので、どんな推移でも重ならない。
+            // 列の幅は数字に合わせ、余った幅はグラフに回す
+            gridTemplateColumns: '2.25rem minmax(0, 1fr) auto',
           })}
         >
           <div
@@ -921,14 +922,15 @@ function WinRateChart({
           </div>
           <div
             aria-hidden="true"
-            className={css({ color: 'amber.9', h: '36', position: 'relative' })}
+            className={css({ color: 'amber.9', h: '36', pl: '1' })}
           >
+            {/* 列の幅に数字の幅が入るよう、絶対配置ではなく相対配置で点の高さへ動かす */}
             <span
               className={css({
+                display: 'block',
                 fontVariantNumeric: 'tabular-nums',
                 fontWeight: 'semibold',
-                left: '1',
-                position: 'absolute',
+                position: 'relative',
                 textStyle: 'sm',
                 transform: 'translateY(-50%)',
                 whiteSpace: 'nowrap',
