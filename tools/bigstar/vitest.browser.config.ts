@@ -10,8 +10,16 @@ export default defineConfig({
   optimizeDeps: {
     include: [
       '@ark-ui/react/collapsible',
+      '@base-ui/react/alert-dialog',
+      '@base-ui/react/collapsible',
+      '@base-ui/react/dialog',
+      '@base-ui/react/field',
       '@base-ui/react/radio',
       '@base-ui/react/radio-group',
+      '@base-ui/react/select',
+      '@base-ui/react/switch',
+      '@base-ui/react/toggle',
+      '@base-ui/react/toggle-group',
       '@tauri-apps/api/window',
     ],
   },

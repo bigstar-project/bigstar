@@ -41,7 +41,8 @@ export function App() {
   const pageLayout =
     launcher.activeView === 'settings' ||
     launcher.activeView === 'battle' ||
-    launcher.activeView === 'cpu';
+    launcher.activeView === 'cpu' ||
+    launcher.activeView === 'history';
   // CPU 対戦を始められない原因が対戦画面にあるときは、そこへ移るボタンを出す
   const cpuBlockedAction = launcher.matchmakingRooms.hostedRoom
     ? {

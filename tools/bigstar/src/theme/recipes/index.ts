@@ -16,10 +16,11 @@ import { select } from './select'
 import { spinner } from './spinner'
 import { switchRecipe } from './switch'
 import { tabs } from './tabs'
+import { textarea } from './textarea'
 import { toast } from './toast'
 import { toggle, toggleGroup } from './toggle'
 
 // prettier-ignore
-export const recipes = { badge, button, input, kbd, spinner, toggle, toggleGroup }
+export const recipes = { badge, button, input, kbd, spinner, textarea, toggle, toggleGroup }
 // prettier-ignore
 export const slotRecipes = { alert, card, collapsible, dialog, emptyState, field, numberField, progress, radioGroup, select, switchRecipe, tabs, toast }

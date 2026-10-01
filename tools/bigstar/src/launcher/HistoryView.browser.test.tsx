@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NuqsAdapter } from 'nuqs/adapters/react';
 import { type ReactNode, useState } from 'react';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import type { Locator } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 import * as Tabs from '@/components/ui/tabs';
 import { previewMatchHistory } from '../previewData';
@@ -27,6 +28,18 @@ function HistoryTestProviders({ children }: { children: ReactNode }) {
   );
 }
 
+const openRows = () =>
+  document.querySelectorAll('[data-history-match] [aria-expanded="true"]');
+const matchRows = () => document.querySelectorAll('[data-history-match]');
+const detailBodies = () =>
+  document.querySelectorAll('[data-match-details-body]');
+
+// ブラウザテストでは CSS を読み込まないので、Base UI がダイアログの背後に敷く
+// 固定配置の要素が、配置されていないダイアログの上に重なる。ダイアログ内は DOM から直接押す
+function clickInDialog(locator: Locator) {
+  (locator.element() as HTMLElement).click();
+}
+
 describe('履歴ビュー', () => {
   test('URLからすべてのフィルターを復元する', async () => {
     window.history.replaceState(
@@ -47,10 +60,10 @@ describe('履歴ビュー', () => {
       .element(screen.getByRole('combobox', { name: '対戦相手' }))
       .toHaveTextContent('Rival');
     await expect
-      .element(screen.getByRole('combobox', { name: 'ステージ' }))
+      .element(screen.getByRole('combobox', { name: 'コース' }))
       .toHaveTextContent('雪');
     await expect
-      .element(screen.getByRole('combobox', { name: '履歴の結果' }))
+      .element(screen.getByRole('combobox', { name: '結果' }))
       .toHaveTextContent('勝利');
   });
 
@@ -64,15 +77,12 @@ describe('履歴ビュー', () => {
     await expect.element(screen.getByText('対戦勝率')).toBeVisible();
     await expect.element(screen.getByText('ゲーム勝率')).toBeVisible();
     await expect
-      .element(screen.getByRole('img', { name: '勝率推移グラフ' }))
+      .element(screen.getByRole('img', { name: /^直近10戦の勝率の推移/ }))
       .toBeVisible();
     await expect
-      .element(screen.getByRole('img', { name: '勝率推移グラフ' }))
-      .toHaveAttribute('viewBox', '0 0 280 100');
-    await expect.element(screen.getByText('ステージ別勝率')).toBeVisible();
-    await expect
-      .element(screen.getByRole('combobox', { name: '期間' }))
-      .toBeVisible();
+      .element(screen.getByRole('img', { name: /^対戦ごとの勝敗/ }))
+      .toBeInTheDocument();
+    await expect.element(screen.getByText('コース別勝率')).toBeVisible();
     await expect
       .element(screen.getByRole('combobox', { name: '期間' }))
       .toHaveTextContent('全期間');
@@ -80,19 +90,39 @@ describe('履歴ビュー', () => {
       .element(screen.getByRole('combobox', { name: '対戦相手' }))
       .toBeVisible();
     await expect
-      .element(screen.getByRole('combobox', { name: 'ステージ' }))
+      .element(screen.getByRole('combobox', { name: 'コース' }))
       .toBeVisible();
     await expect
-      .element(screen.getByRole('combobox', { name: '履歴の結果' }))
-      .toBeVisible();
-    await expect
-      .element(screen.getByRole('combobox', { name: '履歴の結果' }))
+      .element(screen.getByRole('combobox', { name: '結果' }))
       .toHaveTextContent('完了した対戦');
     await expect.element(screen.getByText('3件')).toBeVisible();
 
-    await screen.getByRole('combobox', { name: '履歴の結果' }).click();
+    await screen.getByRole('combobox', { name: '結果' }).click();
     await screen.getByRole('option', { name: 'すべて' }).click();
     await expect.element(screen.getByText('4件')).toBeVisible();
+  });
+
+  test('絞り込みを変えたときだけリセットを見せ、押すと既定に戻す', async () => {
+    const screen = await render(
+      <HistoryTestProviders>
+        <HistoryView matches={previewMatchHistory()} />
+      </HistoryTestProviders>,
+    );
+
+    // 隠している間はボタンとして読まれないので、文字で探す
+    const reset = screen.getByText('リセット', { exact: true });
+    await expect.element(screen.getByText('3件')).toBeVisible();
+    await expect.element(reset).not.toBeVisible();
+
+    await screen.getByRole('combobox', { name: '結果' }).click();
+    await screen.getByRole('option', { name: 'すべて' }).click();
+    await expect.element(reset).toBeVisible();
+
+    await reset.click();
+    await expect
+      .element(screen.getByRole('combobox', { name: '結果' }))
+      .toHaveTextContent('完了した対戦');
+    await expect.element(reset).not.toBeVisible();
   });
 
   test('対戦相手の名前から個別戦績へ移動する', async () => {
@@ -105,7 +135,7 @@ describe('履歴ビュー', () => {
       </HistoryTestProviders>,
     );
 
-    await screen.getByText('3 - 1').click();
+    await screen.getByText('3–1').click();
     await screen.getByRole('button', { name: 'Rivalとの戦績を見る' }).click();
 
     await vi.waitFor(() => {
@@ -117,14 +147,10 @@ describe('履歴ビュー', () => {
     await expect
       .element(screen.getByRole('heading', { name: 'Rivalとの戦績' }))
       .toBeVisible();
-    await expect.element(screen.getByText('1勝 0敗')).toBeVisible();
+    await expect.element(screen.getByText(/^1勝 0敗/)).toBeVisible();
     expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' });
-    expect(
-      document.querySelector(
-        '[data-scope="collapsible"][data-part="root"][data-state="open"]',
-      ),
-    ).toBeNull();
-    await screen.getByRole('button', { name: '全対戦履歴に戻る' }).click();
+    expect(openRows()).toHaveLength(0);
+    await screen.getByRole('button', { name: 'すべての履歴に戻る' }).click();
     await expect
       .element(screen.getByRole('heading', { name: 'Rivalとの戦績' }))
       .not.toBeInTheDocument();
@@ -157,19 +183,19 @@ describe('履歴ビュー', () => {
       .toHaveTextContent('すべて');
   });
 
-  test('対戦詳細の表は自分と相手の名前をヘッダーに表示する', async () => {
+  test('対戦詳細の表は自分と相手を行の見出しに表示する', async () => {
     const screen = await render(
       <HistoryTestProviders>
         <HistoryView matches={previewMatchHistory()} />
       </HistoryTestProviders>,
     );
 
-    await screen.getByText('3 - 1').click();
+    await screen.getByText('3–1').click();
 
-    const headers = [...document.querySelectorAll('th')].map((header) =>
-      header.textContent?.trim(),
+    const rowHeaders = [...document.querySelectorAll('th[scope="row"]')].map(
+      (header) => header.textContent?.trim(),
     );
-    expect(headers.slice(3, 5)).toEqual(['Preview Player', 'Rival']);
+    expect(rowHeaders).toEqual(['あなた', 'Rival']);
   });
 
   test('相手の最後の履歴を削除したら全履歴へ戻る', async () => {
@@ -190,11 +216,11 @@ describe('履歴ビュー', () => {
     }
 
     const screen = await render(<DeletableHistory />);
-    await screen.getByText('3 - 1').click();
+    await screen.getByText('3–1').click();
     await screen.getByRole('button', { name: 'Rivalとの戦績を見る' }).click();
-    await screen.getByText('3 - 1').click();
+    await screen.getByText('3–1').click();
     await screen.getByRole('button', { name: '対戦履歴を削除' }).click();
-    await screen.getByRole('button', { name: '削除する' }).click();
+    clickInDialog(screen.getByRole('button', { name: '削除する' }));
 
     await expect
       .element(screen.getByRole('heading', { name: 'Rivalとの戦績' }))
@@ -211,50 +237,28 @@ describe('履歴ビュー', () => {
       </HistoryTestProviders>,
     );
 
-    await expect.element(screen.getByText('3 - 1')).toBeVisible();
-    expect(
-      document.querySelector(
-        '[data-scope="collapsible"][data-part="root"][data-state="open"]',
-      ),
-    ).toBeNull();
+    await expect.element(screen.getByText('3–1')).toBeVisible();
+    expect(openRows()).toHaveLength(0);
   });
 
-  test('対戦の詳細DOMを初回展開まで生成しない', async () => {
+  test('対戦の詳細DOMは開いている間だけ生成する', async () => {
     const screen = await render(
       <HistoryTestProviders>
         <HistoryView matches={previewMatchHistory()} />
       </HistoryTestProviders>,
     );
 
-    const details = () =>
-      document.querySelectorAll(
-        '[data-scope="collapsible"][data-part="content"]',
-      );
-
-    expect(details()).toHaveLength(0);
+    await expect.element(screen.getByText('3–1')).toBeVisible();
+    expect(detailBodies()).toHaveLength(0);
     expect(document.querySelectorAll('th')).toHaveLength(0);
 
-    const triggerContent = screen.getByText('3 - 1');
+    const triggerContent = screen.getByText('3–1');
     await triggerContent.click();
-    await vi.waitFor(() =>
-      expect(document.querySelectorAll('th').length).toBeGreaterThan(0),
-    );
-    expect(details()).toHaveLength(1);
-
-    const detailsElement = details().item(0) as HTMLElement;
-    const detailsBody = detailsElement.querySelector(
-      '[data-match-details-body]',
-    ) as HTMLElement;
-    expect(detailsElement.className).not.toContain('py_3');
-    expect(detailsElement.className).not.toContain('bd-t-w_1px');
-    expect(detailsBody.className).toContain('py_3');
-    expect(detailsBody.className).toContain('bd-t-w_1px');
+    await vi.waitFor(() => expect(detailBodies()).toHaveLength(1));
+    expect(document.querySelectorAll('th').length).toBeGreaterThan(0);
 
     await triggerContent.click();
-    await vi.waitFor(() =>
-      expect(details().item(0)?.getAttribute('data-state')).toBe('closed'),
-    );
-    expect(details()).toHaveLength(1);
+    await vi.waitFor(() => expect(detailBodies()).toHaveLength(0));
   });
 
   test('未プレイだけの対戦は履歴に表示しない', async () => {
@@ -276,11 +280,11 @@ describe('履歴ビュー', () => {
       </HistoryTestProviders>,
     );
 
-    await expect.element(screen.getByText('3 - 1')).toBeVisible();
+    await expect.element(screen.getByText('3–1')).toBeVisible();
     await expect
       .element(screen.getByText('Unplayed Mario'))
       .not.toBeInTheDocument();
-    await expect.element(screen.getByText('0 - 0')).not.toBeInTheDocument();
+    await expect.element(screen.getByText('0–0')).not.toBeInTheDocument();
   });
 
   test('一覧の末尾までスクロールすると次の履歴を自動で読み込む', async () => {
@@ -302,20 +306,18 @@ describe('履歴ビュー', () => {
       </HistoryTestProviders>,
     );
 
-    const historyTriggers = () =>
-      document.querySelectorAll(
-        '[data-scope="collapsible"][data-part="trigger"]',
-      );
-    await vi.waitFor(() => expect(historyTriggers()).toHaveLength(50));
+    await vi.waitFor(() => expect(matchRows()).toHaveLength(50));
 
     const loadMoreTarget = document.querySelector<HTMLElement>(
       '[data-history-load-more]',
     );
     expect(loadMoreTarget).not.toBeNull();
+    // CSS を読み込まないので高さが 0 になり、ページ末尾からわずかにはみ出して見えない。本番と同じ高さを与える
+    if (loadMoreTarget) loadMoreTarget.style.height = '2.5rem';
     loadMoreTarget?.scrollIntoView();
 
-    await vi.waitFor(() => expect(historyTriggers()).toHaveLength(51));
-    expect(historyTriggers().item(50)).toHaveTextContent('51件目の対戦相手');
+    await vi.waitFor(() => expect(matchRows()).toHaveLength(51));
+    expect(matchRows().item(50)).toHaveTextContent('51件目の対戦相手');
     expect(document.querySelector('[data-history-load-more]')).toBeNull();
   });
 
@@ -333,7 +335,7 @@ describe('履歴ビュー', () => {
       .element(screen.getByRole('button', { name: '対戦履歴を削除' }))
       .not.toBeInTheDocument();
 
-    await screen.getByText('3 - 1').click();
+    await screen.getByText('3–1').click();
 
     await screen.getByRole('button', { name: '対戦履歴を削除' }).click();
 
@@ -342,9 +344,11 @@ describe('履歴ビュー', () => {
       .element(screen.getByText('対戦履歴を削除しますか？'))
       .toBeVisible();
 
-    await screen.getByRole('button', { name: '削除する' }).click();
+    clickInDialog(screen.getByRole('button', { name: '削除する' }));
 
-    expect(onDeleteMatch).toHaveBeenCalledWith(playedMatch.id);
+    await vi.waitFor(() =>
+      expect(onDeleteMatch).toHaveBeenCalledWith(playedMatch.id),
+    );
   });
 
   test('履歴ではログパスと診断ZIP作成を表示せず必要な操作だけ提供する', async () => {
@@ -362,17 +366,17 @@ describe('履歴ビュー', () => {
       </HistoryTestProviders>,
     );
 
-    await screen.getByText('3 - 1').click();
+    await screen.getByText('3–1').click();
     expect(document.body.textContent).not.toContain(playedMatch.logDir);
     await expect
       .element(screen.getByRole('button', { name: '診断ZIPを作成' }))
       .not.toBeInTheDocument();
     await screen.getByRole('button', { name: 'ログを開く' }).click();
-    await screen.getByRole('button', { name: 'フィードバック' }).click();
+    await screen.getByRole('button', { name: '問題を報告' }).click();
     await screen
       .getByLabelText('発生した問題')
       .fill('接続中にタイムアウトしました');
-    await screen.getByRole('button', { name: '送信' }).click();
+    clickInDialog(screen.getByRole('button', { name: '送信', exact: true }));
 
     expect(onOpenLogDir).toHaveBeenCalledWith(playedMatch.logDir);
     expect(onUploadLogArchive).toHaveBeenCalledWith(playedMatch.logDir, {
@@ -380,5 +384,9 @@ describe('履歴ビュー', () => {
       description: '接続中にタイムアウトしました',
       includePerformance: true,
     });
+    await expect
+      .element(screen.getByRole('heading', { name: '送信しました' }))
+      .toBeVisible();
+    await expect.element(screen.getByText('report-test')).toBeVisible();
   });
 });

@@ -34,7 +34,7 @@ function viewTitle(view: View) {
   if (view === 'solo-test') return 'ひとり検証';
   if (view === 'battle') return '対戦';
   if (view === 'ai') return 'AI';
-  if (view === 'history') return '対戦履歴';
+  if (view === 'history') return '履歴';
   return '設定';
 }
 

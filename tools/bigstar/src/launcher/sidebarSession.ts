@@ -1,7 +1,7 @@
 import type { SoloTestStatus } from '../bindings';
 import { localPlayerSide, opponentPlayerSide } from '../matchHistory';
 import { cpuOpponents } from './CpuBattleView';
-import { matchWinsFor } from './MatchView';
+import { matchWinsFor } from './GameTable';
 import type { SidebarSession } from './SidebarStatus';
 import type {
   BattleMatchRecord,

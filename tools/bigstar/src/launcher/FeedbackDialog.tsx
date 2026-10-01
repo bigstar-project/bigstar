@@ -1,18 +1,17 @@
-import { Portal } from '@ark-ui/react';
-import { CloudArrowUp } from '@phosphor-icons/react';
-import { type ChangeEvent, useState } from 'react';
+import { Check, Copy } from '@phosphor-icons/react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { css } from 'styled-system/css';
-import { SelectField } from '../components/Fields';
-import {
-  Button,
-  CloseButton,
-  Dialog,
-  Field,
-  Switch,
-  Textarea,
-} from '../components/park-ui';
+import { Button } from '@/components/ui/button';
+import * as Collapsible from '@/components/ui/collapsible';
+import * as Dialog from '@/components/ui/dialog';
+import * as Field from '@/components/ui/field';
+import * as Switch from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
+import { Toggle, ToggleGroup } from '@/components/ui/toggle';
 import type { FeedbackCategory } from '../types';
 import type { FeedbackInput } from './types';
+
+const descriptionMaxLength = 4000;
 
 const categoryOptions: Array<{
   label: string;
@@ -27,9 +26,16 @@ const categoryOptions: Array<{
   { label: 'その他', value: 'other' },
 ];
 
+/** 対戦ログの行から開く、問題の報告。その対戦の診断情報を添えて送る */
 export function FeedbackDialog({
+  matchDate,
+  matchSummary,
   onSubmit,
 }: {
+  /** 「6/21 19:40」 */
+  matchDate: string;
+  /** 「Rival 戦 3–1」 */
+  matchSummary: string;
   onSubmit: (feedback: FeedbackInput) => Promise<string | null>;
 }) {
   const [open, setOpen] = useState(false);
@@ -39,6 +45,9 @@ export function FeedbackDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reportId, setReportId] = useState<string | null>(null);
+  const categoryLabelId = useId();
+  const performanceLabelId = useId();
+  const performanceDescriptionId = useId();
 
   const submit = async () => {
     const trimmed = description.trim();
@@ -58,7 +67,7 @@ export function FeedbackDialog({
       if (nextReportId) {
         setReportId(nextReportId);
       } else {
-        setError('フィードバックを送信できませんでした');
+        setError('送信できませんでした');
       }
     } catch (submitError) {
       setError(String(submitError));
@@ -70,130 +79,325 @@ export function FeedbackDialog({
   return (
     <Dialog.Root
       open={open}
-      onOpenChange={(details) => {
-        setOpen(details.open);
-        if (details.open) {
+      size="lg"
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) {
           setError(null);
           setReportId(null);
         }
       }}
     >
-      <Dialog.Trigger asChild>
-        <Button size="xs" variant="outline">
-          <CloudArrowUp size={16} weight="bold" />
-          フィードバック
-        </Button>
+      <Dialog.Trigger
+        render={<Button colorPalette="gray" size="xs" variant="plain" />}
+      >
+        問題を報告
       </Dialog.Trigger>
-      <Portal>
+      <Dialog.Portal>
         <Dialog.Backdrop />
-        <Dialog.Positioner>
-          <Dialog.Content className={css({ maxW: 'lg', w: 'full' })}>
-            <Dialog.CloseTrigger>
-              <CloseButton />
-            </Dialog.CloseTrigger>
-            <Dialog.Header>
-              <Dialog.Title>フィードバックを送信</Dialog.Title>
-              <Dialog.Description>
-                選択した対戦の安全な診断情報を添付します。プレイヤー名、IP、
-                ルームコード、ファイルパスは送信しません。
-              </Dialog.Description>
-            </Dialog.Header>
-            <Dialog.Body className={css({ display: 'grid', gap: '4' })}>
-              <SelectField
-                label="問題の種類"
-                options={categoryOptions}
-                value={category}
-                onChange={(value) => setCategory(value as FeedbackCategory)}
-              />
-              <Field.Root invalid={Boolean(error && !description.trim())}>
-                <Field.Label>発生した問題</Field.Label>
-                <Textarea
-                  maxLength={4000}
-                  minH="32"
-                  placeholder="何をしていたときに、何が起きたかを入力してください"
-                  value={description}
-                  onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
-                    setDescription(event.target.value)
-                  }
-                />
-                <Field.HelperText>
-                  個人情報やルームコードは入力しないでください（
-                  {description.length}/4000）
-                </Field.HelperText>
-              </Field.Root>
-              <Switch.Root
-                checked={includePerformance}
-                onCheckedChange={(details) =>
-                  setIncludePerformance(details.checked)
-                }
-                className={css({
-                  alignItems: 'center',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                })}
-              >
-                <Switch.HiddenInput />
-                <div>
-                  <Switch.Label>パフォーマンスログを含める</Switch.Label>
-                  <p className={css({ color: 'fg.muted', textStyle: 'xs' })}>
-                    フレーム時間、CPU時間、音声待ちなどを添付します。
-                  </p>
-                </div>
-                <Switch.Control />
-              </Switch.Root>
-              <div
-                className={css({
-                  bg: 'gray.surface.bg',
-                  borderColor: 'gray.surface.border',
-                  borderRadius: 'l2',
-                  borderWidth: '1px',
-                  color: 'fg.muted',
-                  p: '3',
-                  textStyle: 'xs',
-                })}
-              >
-                添付対象: 診断要約、端末環境、アプリエラー、接続状態、
-                各プロセス出力の末尾
-                {includePerformance ? '、パフォーマンスログ' : ''}
-              </div>
-              {error ? (
-                <p className={css({ color: 'red.plain.fg', textStyle: 'sm' })}>
-                  {error}
-                </p>
-              ) : null}
-              {reportId ? (
+        <Dialog.Popup>
+          {reportId ? (
+            <SentReport reportId={reportId} />
+          ) : (
+            <>
+              <Dialog.Header className={css({ pr: '10' })}>
+                <Dialog.Title>問題を報告</Dialog.Title>
+                <Dialog.Description>
+                  <span
+                    className={css({
+                      color: 'fg.default',
+                      fontVariantNumeric: 'tabular-nums',
+                      fontWeight: 'semibold',
+                      pr: '2',
+                    })}
+                  >
+                    {matchDate}
+                  </span>
+                  {matchSummary} の安全な診断情報を添付します。
+                </Dialog.Description>
+              </Dialog.Header>
+              <Dialog.CloseTrigger aria-label="閉じる" />
+
+              <Dialog.Body className={css({ gap: '5' })}>
                 <div
                   className={css({
-                    bg: 'green.subtle.bg',
-                    borderColor: 'green.outline.border',
-                    borderRadius: 'l2',
-                    borderWidth: '1px',
-                    color: 'green.subtle.fg',
-                    p: '3',
-                    textStyle: 'sm',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '2',
                   })}
                 >
-                  送信しました。レポートID: <strong>{reportId}</strong>
+                  <span className={labelClass} id={categoryLabelId}>
+                    問題の種類
+                  </span>
+                  <ToggleGroup
+                    aria-labelledby={categoryLabelId}
+                    className={css({ flexWrap: 'wrap', gap: '1.5' })}
+                    colorPalette="gray"
+                    value={[category]}
+                    onValueChange={(next) => {
+                      // 押し直しで選択が外れないように、空の選択は無視する
+                      const [picked] = next;
+                      if (picked !== undefined) setCategory(picked);
+                    }}
+                  >
+                    {categoryOptions.map((option) => (
+                      <Toggle
+                        key={option.value}
+                        pressedVariant="solid"
+                        size="xs"
+                        value={option.value}
+                        variant="outline"
+                      >
+                        {option.label}
+                      </Toggle>
+                    ))}
+                  </ToggleGroup>
                 </div>
-              ) : null}
-            </Dialog.Body>
-            <Dialog.Footer>
-              <Dialog.ActionTrigger asChild>
-                <Button disabled={busy} variant="outline">
-                  閉じる
+
+                <Field.Root
+                  className={css({ gap: '2' })}
+                  invalid={Boolean(error) && !description.trim()}
+                >
+                  <Field.Label className={labelClass}>発生した問題</Field.Label>
+                  <Field.Control
+                    render={
+                      <Textarea
+                        maxLength={descriptionMaxLength}
+                        placeholder="何をしていたときに、何が起きたかを入力してください"
+                        rows={4}
+                        size="sm"
+                      />
+                    }
+                    value={description}
+                    onValueChange={setDescription}
+                  />
+                  <div
+                    className={css({
+                      display: 'flex',
+                      gap: '3',
+                      justifyContent: 'space-between',
+                    })}
+                  >
+                    <Field.Description>
+                      個人情報やルームコードは入力しないでください
+                    </Field.Description>
+                    <span
+                      aria-hidden="true"
+                      className={css({
+                        color: 'fg.subtle',
+                        fontVariantNumeric: 'tabular-nums',
+                        textStyle: 'xs',
+                        whiteSpace: 'nowrap',
+                      })}
+                    >
+                      {description.length} / {descriptionMaxLength}
+                    </span>
+                  </div>
+                </Field.Root>
+
+                <div className={css({ borderBottomWidth: '1px' })}>
+                  {/* 行のどこを押しても切り替わるように、行全体を Switch.Label にする */}
+                  <Switch.Label
+                    className={css({
+                      alignItems: 'center',
+                      borderTopWidth: '1px',
+                      display: 'flex',
+                      gap: '4',
+                      justifyContent: 'space-between',
+                      minH: '14',
+                      py: '2',
+                    })}
+                  >
+                    <span
+                      className={css({
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.5',
+                      })}
+                    >
+                      <span className={labelClass} id={performanceLabelId}>
+                        パフォーマンスログを含める
+                      </span>
+                      <span
+                        className={css({ color: 'fg.muted', textStyle: 'xs' })}
+                        id={performanceDescriptionId}
+                      >
+                        フレーム時間、CPU時間、音声待ちなどを添付します
+                      </span>
+                    </span>
+                    <Switch.Root
+                      aria-describedby={performanceDescriptionId}
+                      aria-labelledby={performanceLabelId}
+                      checked={includePerformance}
+                      colorPalette="gray"
+                      onCheckedChange={(checked) =>
+                        setIncludePerformance(checked)
+                      }
+                    >
+                      <Switch.Thumb />
+                    </Switch.Root>
+                  </Switch.Label>
+                  <Collapsible.Root className={css({ borderTopWidth: '1px' })}>
+                    <Collapsible.Trigger
+                      className={css({
+                        color: 'fg.muted',
+                        fontWeight: 'normal',
+                        h: '10',
+                        py: '0',
+                      })}
+                    >
+                      添付される内容
+                      <span
+                        className={css({
+                          color: 'success.11',
+                          ml: 'auto',
+                          textStyle: 'xs',
+                        })}
+                      >
+                        プレイヤー名・IP・部屋コード・ファイルパスは送りません
+                      </span>
+                      <Collapsible.Indicator />
+                    </Collapsible.Trigger>
+                    <Collapsible.Panel>
+                      <p className={css({ textStyle: 'xs' })}>
+                        診断要約、端末環境、アプリのエラー、接続状態、各プロセス出力の末尾
+                        {includePerformance ? '、パフォーマンスログ' : ''}
+                      </p>
+                    </Collapsible.Panel>
+                  </Collapsible.Root>
+                </div>
+
+                {error ? (
+                  <p
+                    className={css({ color: 'danger.11', textStyle: 'sm' })}
+                    role="alert"
+                  >
+                    {error}
+                  </p>
+                ) : null}
+              </Dialog.Body>
+
+              <Dialog.Footer>
+                <Dialog.Close
+                  disabled={busy}
+                  render={
+                    <Button colorPalette="gray" variant="subtle">
+                      キャンセル
+                    </Button>
+                  }
+                />
+                <Button
+                  colorPalette="amber"
+                  loading={busy}
+                  onClick={() => void submit()}
+                >
+                  送信
                 </Button>
-              </Dialog.ActionTrigger>
-              <Button
-                disabled={busy || Boolean(reportId)}
-                loading={busy}
-                onClick={() => void submit()}
-              >
-                送信
-              </Button>
-            </Dialog.Footer>
-          </Dialog.Content>
-        </Dialog.Positioner>
-      </Portal>
+              </Dialog.Footer>
+            </>
+          )}
+        </Dialog.Popup>
+      </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+const labelClass = css({ fontWeight: 'semibold', textStyle: 'sm' });
+
+/** 送信のあと、入力欄の代わりに出す。レポート ID を控えられるようにする */
+function SentReport({ reportId }: { reportId: string }) {
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  // 送信ボタンが消えるので、見出しへ移って送信できたことを読み上げる
+  useEffect(() => {
+    titleRef.current?.focus();
+  }, []);
+
+  return (
+    <div
+      className={css({
+        alignItems: 'center',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '2.5',
+        pb: '1',
+        pt: '4',
+        textAlign: 'center',
+      })}
+    >
+      <span
+        className={css({
+          alignItems: 'center',
+          bg: 'success.a3',
+          borderRadius: 'full',
+          boxSize: '12',
+          color: 'success.11',
+          display: 'flex',
+          justifyContent: 'center',
+        })}
+      >
+        <Check size={22} weight="bold" />
+      </span>
+      <Dialog.Title
+        className={css({ mt: '1.5', outline: 'none' })}
+        ref={titleRef}
+        tabIndex={-1}
+      >
+        送信しました
+      </Dialog.Title>
+      <Dialog.Description>
+        ご協力ありがとうございます。下記がこの報告のレポートIDです。
+      </Dialog.Description>
+      <span
+        className={css({
+          alignItems: 'center',
+          bg: 'canvas',
+          borderRadius: 'l2',
+          borderWidth: '1px',
+          display: 'flex',
+          gap: '2',
+          mt: '1',
+          pl: '3',
+          pr: '1.5',
+          py: '1.5',
+        })}
+      >
+        <code
+          className={css({
+            fontFamily: 'mono',
+            fontWeight: 'semibold',
+            textStyle: 'sm',
+          })}
+        >
+          {reportId}
+        </code>
+        <Button
+          aria-label={copied ? 'コピーしました' : 'レポートIDをコピー'}
+          colorPalette="gray"
+          size="2xs"
+          square
+          variant="subtle"
+          onClick={() => {
+            void navigator.clipboard.writeText(reportId).then(() => {
+              setCopied(true);
+            });
+          }}
+        >
+          {copied ? <Check weight="bold" /> : <Copy />}
+        </Button>
+      </span>
+      <Dialog.Close
+        render={
+          <Button
+            className={css({ mt: '3.5' })}
+            colorPalette="gray"
+            variant="subtle"
+          >
+            閉じる
+          </Button>
+        }
+      />
+    </div>
   );
 }
