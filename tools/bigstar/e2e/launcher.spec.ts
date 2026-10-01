@@ -341,6 +341,120 @@ function lastCall(calls: { args: unknown[]; name: string }[], name: string) {
   return [...calls].reverse().find((call) => call.name === name);
 }
 
+test('設定済みの起動は初回設定や準備バナーを表示せず対戦できる', async ({
+  page,
+}) => {
+  await installRoomsApi(page);
+  await page.goto('/?preview=ready');
+  await expect(
+    page.getByRole('button', { name: '部屋を作る', exact: true }),
+  ).toBeEnabled();
+  await expect(
+    page.getByRole('heading', { name: '対戦の前に、3つだけ準備します' }),
+  ).toBeHidden();
+  await expect(
+    page.getByText('対戦データを準備しています', { exact: true }),
+  ).toBeHidden();
+});
+
+test('設定で同じROMを選び直しても対戦可能な状態へ戻る', async ({ page }) => {
+  await installRoomsApi(page);
+  await page.goto('/?preview=ready');
+  await expect(
+    page.getByRole('button', { name: '部屋を作る', exact: true }),
+  ).toBeEnabled();
+  await page.getByRole('tab', { name: '設定', exact: true }).click();
+  await page.getByRole('button', { name: '変更', exact: true }).click();
+  await page.getByRole('tab', { name: '対戦', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: '部屋を作る', exact: true }),
+  ).toBeEnabled();
+});
+
+test('ROM再生成中は通常画面にバナーを表示し対戦だけを止める', async ({
+  page,
+}) => {
+  await installRoomsApi(page);
+  await page.goto('/?preview=ready&previewRom=updating');
+  const banner = page
+    .getByRole('status')
+    .filter({ hasText: '対戦データを準備しています' });
+  await expect(banner).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: '対戦の前に、3つだけ準備します' }),
+  ).toBeHidden();
+  await expect(
+    page.getByRole('button', { name: '部屋を作る', exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Host Player の部屋に参加', exact: true }),
+  ).toBeDisabled();
+  await page.getByRole('tab', { name: '対戦履歴', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: '履歴', exact: true }),
+  ).toBeVisible();
+  await expect(banner).toBeVisible();
+  await page.getByRole('tab', { name: '設定', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: '設定', exact: true }),
+  ).toBeVisible();
+  await expect(banner).toBeVisible();
+  await page.getByRole('tab', { name: 'CPU対戦', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: '対戦を始める', exact: true }),
+  ).toBeDisabled();
+});
+
+test('準備失敗は画面に残り、再試行の成功後は操作せずロビーへ復帰する', async ({
+  page,
+}) => {
+  await installRoomsApi(page);
+  await page.goto('/?preview=ready&previewRom=error');
+  const errorBanner = page
+    .getByRole('alert')
+    .filter({ hasText: '対戦データを準備できませんでした' });
+  await expect(errorBanner).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: '部屋を作る', exact: true }),
+  ).toBeDisabled();
+  await page.getByRole('tab', { name: '設定', exact: true }).click();
+  await expect(errorBanner).toBeVisible();
+  await page.getByRole('tab', { name: '対戦', exact: true }).click();
+  await page.getByRole('button', { name: '再試行', exact: true }).click();
+  await expect(
+    page.getByText('対戦データを準備しています', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: '部屋を作る', exact: true }),
+  ).toBeEnabled();
+  await expect(errorBanner).toBeHidden();
+  await expect(
+    page.getByText('対戦データを準備しています', { exact: true }),
+  ).toBeHidden();
+  await expect(
+    page.getByRole('heading', { name: '対戦の前に、3つだけ準備します' }),
+  ).toBeHidden();
+});
+
+test('元ROMが見つからない場合は初回設定へ戻らず選び直せる', async ({
+  page,
+}) => {
+  await installRoomsApi(page);
+  await page.goto('/?preview=ready&previewRom=missing');
+  await expect(
+    page.getByRole('alert').filter({ hasText: '元のROMが見つかりません' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'ROMを選び直す', exact: true }),
+  ).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: '部屋を作る', exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole('heading', { name: '対戦の前に、3つだけ準備します' }),
+  ).toBeHidden();
+});
+
 test('初回セットアップでロム生成と入力設定を完了できる', async ({ page }) => {
   await installGuiDriver(page, {
     inputConfigOpened: false,

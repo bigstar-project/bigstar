@@ -38,7 +38,7 @@ use crate::processes::{
     remove_inherited_melonds_env_keys, session_status_inner, start_match_resolved,
     stop_existing_with_unresolved_report, LaunchPaths,
 };
-use crate::roms::{prepare_roms, prepared_roms_are_current};
+use crate::roms::prepare_roms;
 use crate::settings::validate_request;
 use crate::state::AppState;
 use crate::windowing::show_main_window;
@@ -88,7 +88,8 @@ pub(crate) fn get_defaults(app: AppHandle) -> Result<Defaults, String> {
         base_rom_path: saved.base_rom_path.trim().to_owned(),
         player_name: saved.player_name.trim().to_owned(),
         player_profile_id: saved.player_profile_id.trim().to_owned(),
-        roms_prepared_once: prepared_roms_are_current(&app, saved.base_rom_path.trim()),
+        // 初回設定の履歴。現在のROM/saveの検証はensure_romsと対戦直前のgateが担う。
+        roms_prepared_once: saved.roms_prepared_once,
         input_config_opened_once: saved.input_config_opened_once,
         port: DEFAULT_PORT,
         diagnostic_events_enabled: saved.diagnostic_events_enabled,
@@ -107,9 +108,6 @@ pub(crate) fn save_rom_paths(
     request: SaveRomPathsRequest,
 ) -> Result<(), String> {
     let mut settings = load_launcher_settings(&app)?;
-    if settings.base_rom_path.trim() != request.base_rom_path.trim() {
-        settings.roms_prepared_once = false;
-    }
     settings.base_rom_path = request.base_rom_path.trim().to_owned();
     save_launcher_settings(&app, &settings)?;
     if !settings.base_rom_path.is_empty() && !session_is_active(state.inner())? {

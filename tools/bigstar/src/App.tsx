@@ -12,6 +12,7 @@ import { CpuBattleView } from './launcher/CpuBattleView';
 import { HistoryView } from './launcher/HistoryView';
 import { LauncherShell } from './launcher/LauncherShell';
 import { OnboardingGate } from './launcher/OnboardingGate';
+import { RomPreparationBanner } from './launcher/RomPreparationBanner';
 import { SettingsView } from './launcher/SettingsView';
 import { SoloTestView } from './launcher/SoloTestView';
 import { sidebarSession } from './launcher/sidebarSession';
@@ -28,11 +29,7 @@ export function App() {
   useEffect(() => {
     if (launcher.activeView === 'ai') setAiViewerMounted(true);
   }, [launcher.activeView]);
-  const onboardingMissing =
-    launcher.onboarding.loaded &&
-    (!launcher.onboarding.romsPrepared ||
-      !launcher.onboarding.inputConfigOpened ||
-      !launcher.onboarding.playerNameConfigured);
+  const onboardingMissing = launcher.onboardingRequired;
   // そろっても「ロビーへ進む」を押すまでは、初回セットアップの画面を出し続ける
   const [onboardingPending, setOnboardingPending] = useState(false);
   if (onboardingMissing && !onboardingPending) setOnboardingPending(true);
@@ -96,7 +93,15 @@ export function App() {
           })}
           soloTestEnabled={currentRuntimeCapabilities().soloTest}
           aiDevToolsEnabled={aiDevToolsEnabled}
-          romStatus={launcher.romStatus}
+          romStatus={null}
+          preparationBanner={
+            <RomPreparationBanner
+              busy={launcher.romPreparation.busy}
+              error={launcher.romPreparation.error}
+              onRetry={launcher.romPreparation.retry}
+              onSelectRom={launcher.actions.selectBaseRomAndPrepare}
+            />
+          }
           updateBusy={launcher.updateBusy}
           updateStatus={launcher.updateStatus}
         >
@@ -138,7 +143,7 @@ export function App() {
           <SettingsView
             actions={launcher.actions}
             form={launcher.form}
-            romGenerationBusy={launcher.onboarding.romGenerationBusy}
+            romGenerationBusy={launcher.romPreparation.busy}
             startup={launcher.startup}
             updateField={launcher.updateField}
           />

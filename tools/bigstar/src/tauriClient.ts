@@ -374,15 +374,38 @@ export function generateRoms(request: GenerateRomRequest) {
 
 export function ensureRoms(request: GenerateRomRequest) {
   if (!isTauriRuntime()) {
-    const defaults = previewDefaultsForCurrentUrl();
-    return Promise.resolve<GenerateRomResponse>({
-      host_rom: defaults.host_rom_path,
-      client_rom: defaults.client_rom_path,
-      generated: false,
-      rom_identity: previewRomIdentity,
-    });
+    return previewEnsureRoms();
   }
   return unwrapCommand(commands.ensureRoms(request));
+}
+
+let previewRomAttempts = 0;
+
+/** ブラウザだけで更新中・失敗・復旧の実画面を確認するためのシナリオ。 */
+async function previewEnsureRoms(): Promise<GenerateRomResponse> {
+  const scenario = new URLSearchParams(window.location.search).get(
+    'previewRom',
+  );
+  if (scenario === 'updating') return new Promise(() => {});
+  if (scenario === 'missing') {
+    throw new Error(
+      '元のROMが見つかりません。保存場所を確認するか、ROMを選び直してください。',
+    );
+  }
+  if (scenario === 'error') {
+    if (previewRomAttempts++ === 0)
+      throw new Error(
+        '対戦データを保存できませんでした。空き容量と保存先へのアクセスを確認してください。',
+      );
+    await new Promise((resolve) => window.setTimeout(resolve, 1200));
+  }
+  const defaults = previewDefaultsForCurrentUrl();
+  return {
+    host_rom: defaults.host_rom_path,
+    client_rom: defaults.client_rom_path,
+    generated: scenario === 'error',
+    rom_identity: previewRomIdentity,
+  };
 }
 
 export function startMatch(request: LaunchRequest) {

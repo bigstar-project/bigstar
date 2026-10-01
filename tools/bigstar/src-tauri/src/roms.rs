@@ -4,16 +4,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use tauri::AppHandle;
 
-use crate::config::{app_version, REUSABLE_ROM_FORMAT, ROM_LOOP_ROLLBACK_CONTRACT};
+use crate::config::{REUSABLE_ROM_FORMAT, ROM_LOOP_ROLLBACK_CONTRACT};
 use crate::models::{GenerateRomRequest, GenerateRomResponse, RomIdentity};
 use crate::paths::{
     absolutize_existing, ensure_parent_dir, find_bridge_binary, find_symbols_file,
     fixed_generated_rom_paths,
 };
-use crate::save_bootstrap::{
-    canonical_save_path, ensure_canonical_save, read_and_validate_canonical, validate_save_bytes,
-    KNOWN_NSMB_US_ROM_SHA256,
-};
+use crate::save_bootstrap::{ensure_canonical_save, validate_save_bytes, KNOWN_NSMB_US_ROM_SHA256};
 use crate::settings::{course_mode_value, lives_value};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -23,8 +20,6 @@ const MANIFEST_VERSION: u8 = 4;
 const ROM_GENERATOR_SOURCES: &[&str] = &[
     include_str!("../../../bigstar-rom/src/lib.rs"),
     include_str!("../../../bigstar-rom/src/binary.rs"),
-    include_str!("config.rs"),
-    include_str!("settings.rs"),
 ];
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -172,56 +167,6 @@ fn rom_prepare_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
-pub(crate) fn prepared_roms_are_current(app: &AppHandle, source_rom: &str) -> bool {
-    let Ok(source_rom) = absolutize_existing(source_rom) else {
-        return false;
-    };
-    let Ok(source_rom_sha256) = sha256_file(&source_rom) else {
-        return false;
-    };
-    let Ok(canonical_path) = canonical_save_path(app, &source_rom_sha256) else {
-        return false;
-    };
-    let Ok(canonical) = read_and_validate_canonical(&canonical_path, &source_rom_sha256) else {
-        return false;
-    };
-    let Ok(symbols) = find_symbols_file(app) else {
-        return false;
-    };
-    let Ok(bridge) = find_bridge_binary(app) else {
-        return false;
-    };
-    let Ok((host_rom, client_rom)) = fixed_generated_rom_paths(app) else {
-        return false;
-    };
-    let inputs = RomManifestInputs {
-        manifest_version: MANIFEST_VERSION,
-        rom_format: REUSABLE_ROM_FORMAT.to_owned(),
-        generator_id: rom_generator_id(),
-        source_rom_sha256,
-        canonical_save_sha256: canonical.sha256.clone(),
-        symbols_sha256: match sha256_file(&symbols) {
-            Ok(hash) => hash,
-            Err(_) => return false,
-        },
-        options: canonical_rom_options(),
-    };
-    let bridge_sha256 = match sha256_file(&bridge) {
-        Ok(hash) => hash,
-        Err(_) => return false,
-    };
-    reusable_rom_identity(
-        &host_rom,
-        &client_rom,
-        &inputs,
-        &bridge_sha256,
-        &canonical.sha256,
-    )
-    .is_ok_and(|identity| identity.is_some())
-        && validate_rom_save(&host_rom).is_ok_and(|hash| hash == canonical.sha256)
-        && validate_rom_save(&client_rom).is_ok_and(|hash| hash == canonical.sha256)
-}
-
 fn reusable_rom_identity(
     host_rom: &Path,
     client_rom: &Path,
@@ -365,11 +310,9 @@ fn sha256_text(parts: &[&str]) -> String {
 }
 
 fn rom_generator_id() -> String {
-    let mut parts = vec![
-        app_version(),
-        REUSABLE_ROM_FORMAT,
-        ROM_LOOP_ROLLBACK_CONTRACT,
-    ];
+    // アプリのリリース番号やGUI設定の変更では無効化しない。
+    // 生成コード・ROM形式・実行契約を識別し、設定の実値とsymbolsはmanifestで照合する。
+    let mut parts = vec![REUSABLE_ROM_FORMAT, ROM_LOOP_ROLLBACK_CONTRACT];
     parts.extend_from_slice(ROM_GENERATOR_SOURCES);
     sha256_text(&parts)
 }
@@ -458,4 +401,45 @@ pub(crate) fn write_reusable_rom_marker(rom: &Path) -> Result<(), String> {
         },
     };
     write_reusable_rom_manifest(rom, &manifest)
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    #[test]
+    fn reuse_checks_generator_options_and_rom_bytes_independently_of_bridge() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = dir.path().join("host.nds");
+        let client = dir.path().join("client.nds");
+        fs::write(&host, b"host").unwrap();
+        fs::write(&client, b"client").unwrap();
+        write_reusable_rom_marker(&host).unwrap();
+        let mut manifest = read_reusable_rom_manifest(&host).unwrap();
+        manifest.identity = rom_identity(
+            &manifest.inputs.generator_id,
+            &sha256_file(&host).unwrap(),
+            &sha256_file(&client).unwrap(),
+            "old-bridge",
+            "save",
+        );
+        write_reusable_rom_manifest(&host, &manifest).unwrap();
+        write_reusable_rom_manifest(&client, &manifest).unwrap();
+
+        let reuse = |inputs: &RomManifestInputs| {
+            reusable_rom_identity(&host, &client, inputs, "new-bridge", "save").unwrap()
+        };
+        let identity = reuse(&manifest.inputs).unwrap();
+        assert_eq!(identity.bridge_sha256, "new-bridge");
+        assert_ne!(identity.rom_pair_id, manifest.identity.rom_pair_id);
+
+        let mut changed = manifest.inputs.clone();
+        changed.generator_id = sha256_text(&["changed generator source"]);
+        assert!(reuse(&changed).is_none());
+        changed = manifest.inputs.clone();
+        changed.options.game_tick_probe = !changed.options.game_tick_probe;
+        assert!(reuse(&changed).is_none());
+        fs::write(&host, b"corrupted").unwrap();
+        assert!(reuse(&manifest.inputs).is_none());
+    }
 }

@@ -366,6 +366,7 @@ export function useLauncherController() {
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [roomsError, setRoomsError] = useState<string | null>(null);
   const [onboardingRomsPrepared, setOnboardingRomsPrepared] = useState(false);
+  const [romSetupCompleted, setRomSetupCompleted] = useState(false);
   const [romEnsureBusy, setRomEnsureBusy] = useState(false);
   const [romGenerationBusy, setRomGenerationBusy] = useState(false);
   const [romGenerationError, setRomGenerationError] =
@@ -414,8 +415,14 @@ export function useLauncherController() {
 
   const connectionActive = connectionStatus.active || soloBusy;
   const updateRequired = isUpdateRequired(updateStatus);
+  const romPreparationBlocked =
+    !defaultsLoaded ||
+    !onboardingRomsPrepared ||
+    romEnsureBusy ||
+    romGenerationBusy;
   const summary: LauncherSummary = {
     connectionActive: connectionStatus.active,
+    romPreparationBlocked,
     updateRequired,
     updateVersion: updateStatus.version,
   };
@@ -652,6 +659,9 @@ export function useLauncherController() {
     }
     switch (key) {
       case 'baseRomPath':
+        startupRomPreparationKeyRef.current = null;
+        setOnboardingRomsPrepared(false);
+        preparedRomCacheRef.current = null;
         persistSettingMutation.mutate({
           kind: 'baseRomPath',
           value: String(value),
@@ -748,7 +758,7 @@ export function useLauncherController() {
     });
     setPlayerProfileId(defaults.player_profile_id);
     playerProfileIdRef.current = defaults.player_profile_id;
-    setOnboardingRomsPrepared(defaults.roms_prepared_once);
+    setRomSetupCompleted(defaults.roms_prepared_once);
     setOnboardingInputConfigOpened(defaults.input_config_opened_once);
     setOnboardingPlayerNameConfigured(defaults.player_name.trim().length > 0);
   }, [defaultsQuery.data]);
@@ -804,6 +814,8 @@ export function useLauncherController() {
   };
 
   const prepareRomsFor = async (sourceForm: FormState) => {
+    startupRomPreparationKeyRef.current = sourceForm.baseRomPath.trim();
+    preparedRomCacheRef.current = null;
     const request: GenerateRomRequest = {
       source_rom: sourceForm.baseRomPath,
     };
@@ -812,7 +824,6 @@ export function useLauncherController() {
       setRomGenerationBusy(true);
       setRomGenerationError(null);
       setOnboardingRomsPrepared(false);
-      setActivityStatus({ text: '基準セーブを初期化中', kind: 'idle' });
       const response = await generateRoms(request);
       preparedRomCacheRef.current = {
         sourceRom: sourceForm.baseRomPath,
@@ -827,17 +838,16 @@ export function useLauncherController() {
         clientRomPath: response.client_rom,
       }));
       setOnboardingRomsPrepared(true);
+      setRomSetupCompleted(true);
       void queryClient.invalidateQueries({
         queryKey: launcherQueryKeys.defaults,
       });
-      setActivityStatus({ text: '共通 ROM の準備が完了しました', kind: 'ok' });
     } catch (error) {
       setOnboardingRomsPrepared(false);
       setRomGenerationError({
-        message: String(error),
+        message: error instanceof Error ? error.message : String(error),
         sourceRom: sourceForm.baseRomPath,
       });
-      setActivityStatus({ text: String(error), kind: 'error' });
     } finally {
       setRomGenerationBusy(false);
     }
@@ -848,6 +858,7 @@ export function useLauncherController() {
   };
 
   const prepareBaseRom = async (selected: string) => {
+    startupRomPreparationKeyRef.current = selected.trim();
     const nextForm = { ...form, baseRomPath: selected };
     setForm(nextForm);
     setOnboardingRomsPrepared(false);
@@ -895,7 +906,19 @@ export function useLauncherController() {
       };
       const promise = (async () => {
         setRomEnsureBusy(true);
-        const response = await ensureRoms(request);
+        setRomGenerationError(null);
+        let response: GenerateRomResponse;
+        try {
+          response = await ensureRoms(request);
+        } catch (error) {
+          preparedRomCacheRef.current = null;
+          setOnboardingRomsPrepared(false);
+          setRomGenerationError({
+            message: error instanceof Error ? error.message : String(error),
+            sourceRom: nextForm.baseRomPath,
+          });
+          throw error;
+        }
         preparedRomCacheRef.current = {
           sourceRom: nextForm.baseRomPath,
           hostRom: response.host_rom,
@@ -908,6 +931,7 @@ export function useLauncherController() {
           clientRomPath: response.client_rom,
         }));
         setOnboardingRomsPrepared(true);
+        setRomSetupCompleted(true);
         void queryClient.invalidateQueries({
           queryKey: launcherQueryKeys.defaults,
         });
@@ -946,7 +970,7 @@ export function useLauncherController() {
   );
 
   useEffect(() => {
-    if (!defaultsLoaded || connectionActive || !form.baseRomPath.trim()) {
+    if (!defaultsLoaded || connectionActive) {
       return;
     }
     const key = form.baseRomPath.trim();
@@ -954,35 +978,29 @@ export function useLauncherController() {
       return;
     }
     startupRomPreparationKeyRef.current = key;
-    const initializingCanonicalSave = !onboardingRomsPrepared;
-    if (initializingCanonicalSave) {
-      setRomGenerationError(null);
-      setActivityStatus({ text: '基準セーブを初期化中', kind: 'idle' });
-    }
-    void ensurePreparedRoms(form)
-      .then(() => {
-        if (initializingCanonicalSave) {
-          setActivityStatus({ text: 'ROMの準備が完了しました', kind: 'ok' });
-        }
-      })
-      .catch((error) => {
-        startupRomPreparationKeyRef.current = null;
-        if (initializingCanonicalSave) {
-          // 初回セットアップの ROM の手順で、失敗した理由と選び直しを出す
-          setRomGenerationError({ message: String(error), sourceRom: key });
-        }
-        setActivityStatus({
-          text: `起動時のROM準備に失敗しました: ${String(error)}`,
-          kind: 'warn',
+    if (!key) {
+      if (romSetupCompleted) {
+        setRomGenerationError({
+          message: '元のROMが設定されていません。ROMを選び直してください。',
+          sourceRom: '',
         });
-      });
+      }
+      return;
+    }
+    // 失敗は画面に保持し、自動再試行ループにしない。
+    void ensurePreparedRoms(form).catch(() => {});
   }, [
     defaultsLoaded,
     form,
     connectionActive,
     ensurePreparedRoms,
-    onboardingRomsPrepared,
+    romSetupCompleted,
   ]);
+
+  const retryRomPreparation = async () => {
+    if (romEnsureBusy || romGenerationBusy || connectionActive) return;
+    await ensurePreparedRoms(form).catch(() => {});
+  };
 
   const startMatchFor = useCallback(
     async (
@@ -1678,6 +1696,7 @@ export function useLauncherController() {
       matchmakingActionBusy ||
       romEnsureBusy ||
       romGenerationBusy ||
+      !onboardingRomsPrepared ||
       !defaultsLoaded,
     changeView,
     connectionActive,
@@ -1720,10 +1739,16 @@ export function useLauncherController() {
       inputConfigOpened: onboardingInputConfigOpened,
       playerNameConfigured: onboardingPlayerNameConfigured,
     },
-    romStatus:
-      romEnsureBusy || romGenerationBusy
-        ? { text: 'ROM生成中', kind: 'idle' as StatusKind }
-        : null,
+    onboardingRequired:
+      defaultsLoaded &&
+      (!romSetupCompleted ||
+        !onboardingInputConfigOpened ||
+        !onboardingPlayerNameConfigured),
+    romPreparation: {
+      busy: romEnsureBusy || romGenerationBusy,
+      error: romGenerationError,
+      retry: retryRomPreparation,
+    },
     startup: {
       enabled: startupEnabled,
       loading: startupEnabledQuery.isPending || startupMutation.isPending,

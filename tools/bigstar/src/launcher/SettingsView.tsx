@@ -107,6 +107,7 @@ export function SettingsView({
             </div>
             <Button
               colorPalette="gray"
+              disabled={romGenerationBusy}
               size="sm"
               variant="subtle"
               onClick={() => void actions.selectRomPath('baseRomPath')}

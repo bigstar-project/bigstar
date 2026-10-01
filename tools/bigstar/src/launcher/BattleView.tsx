@@ -90,6 +90,7 @@ export function BattleView({
 
   const { hostedRoom } = matchmakingRooms;
   const matchmakingDisabled =
+    Boolean(summary.romPreparationBlocked) ||
     summary.connectionActive ||
     summary.updateRequired ||
     Boolean(matchmakingRooms.hostedRoomId);

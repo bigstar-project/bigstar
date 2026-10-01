@@ -53,6 +53,7 @@ export type ConnectionStatusState = {
 
 export type LauncherSummary = {
   connectionActive: boolean;
+  romPreparationBlocked?: boolean;
   updateRequired: boolean;
   updateVersion?: string;
 };

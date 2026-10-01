@@ -46,6 +46,7 @@ export function LauncherShell({
   onCheckForUpdate,
   onViewChange,
   playerName = '',
+  preparationBanner,
   roomCount = 0,
   romStatus,
   session = null,
@@ -64,6 +65,7 @@ export function LauncherShell({
   onCheckForUpdate: () => void;
   onViewChange: (view: View) => void;
   playerName?: string;
+  preparationBanner?: ReactNode;
   /** 募集中の部屋の数。0 なら対戦タブに数を出さない */
   roomCount?: number;
   romStatus: ActivityStatus | null;
@@ -232,6 +234,7 @@ export function LauncherShell({
                 px: { base: '6', lg: '12' },
               })}
             >
+              {preparationBanner}
               {/* 対戦画面は見出しの横に部屋を作るボタンを置くので、自分で見出しを出す */}
               {activeView === 'battle' ? null : (
                 <PageHeader title={viewTitle(activeView)} />
