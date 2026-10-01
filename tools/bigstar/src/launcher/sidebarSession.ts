@@ -21,7 +21,10 @@ export function sidebarSession({
   hostedRoom: MatchmakingRoomsState['hostedRoom'];
   soloStatus: SoloTestStatus;
 }): SidebarSession | null {
-  if (connectionStatus.active) {
+  // 中止の直後や勝敗が付いた後も melonDS が開いている間はセッションが続くが、
+  // 終わった対戦は接続中・再接続中として出さない
+  const matchEnded = currentMatch !== null && currentMatch.status !== 'running';
+  if (connectionStatus.active && !matchEnded) {
     if (connectionStatus.recoveryDeadlineMs !== undefined) {
       return {
         kind: 'reconnecting',
