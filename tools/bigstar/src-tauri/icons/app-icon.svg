@@ -1,0 +1,14 @@
+<!--
+  アプリのアイコンの元絵。画面左上のロゴ（src/launcher/PixelIcons.tsx の PixelStar）と同じ 9×8 ドットの星を、
+  サイドバーと同じ暗い色の角丸の板に載せる。
+  作り直すときは tauri icon でこの SVG から別のフォルダへ書き出し、icon.ico と icon.png だけをこのフォルダへコピーする。
+    corepack pnpm tauri icon src-tauri/icons/app-icon.svg -o <書き出し先>
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <rect width="256" height="256" rx="44" fill="#0A0C0F"/>
+  <!-- 1 ドットを 20px にして、板の左上から (38, 48) に置く -->
+  <g transform="translate(38 48) scale(20)">
+    <path fill="#FFC53D" d="M4 0h1v1H4zM3 1h3v1H3zM0 2h9v1H0zM1 3h7v1H1zM2 4h5v2H2zM1 6h3v1H1zM5 6h3v1H5zM1 7h2v1H1zM6 7h2v1H6z"/>
+    <path fill="#0A0C0F" d="M3 3h1v2H3zM5 3h1v2H5z"/>
+  </g>
+</svg>
