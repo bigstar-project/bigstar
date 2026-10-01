@@ -2,7 +2,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NuqsAdapter } from 'nuqs/adapters/react';
 import { type ReactNode, useState } from 'react';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import type { Locator } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 import * as Tabs from '@/components/ui/tabs';
 import { previewMatchHistory } from '../previewData';
@@ -33,12 +32,6 @@ const openRows = () =>
 const matchRows = () => document.querySelectorAll('[data-history-match]');
 const detailBodies = () =>
   document.querySelectorAll('[data-match-details-body]');
-
-// ブラウザテストでは CSS を読み込まないので、Base UI がダイアログの背後に敷く
-// 固定配置の要素が、配置されていないダイアログの上に重なる。ダイアログ内は DOM から直接押す
-function clickInDialog(locator: Locator) {
-  (locator.element() as HTMLElement).click();
-}
 
 describe('履歴ビュー', () => {
   test('URLからすべてのフィルターを復元する', async () => {
@@ -220,7 +213,7 @@ describe('履歴ビュー', () => {
     await screen.getByRole('button', { name: 'Rivalとの戦績を見る' }).click();
     await screen.getByText('3–1').click();
     await screen.getByRole('button', { name: '対戦履歴を削除' }).click();
-    clickInDialog(screen.getByRole('button', { name: '削除する' }));
+    await screen.getByRole('button', { name: '削除する' }).click();
 
     await expect
       .element(screen.getByRole('heading', { name: 'Rivalとの戦績' }))
@@ -312,8 +305,6 @@ describe('履歴ビュー', () => {
       '[data-history-load-more]',
     );
     expect(loadMoreTarget).not.toBeNull();
-    // CSS を読み込まないので高さが 0 になり、ページ末尾からわずかにはみ出して見えない。本番と同じ高さを与える
-    if (loadMoreTarget) loadMoreTarget.style.height = '2.5rem';
     loadMoreTarget?.scrollIntoView();
 
     await vi.waitFor(() => expect(matchRows()).toHaveLength(51));
@@ -344,7 +335,7 @@ describe('履歴ビュー', () => {
       .element(screen.getByText('対戦履歴を削除しますか？'))
       .toBeVisible();
 
-    clickInDialog(screen.getByRole('button', { name: '削除する' }));
+    await screen.getByRole('button', { name: '削除する' }).click();
 
     await vi.waitFor(() =>
       expect(onDeleteMatch).toHaveBeenCalledWith(playedMatch.id),
@@ -376,7 +367,7 @@ describe('履歴ビュー', () => {
     await screen
       .getByLabelText('発生した問題')
       .fill('接続中にタイムアウトしました');
-    clickInDialog(screen.getByRole('button', { name: '送信', exact: true }));
+    await screen.getByRole('button', { name: '送信', exact: true }).click();
 
     expect(onOpenLogDir).toHaveBeenCalledWith(playedMatch.logDir);
     expect(onUploadLogArchive).toHaveBeenCalledWith(playedMatch.logDir, {

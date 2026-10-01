@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { type Locator, userEvent } from 'vitest/browser';
+import { userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 import * as Tabs from '@/components/ui/tabs';
 import { initialForm } from '../form';
@@ -43,12 +43,6 @@ function SettingsHarness({
       />
     </Tabs.Root>
   );
-}
-
-// ブラウザテストでは CSS を読み込まないので、Base UI がダイアログの背後に敷く
-// 固定配置の要素が、配置されていないダイアログの上に重なる。ダイアログ内は DOM から直接押す
-function clickInDialog(locator: Locator) {
-  (locator.element() as HTMLElement).click();
 }
 
 async function renderSettingsView(
@@ -288,7 +282,7 @@ describe('設定ビュー', () => {
     await expect
       .element(screen.getByRole('alertdialog'))
       .toHaveTextContent('古い詳細ログを削除しますか？');
-    clickInDialog(screen.getByRole('button', { name: '削除する' }));
+    await screen.getByRole('button', { name: '削除する' }).click();
 
     await vi.waitFor(() =>
       expect(launcherActions.cleanupDetailedLogs).toHaveBeenCalledTimes(1),
@@ -303,7 +297,7 @@ describe('設定ビュー', () => {
 
     await screen.getByRole('button', { name: '削除…' }).click();
     await expect.element(screen.getByRole('alertdialog')).toBeVisible();
-    clickInDialog(screen.getByRole('button', { name: 'キャンセル' }));
+    await screen.getByRole('button', { name: 'キャンセル' }).click();
 
     expect(launcherActions.cleanupDetailedLogs).not.toHaveBeenCalled();
     await expect

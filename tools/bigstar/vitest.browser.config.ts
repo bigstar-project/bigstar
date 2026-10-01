@@ -33,6 +33,7 @@ export default defineConfig({
   ],
   test: {
     include: ['src/**/*.browser.test.{ts,tsx}'],
+    setupFiles: ['./src/browserTestSetup.ts'],
     browser: {
       api: {
         host: '127.0.0.1',

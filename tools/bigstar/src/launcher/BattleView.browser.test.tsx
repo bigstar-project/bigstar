@@ -1,5 +1,4 @@
 import { describe, expect, test, vi } from 'vitest';
-import type { Locator } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 import * as Tabs from '@/components/ui/tabs';
 import {
@@ -218,12 +217,6 @@ async function renderBattleView(
   };
 }
 
-// ブラウザテストでは CSS を読み込まないので、Base UI がダイアログの背後に敷く
-// 固定配置の要素が、配置されていないダイアログの上に重なる。ダイアログ内は DOM から直接押す
-function clickInDialog(locator: Locator) {
-  (locator.element() as HTMLElement).click();
-}
-
 /** 結果表の各行を、行見出しとセルの読み上げ名で返す */
 function gameRows() {
   return [...document.querySelectorAll('tbody tr')].map((row) =>
@@ -406,10 +399,11 @@ describe('対戦ビュー', () => {
       .element(screen.getByRole('alert'))
       .toHaveTextContent('相手との通信が途切れました');
     await expect.element(screen.getByText(/^0:4[12]$/)).toBeVisible();
-    // CSS を読み込まないテストではバーに大きさが無いので、値だけを確かめる
-    await expect
-      .element(screen.getByRole('progressbar', { name: '再接続の残り時間' }))
-      .toHaveAttribute('aria-valuemax', '60');
+    const recoveryBar = screen.getByRole('progressbar', {
+      name: '再接続の残り時間',
+    });
+    await expect.element(recoveryBar).toBeVisible();
+    await expect.element(recoveryBar).toHaveAttribute('aria-valuemax', '60');
     await expect
       .element(
         screen.getByRole('columnheader', { name: '第2ゲーム 土管 通信待ち' }),
@@ -530,20 +524,18 @@ describe('対戦ビュー', () => {
       )
       .toHaveAttribute('aria-pressed', 'true');
 
-    clickInDialog(
-      dialog
-        .getByRole('group', { name: 'コース' })
-        .getByRole('button', { name: '事前に選ぶ' }),
-    );
-    clickInDialog(
-      dialog
-        .getByRole('group', { name: '残機' })
-        .getByRole('button', { name: '無限' }),
-    );
+    await dialog
+      .getByRole('group', { name: 'コース' })
+      .getByRole('button', { name: '事前に選ぶ' })
+      .click();
+    await dialog
+      .getByRole('group', { name: '残機' })
+      .getByRole('button', { name: '無限' })
+      .click();
     expect(updateField).toHaveBeenCalledWith('courseMode', 'select');
     expect(updateField).toHaveBeenCalledWith('lives', 'endless');
 
-    clickInDialog(dialog.getByRole('button', { name: '作成して待機' }));
+    await dialog.getByRole('button', { name: '作成して待機' }).click();
 
     expect(launcherActions.createRoom).toHaveBeenCalledTimes(1);
     await expect.element(dialog).not.toBeInTheDocument();
@@ -555,9 +547,9 @@ describe('対戦ビュー', () => {
     });
 
     await screen.getByRole('button', { name: '部屋を作る' }).click();
-    clickInDialog(screen.getByRole('combobox', { name: 'ゲーム 2' }));
+    await screen.getByRole('combobox', { name: 'ゲーム 2' }).click();
     await expect.element(screen.getByRole('listbox')).toBeVisible();
-    clickInDialog(screen.getByRole('option', { name: '城' }));
+    await screen.getByRole('option', { name: '城' }).click();
 
     expect(updateField).toHaveBeenCalledWith('courseStages', [0, 4, 2, 3, 4]);
   });
@@ -576,7 +568,7 @@ describe('対戦ビュー', () => {
     await expect
       .element(details)
       .toHaveTextContent('遅延 2F · 予測 7F · RB 有効');
-    clickInDialog(details);
+    await details.click();
 
     await expect
       .element(screen.getByRole('textbox', { name: '入力遅延' }))
@@ -595,10 +587,10 @@ describe('対戦ビュー', () => {
     const { screen, updateField } = await renderBattleView();
 
     await screen.getByRole('button', { name: '部屋を作る' }).click();
-    clickInDialog(screen.getByRole('button', { name: /通信の詳細設定/ }));
+    await screen.getByRole('button', { name: /通信の詳細設定/ }).click();
     const rollback = screen.getByRole('switch', { name: 'ロールバック' });
     await expect.element(rollback).not.toBeChecked();
-    clickInDialog(rollback);
+    await rollback.click();
 
     expect(updateField).toHaveBeenCalledWith('rollbackEnabled', true);
     expect(updateField).toHaveBeenCalledWith(
