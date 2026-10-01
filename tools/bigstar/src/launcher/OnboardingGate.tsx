@@ -18,7 +18,6 @@ import { Button } from '@/components/ui/button';
 import * as Field from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
-import { AppTitlebar } from '../components/AppTitlebar';
 import type { FormState } from '../types';
 import type { ActivityStatus } from './ActivityToasts';
 import { Brand } from './Brand';
@@ -114,7 +113,6 @@ export function OnboardingGate({
         h: 'full',
       })}
     >
-      <AppTitlebar navigation={false} />
       <div
         className={css({
           display: 'flex',

@@ -6,7 +6,6 @@ import { Badge } from '@/components/ui/badge';
 import { Kbd } from '@/components/ui/kbd';
 import * as Tabs from '@/components/ui/tabs';
 import launcherBg from '../assets/launcher-bg.png';
-import { AppTitlebar } from '../components/AppTitlebar';
 import { type ActivityStatus, ActivityToasts } from './ActivityToasts';
 import { Brand } from './Brand';
 import { PageHeader } from './PageHeader';
@@ -234,7 +233,6 @@ export function LauncherShell({
                 }
           }
         >
-          <AppTitlebar />
           <div className={css({ flex: '1', minH: '0', overflowY: 'auto' })}>
             <div
               className={

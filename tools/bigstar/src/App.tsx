@@ -5,6 +5,7 @@ import {
   areAiDevToolsEnabled,
   currentRuntimeCapabilities,
 } from './buildProfile';
+import { AppTitlebar } from './components/AppTitlebar';
 import type { ActivityStatus } from './launcher/ActivityToasts';
 import { BattleView } from './launcher/BattleView';
 import { CpuBattleView } from './launcher/CpuBattleView';
@@ -71,87 +72,100 @@ export function App() {
   const { hostedRoomId, rooms } = launcher.matchmakingRooms;
 
   return (
-    <div className={css({ h: 'dvh', overflow: 'hidden' })}>
-      <LauncherShell
-        activeView={launcher.activeView}
-        activityStatus={toastStatus}
-        hidden={onboardingOpen}
-        layout={pageLayout ? 'page' : 'panel'}
-        onCheckForUpdate={() => void launcher.actions.checkForUpdate()}
-        onViewChange={launcher.changeView}
-        playerName={launcher.form.hostName.trim()}
-        roomCount={rooms.filter((room) => room.room_id !== hostedRoomId).length}
-        session={sidebarSession({
-          connectionStatus: launcher.connectionStatus,
-          currentMatch: launcher.currentMatch,
-          hostedRoom: launcher.matchmakingRooms.hostedRoom,
-          soloStatus: launcher.soloTest.status,
-        })}
-        soloTestEnabled={currentRuntimeCapabilities().soloTest}
-        aiDevToolsEnabled={aiDevToolsEnabled}
-        romStatus={launcher.romStatus}
-        updateBusy={launcher.updateBusy}
-        updateStatus={launcher.updateStatus}
-      >
-        <BattleView
-          actions={launcher.actions}
-          connectionStatus={launcher.connectionStatus}
-          form={launcher.form}
-          matchmakingRooms={launcher.matchmakingRooms}
-          currentMatch={launcher.currentMatch}
-          onOpenHistory={() => launcher.changeView('history')}
-          onReturnToLobby={() =>
-            setDismissedMatchId(launcher.currentMatch?.id ?? null)
+    <div
+      className={css({
+        display: 'flex',
+        flexDirection: 'column',
+        h: 'dvh',
+        overflow: 'hidden',
+      })}
+    >
+      {/* 初回セットアップには戻る先がないので、戻る・進むを出さない */}
+      <AppTitlebar navigation={!onboardingOpen} />
+      <div className={css({ flexGrow: '1', minH: '0' })}>
+        <LauncherShell
+          activeView={launcher.activeView}
+          activityStatus={toastStatus}
+          hidden={onboardingOpen}
+          layout={pageLayout ? 'page' : 'panel'}
+          onCheckForUpdate={() => void launcher.actions.checkForUpdate()}
+          onViewChange={launcher.changeView}
+          playerName={launcher.form.hostName.trim()}
+          roomCount={
+            rooms.filter((room) => room.room_id !== hostedRoomId).length
           }
-          showMatch={showMatch}
-          summary={launcher.summary}
+          session={sidebarSession({
+            connectionStatus: launcher.connectionStatus,
+            currentMatch: launcher.currentMatch,
+            hostedRoom: launcher.matchmakingRooms.hostedRoom,
+            soloStatus: launcher.soloTest.status,
+          })}
+          soloTestEnabled={currentRuntimeCapabilities().soloTest}
+          aiDevToolsEnabled={aiDevToolsEnabled}
+          romStatus={launcher.romStatus}
           updateBusy={launcher.updateBusy}
-          updateField={launcher.updateField}
-        />
-        {aiDevToolsEnabled && aiViewerMounted ? <AIReplayViewer /> : null}
-        <CpuBattleView
-          blocked={launcher.soloTestBlocked}
-          blockedAction={cpuBlockedAction}
-          controller={launcher.soloTest}
-        />
-        {currentRuntimeCapabilities().soloTest ? (
-          <SoloTestView
-            controller={launcher.soloTest}
+          updateStatus={launcher.updateStatus}
+        >
+          <BattleView
+            actions={launcher.actions}
+            connectionStatus={launcher.connectionStatus}
+            form={launcher.form}
+            matchmakingRooms={launcher.matchmakingRooms}
+            currentMatch={launcher.currentMatch}
+            onOpenHistory={() => launcher.changeView('history')}
+            onReturnToLobby={() =>
+              setDismissedMatchId(launcher.currentMatch?.id ?? null)
+            }
+            showMatch={showMatch}
+            summary={launcher.summary}
+            updateBusy={launcher.updateBusy}
+            updateField={launcher.updateField}
+          />
+          {aiDevToolsEnabled && aiViewerMounted ? <AIReplayViewer /> : null}
+          <CpuBattleView
             blocked={launcher.soloTestBlocked}
+            blockedAction={cpuBlockedAction}
+            controller={launcher.soloTest}
+          />
+          {currentRuntimeCapabilities().soloTest ? (
+            <SoloTestView
+              controller={launcher.soloTest}
+              blocked={launcher.soloTestBlocked}
+            />
+          ) : null}
+          <HistoryView
+            onOpenLogDir={launcher.actions.openLogDir}
+            onUploadLogArchive={
+              feedbackSubmissionEnabled
+                ? launcher.actions.uploadLogArchive
+                : undefined
+            }
+          />
+          <SettingsView
+            actions={launcher.actions}
+            form={launcher.form}
+            romGenerationBusy={launcher.onboarding.romGenerationBusy}
+            startup={launcher.startup}
+            updateField={launcher.updateField}
+          />
+        </LauncherShell>
+        {onboardingOpen ? (
+          <OnboardingGate
+            actions={launcher.actions}
+            activityStatus={launcher.activityStatus}
+            aiDevToolsEnabled={aiDevToolsEnabled}
+            form={launcher.form}
+            onboarding={launcher.onboarding}
+            onFinish={() => {
+              setOnboardingPending(false);
+              setStatusAtOnboardingEnd(launcher.activityStatus);
+              launcher.changeView('battle');
+            }}
+            onOpenAi={() => launcher.changeView('ai')}
+            updateField={launcher.updateField}
           />
         ) : null}
-        <HistoryView
-          onOpenLogDir={launcher.actions.openLogDir}
-          onUploadLogArchive={
-            feedbackSubmissionEnabled
-              ? launcher.actions.uploadLogArchive
-              : undefined
-          }
-        />
-        <SettingsView
-          actions={launcher.actions}
-          form={launcher.form}
-          romGenerationBusy={launcher.onboarding.romGenerationBusy}
-          startup={launcher.startup}
-          updateField={launcher.updateField}
-        />
-      </LauncherShell>
-      {onboardingOpen ? (
-        <OnboardingGate
-          actions={launcher.actions}
-          activityStatus={launcher.activityStatus}
-          aiDevToolsEnabled={aiDevToolsEnabled}
-          form={launcher.form}
-          onboarding={launcher.onboarding}
-          onFinish={() => {
-            setOnboardingPending(false);
-            setStatusAtOnboardingEnd(launcher.activityStatus);
-            launcher.changeView('battle');
-          }}
-          onOpenAi={() => launcher.changeView('ai')}
-          updateField={launcher.updateField}
-        />
-      ) : null}
+      </div>
     </div>
   );
 }

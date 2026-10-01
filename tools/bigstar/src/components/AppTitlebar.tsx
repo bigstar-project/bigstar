@@ -203,9 +203,12 @@ function WindowButton({
   );
 }
 
-// 本文の列の上端に置く。背景は本文と同じにして、サイドバーを上端まで伸ばす
+// ウィンドウの上端に全幅で置く。サイドバーと同じ背景にし、境目の線もサイドバーの右端に合わせる
 const titlebarClassName = css({
   alignItems: 'center',
+  bg: 'app.sidebar',
+  borderBottomColor: 'gray.3',
+  borderBottomWidth: '1px',
   display: 'grid',
   flexShrink: '0',
   gridTemplateColumns: 'auto minmax(0, 1fr) auto',
