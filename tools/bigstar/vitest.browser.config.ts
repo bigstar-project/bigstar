@@ -9,7 +9,6 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: [
-      '@ark-ui/react/collapsible',
       '@base-ui/react/alert-dialog',
       '@base-ui/react/collapsible',
       '@base-ui/react/dialog',

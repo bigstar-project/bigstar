@@ -1,7 +1,18 @@
 import type { ReactNode } from 'react';
 import { css } from 'styled-system/css';
-import { Badge, Card } from '../components/park-ui';
+import { Badge } from '@/components/ui/badge';
+import * as Card from '@/components/ui/card';
 
+type BadgeTone = 'green' | 'red' | 'slate' | 'yellow';
+
+const badgePalette = {
+  green: 'success',
+  red: 'danger',
+  slate: 'gray',
+  yellow: 'warning',
+} as const satisfies Record<BadgeTone, string>;
+
+/** AI とひとり検証で使う、見出し付きの枠 */
 export function LauncherCard({
   badge,
   badgeTone = 'slate',
@@ -10,110 +21,51 @@ export function LauncherCard({
   title,
 }: {
   badge?: string;
-  badgeTone?: 'green' | 'red' | 'slate' | 'yellow';
+  badgeTone?: BadgeTone;
   children: ReactNode;
   icon?: ReactNode;
   title?: string;
 }) {
   return (
-    <Card.Root variant="glass">
+    <Card.Root size="sm" variant="raised">
       {title ? (
         <Card.Header
-          css={{
+          className={css({
             alignItems: 'center',
             flexDirection: 'row',
             gap: '2',
             justifyContent: 'space-between',
-            p: '3.5',
-            pb: '0',
-          }}
+            pb: '3',
+          })}
         >
-          <Card.Title
-            asChild
-            css={{
+          <h2
+            className={css({
               alignItems: 'center',
               display: 'flex',
-              fontWeight: 'semibold',
+              fontWeight: 'bold',
               gap: '2',
               textStyle: 'md',
-            }}
+            })}
           >
-            <h2>
-              {icon ? (
-                <span className={css({ color: 'blue.plain.fg' })}>{icon}</span>
-              ) : null}
-              {title}
-            </h2>
-          </Card.Title>
+            {icon ? (
+              <span className={css({ color: 'fg.subtle', display: 'flex' })}>
+                {icon}
+              </span>
+            ) : null}
+            {title}
+          </h2>
           {badge ? (
-            <Badge colorPalette={badgeColorPalette(badgeTone)} variant="subtle">
-              {badge}
-            </Badge>
+            <Badge colorPalette={badgePalette[badgeTone]}>{badge}</Badge>
           ) : null}
         </Card.Header>
       ) : null}
+      {/* 隣のカードに高さをそろえられても、中身は上に詰める */}
       <Card.Body
-        css={{
-          display: 'grid',
-          gap: '2.5',
-          p: '3.5',
-          pt: title ? '3' : '3.5',
-        }}
+        className={css({ alignContent: 'start', display: 'grid', gap: '2.5' })}
       >
         {children}
       </Card.Body>
     </Card.Root>
-  );
-}
-
-function badgeColorPalette(
-  tone: 'green' | 'red' | 'slate' | 'yellow',
-): 'gray' | 'green' | 'red' | 'yellow' {
-  switch (tone) {
-    case 'green':
-      return 'green';
-    case 'red':
-      return 'red';
-    case 'yellow':
-      return 'yellow';
-    default:
-      return 'gray';
-  }
-}
-
-export function InfoPanel({
-  badge,
-  badgeTone,
-  children,
-  icon,
-  title,
-}: {
-  badge?: string;
-  badgeTone?: 'green' | 'red' | 'slate' | 'yellow';
-  children: ReactNode;
-  icon: ReactNode;
-  title: string;
-}) {
-  return (
-    <LauncherCard badge={badge} badgeTone={badgeTone} icon={icon} title={title}>
-      {children}
-    </LauncherCard>
-  );
-}
-
-export function SettingsPanel({
-  children,
-  icon,
-  title,
-}: {
-  children: ReactNode;
-  icon: ReactNode;
-  title: string;
-}) {
-  return (
-    <LauncherCard icon={icon} title={title}>
-      {children}
-    </LauncherCard>
   );
 }
 
@@ -132,29 +84,16 @@ export function SmallInfoCard({
 }) {
   return (
     <Card.Root
-      variant="glass"
-      css={{
-        display: 'grid',
-        gap: '1.5',
-        minH: '20',
-        p: '3',
-      }}
+      className={css({ display: 'grid', gap: '1.5', minH: '20', p: '3' })}
+      variant="raised"
     >
-      <div
-        className={css({
-          color: 'fg.muted',
-          fontWeight: 'black',
-          textStyle: 'sm',
-        })}
-      >
-        {label}
-      </div>
+      <div className={css({ color: 'fg.muted', textStyle: 'xs' })}>{label}</div>
       <div
         className={css({
           alignItems: 'center',
           color: 'fg.default',
           display: 'flex',
-          fontWeight: 'black',
+          fontWeight: 'bold',
           gap: '2',
           textStyle: 'lg',
         })}
@@ -163,25 +102,17 @@ export function SmallInfoCard({
           <img
             src={imageSrc}
             alt=""
-            className={css({
-              h: '9',
-              objectFit: 'contain',
-              w: '9',
-            })}
+            className={css({ h: '9', objectFit: 'contain', w: '9' })}
           />
         ) : (
-          <span className={css({ color: 'red.plain.fg' })}>{icon}</span>
+          <span className={css({ color: 'fg.subtle', display: 'flex' })}>
+            {icon}
+          </span>
         )}
         {value}
       </div>
       {caption ? (
-        <div
-          className={css({
-            color: 'fg.subtle',
-            fontWeight: 'semibold',
-            textStyle: 'sm',
-          })}
-        >
+        <div className={css({ color: 'fg.subtle', textStyle: 'xs' })}>
           {caption}
         </div>
       ) : null}

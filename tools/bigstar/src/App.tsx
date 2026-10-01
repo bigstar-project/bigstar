@@ -50,12 +50,6 @@ export function App() {
   const showMatch =
     launcher.currentMatch !== null &&
     launcher.currentMatch.id !== dismissedMatchId;
-  // Kiso で組み直した画面だけ、無地の背景と 808px の列で表示する
-  const pageLayout =
-    launcher.activeView === 'settings' ||
-    launcher.activeView === 'battle' ||
-    launcher.activeView === 'cpu' ||
-    launcher.activeView === 'history';
   // CPU 対戦を始められない原因が対戦画面にあるときは、そこへ移るボタンを出す
   const cpuBlockedAction = launcher.matchmakingRooms.hostedRoom
     ? {
@@ -87,7 +81,7 @@ export function App() {
           activeView={launcher.activeView}
           activityStatus={toastStatus}
           hidden={onboardingOpen}
-          layout={pageLayout ? 'page' : 'panel'}
+          layout={launcher.activeView === 'ai' ? 'wide' : 'page'}
           onCheckForUpdate={() => void launcher.actions.checkForUpdate()}
           onViewChange={launcher.changeView}
           playerName={launcher.form.hostName.trim()}

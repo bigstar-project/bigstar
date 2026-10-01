@@ -1,7 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { css } from 'styled-system/css';
 import { recordAppError } from '../appDiagnostics';
-import { Button } from './park-ui';
+import { Button } from './ui/button';
 
 export class AppErrorBoundary extends Component<
   { children: ReactNode },
@@ -46,7 +46,9 @@ export class AppErrorBoundary extends Component<
             エラー情報は端末内の診断ログへ保存されました。
           </p>
         </div>
-        <Button onClick={() => window.location.reload()}>再読み込み</Button>
+        <Button colorPalette="amber" onClick={() => window.location.reload()}>
+          再読み込み
+        </Button>
       </main>
     );
   }

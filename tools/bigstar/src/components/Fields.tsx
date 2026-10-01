@@ -1,228 +1,48 @@
-import { Portal } from '@ark-ui/react';
-import type { ReactNode } from 'react';
-import { css, cx } from 'styled-system/css';
-import { Button, Field, Input, Select } from './park-ui';
+import { css } from 'styled-system/css';
+import * as Field from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import * as NumberFieldParts from '@/components/ui/number-field';
+import * as Select from '@/components/ui/select';
 
-export function RoleButton({
-  active,
-  icon,
-  onClick,
-  subtitle,
-  title,
-  tone,
-}: {
-  active: boolean;
-  icon: ReactNode;
-  onClick: () => void;
-  subtitle: string;
-  title: string;
-  tone: 'green' | 'red';
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      className={cx(
-        css({
-          alignItems: 'center',
-          borderRadius: 'l2',
-          borderWidth: '1px',
-          display: 'flex',
-          focusVisibleRing: 'outside',
-          gap: '2.5',
-          minH: '14',
-          p: '3',
-          textAlign: 'left',
-          transition: 'common',
-          cursor: 'pointer',
-        }),
-        css(
-          tone === 'red'
-            ? active
-              ? {
-                  bg: 'red.subtle.bg',
-                  borderColor: 'red.outline.border',
-                  color: 'fg.default',
-                }
-              : {
-                  bg: 'gray.surface.bg',
-                  borderColor: 'gray.surface.border',
-                  color: 'fg.muted',
-                  _hover: {
-                    bg: 'red.subtle.bg',
-                    borderColor: 'red.outline.border',
-                    color: 'fg.default',
-                  },
-                }
-            : active
-              ? {
-                  bg: 'green.subtle.bg',
-                  borderColor: 'green.outline.border',
-                  color: 'fg.default',
-                }
-              : {
-                  bg: 'gray.surface.bg',
-                  borderColor: 'gray.surface.border',
-                  color: 'fg.muted',
-                  _hover: {
-                    bg: 'green.subtle.bg',
-                    borderColor: 'green.outline.border',
-                    color: 'fg.default',
-                  },
-                },
-        ),
-      )}
-      onClick={onClick}
-    >
-      <span
-        className={css({
-          color: active
-            ? tone === 'red'
-              ? 'red.plain.fg'
-              : 'green.plain.fg'
-            : 'fg.muted',
-        })}
-      >
-        {icon}
-      </span>
-      <span
-        className={css({
-          display: 'grid',
-          gap: '1',
-          minW: '0',
-        })}
-      >
-        <span
-          className={css({
-            fontWeight: 'black',
-            lineHeight: 'tight',
-            textStyle: 'md',
-          })}
-        >
-          {title}
-        </span>
-        <span
-          className={css({
-            color: 'fg.muted',
-            fontWeight: 'semibold',
-            lineHeight: 'tight',
-            textStyle: 'xs',
-          })}
-        >
-          {subtitle}
-        </span>
-      </span>
-    </button>
-  );
-}
+// ラベルを上、入力欄を下に置く。ひとり検証の設定欄で使う
+const fieldClass = css({
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '1.5',
+  minW: '0',
+});
+
+const labelClass = css({ color: 'fg.muted', textStyle: 'xs' });
 
 export function TextField({
   label,
-  maxLength,
   onChange,
-  placeholder,
   value,
 }: {
   label: string;
   value: string;
-  maxLength?: number;
-  placeholder?: string;
   onChange: (value: string) => void;
 }) {
   return (
-    <Field.Root
-      className={css({
-        display: 'grid',
-        gap: '1',
-        minW: '0',
-      })}
-    >
-      <Field.Label
-        className={css({
-          color: 'fg.muted',
-          fontWeight: 'black',
-          textStyle: 'xs',
-        })}
-      >
-        {label}
-      </Field.Label>
+    <Field.Root className={fieldClass}>
+      <Field.Label className={labelClass}>{label}</Field.Label>
       <Input
-        variant="outline"
-        className={css({
-          color: 'fg.default',
-          fontWeight: 'semibold',
-        })}
-        value={value}
-        maxLength={maxLength}
-        placeholder={placeholder}
         autoComplete="off"
+        size="sm"
+        value={value}
         onChange={(event) => onChange(event.target.value)}
       />
     </Field.Root>
   );
 }
 
-export function FilePathField({
-  label,
-  onBrowse,
-  value,
-}: {
-  label: string;
-  value: string;
-  onBrowse: () => void;
-}) {
-  return (
-    <Field.Root
-      className={css({
-        display: 'grid',
-        gap: '1',
-        minW: '0',
-      })}
-    >
-      <Field.Label
-        className={css({
-          color: 'fg.muted',
-          fontWeight: 'black',
-          textStyle: 'xs',
-        })}
-      >
-        {label}
-      </Field.Label>
-      <div
-        className={css({
-          display: 'grid',
-          gap: '1.5',
-          gridTemplateColumns: 'minmax(0, 1fr) auto',
-        })}
-      >
-        <Input
-          variant="outline"
-          className={css({
-            color: 'fg.default',
-            fontWeight: 'semibold',
-          })}
-          value={value}
-          placeholder="未選択"
-          readOnly
-          title={value}
-        />
-        <Button variant="outline" onClick={onBrowse}>
-          参照
-        </Button>
-      </div>
-    </Field.Root>
-  );
-}
-
 export function NumberField({
-  disabled = false,
   label,
   max,
   min,
   onChange,
   value,
 }: {
-  disabled?: boolean;
   label: string;
   value: number;
   min: number;
@@ -230,127 +50,72 @@ export function NumberField({
   onChange: (value: number) => void;
 }) {
   return (
-    <Field.Root
-      className={css({
-        display: 'grid',
-        gap: '1',
-        minW: '0',
-      })}
-    >
-      <Field.Label
-        className={css({
-          color: 'fg.muted',
-          fontWeight: 'black',
-          textStyle: 'xs',
-        })}
-      >
-        {label}
-      </Field.Label>
-      <Input
-        variant="outline"
-        className={css({
-          color: 'fg.default',
-          fontWeight: 'semibold',
-        })}
-        type="number"
-        disabled={disabled}
-        min={min}
+    <Field.Root className={fieldClass}>
+      <Field.Label className={labelClass}>{label}</Field.Label>
+      <NumberFieldParts.Root
+        format={{ useGrouping: false }}
         max={max}
+        min={min}
+        size="sm"
         value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
+        onValueChange={(next) => {
+          if (next !== null) onChange(next);
+        }}
+      >
+        <NumberFieldParts.Group>
+          <NumberFieldParts.Input
+            className={css({ px: '3', textAlign: 'start' })}
+          />
+        </NumberFieldParts.Group>
+      </NumberFieldParts.Root>
     </Field.Root>
   );
 }
 
 export function SelectField({
   disabled,
-  icon,
   label,
   onChange,
   options,
   value,
 }: {
   disabled?: boolean;
-  icon?: ReactNode;
   label: string;
   value: string;
   options: Array<{ value: string; label: string }>;
   onChange: (value: string) => void;
 }) {
-  const collection = Select.createListCollection({ items: options });
-  const menu = (
-    <Select.Positioner>
-      <Select.Content>
-        {options.map((option) => (
-          <Select.Item key={option.value} item={option}>
-            <Select.ItemText>{option.label}</Select.ItemText>
-            <Select.ItemIndicator />
-          </Select.Item>
-        ))}
-      </Select.Content>
-    </Select.Positioner>
-  );
-
   return (
-    <div
-      className={css({
-        display: 'grid',
-        gap: '1',
-        minW: '0',
-      })}
-    >
+    // Select.Root は要素を出さないので、ラベルと選択欄を縦に並べる箱を置く
+    <div className={fieldClass}>
       <Select.Root
         disabled={disabled}
-        collection={collection}
-        // size="lg"
-        value={[value]}
-        variant="outline"
-        onValueChange={(details) => {
-          const nextValue = details.value[0];
-          if (nextValue) {
-            onChange(nextValue);
-          }
+        items={options}
+        size="sm"
+        value={value}
+        onValueChange={(next) => {
+          if (next !== null) onChange(next);
         }}
       >
-        <Select.Label
-          className={css({
-            color: 'fg.muted',
-            fontWeight: 'black',
-            textStyle: 'xs',
-          })}
-        >
-          {label}
-        </Select.Label>
-        <Select.Control>
-          <Select.Trigger>
-            <span
-              className={css({
-                alignItems: 'center',
-                display: 'flex',
-                gap: '2',
-                minW: '0',
-              })}
-            >
-              {icon ? (
-                <span
-                  className={css({
-                    color: 'blue.plain.fg',
-                    flexShrink: '0',
-                  })}
-                >
-                  {icon}
-                </span>
-              ) : null}
-              <Select.ValueText />
-            </span>
-            <Select.IndicatorGroup>
-              <Select.Indicator />
-            </Select.IndicatorGroup>
-          </Select.Trigger>
-        </Select.Control>
-        <Portal>{menu}</Portal>
-        <Select.HiddenSelect />
+        <Select.Label className={labelClass}>{label}</Select.Label>
+        <Select.Trigger className={css({ minW: '0', w: 'full' })}>
+          <Select.Value />
+          <Select.Icon />
+        </Select.Trigger>
+        <Select.Portal>
+          <Select.Positioner alignItemWithTrigger={false} sideOffset={4}>
+            <Select.Popup>
+              <Select.List>
+                {options.map((option) => (
+                  <Select.Item key={option.value} value={option.value}>
+                    <Select.ItemText>{option.label}</Select.ItemText>
+                    <Select.ItemIndicator />
+                  </Select.Item>
+                ))}
+              </Select.List>
+            </Select.Popup>
+          </Select.Positioner>
+        </Select.Portal>
       </Select.Root>
     </div>
   );

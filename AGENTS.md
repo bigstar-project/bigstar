@@ -46,16 +46,20 @@ Before the final response of any turn that requires a Markdown update under the 
 
 ## Tauri GUI UI Components
 
-When adding UI to the Tauri GUI in `tools/bigstar`, reuse the existing Park UI setup before creating a new local component from scratch.
+When adding UI to the Tauri GUI in `tools/bigstar`, reuse the existing Kiso UI setup (components in `src/components/ui`, recipes in `src/theme/recipes`) before creating a new local component from scratch. The installed components are listed in `tools/bigstar/.kiso/installed.json`.
 
-If a new UI component is needed, first check whether Park UI has the desired component in its docs/components list. If Park UI provides it, add it with the Park UI CLI from the GUI package directory:
+If a new UI component is needed, first check whether Kiso UI (https://github.com/uniunitaro/kiso-ui) provides it. Kiso has no published package; run its CLI from a local checkout of the Kiso repository and point `--target` at the GUI package:
 
 ```powershell
-cd tools/bigstar
-corepack pnpm dlx @park-ui/cli@latest add <component-name>
+cd <kiso-ui checkout>
+corepack pnpm ui list
+corepack pnpm ui add <component-name> --target <path to tools/bigstar> --dry-run
+corepack pnpm ui add <component-name> --target <path to tools/bigstar>
 ```
 
-Use the canonical Park UI component name from the docs, for example `dialog`, `tabs`, `select`, `tooltip`, `collapsible`, or `menu`. After adding components, review generated files under `src/components/ui` and `src/theme/recipes`, then adapt them to the app's existing design conventions as needed.
+Use the component name shown by `ui list`, for example `dialog`, `tabs`, `select`, `toast`, or `collapsible`. The CLI does not install dependencies, so add any package the new component imports to `tools/bigstar` with `corepack pnpm add`. After adding components, review the generated files under `src/components/ui` and `src/theme/recipes`, and keep `panda.config.ts` with the default `--panda-config=keep`.
+
+Do not change the Kiso repository for app-specific needs. Put app-specific variants or styles in the app's copies under `src/theme/recipes` or in the screen code; `ui diff` shows how the app's copies differ from Kiso, and `ui update` keeps files the app has changed.
 
 ## Code Quality Checks
 

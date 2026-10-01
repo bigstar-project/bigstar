@@ -192,8 +192,8 @@ function WindowButton({
         transition: 'common',
         w: '[46px]',
         _hover: close
-          ? { bg: 'red.solid.bg', color: 'white' }
-          : { bg: 'white.a2', color: 'fg.default' },
+          ? { bg: 'danger.solid.bg', color: 'danger.solid.fg' }
+          : { bg: 'gray.a3', color: 'fg.default' },
       })}
       onClick={onClick}
       type="button"
@@ -227,6 +227,6 @@ const navigationButtonClassName = css({
   justifyContent: 'center',
   transition: 'common',
   w: '7',
-  _hover: { bg: 'white.a2', color: 'fg.default' },
+  _hover: { bg: 'gray.a3', color: 'fg.default' },
   _disabled: { color: 'fg.subtle', cursor: 'default', opacity: '0.38' },
 });

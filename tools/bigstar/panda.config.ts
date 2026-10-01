@@ -6,15 +6,9 @@ import { green } from '@/theme/colors/green';
 import { orange } from '@/theme/colors/orange';
 import { red } from '@/theme/colors/red';
 import { slate } from '@/theme/colors/slate';
-import { yellow } from '@/theme/colors/yellow';
 import { conditions } from '@/theme/conditions';
 import { keyframes } from '@/theme/keyframes';
 import { layerStyles } from '@/theme/layer-styles';
-import { animationStyles as parkUiAnimationStyles } from '@/theme/park-ui/animation-styles';
-import { parkUiConditions } from '@/theme/park-ui/conditions';
-import { durations as parkUiDurations } from '@/theme/park-ui/durations';
-import { keyframes as parkUiKeyframes } from '@/theme/park-ui/keyframes';
-import { recipes as parkUiRecipes } from '@/theme/park-ui/recipes';
 import { recipes, slotRecipes } from '@/theme/recipes';
 import { shadows } from '@/theme/shadows';
 import { textStyles } from '@/theme/text-styles';
@@ -37,23 +31,20 @@ export default defineConfig({
   // Files to exclude
   exclude: [],
 
-  // 旧 Park UI の部品が残っている間は、Ark UI の data-state にも一致させる
-  conditions: { extend: { ...conditions, ...parkUiConditions } },
+  conditions: { extend: conditions },
   globalCss: { extend: globalCss },
 
   // Useful for theme customization
   theme: {
     extend: {
-      animationStyles: parkUiAnimationStyles,
-      recipes: { ...parkUiRecipes, ...recipes },
+      recipes,
       slotRecipes,
-      keyframes: { ...parkUiKeyframes, ...keyframes, ...appKeyframes },
+      keyframes: { ...keyframes, ...appKeyframes },
       layerStyles,
       textStyles,
 
       tokens: {
         ...tokens,
-        durations: parkUiDurations,
         fonts: {
           sans: {
             value:
@@ -96,11 +87,6 @@ export default defineConfig({
           danger: definePalette('danger', red),
           // 画面が名前のまま使う色だけを登録する
           amber,
-          blue,
-          green,
-          red,
-          // 旧 Park UI の画面が使う
-          yellow,
 
           app: {
             bg: { value: '{colors.gray.1}' },

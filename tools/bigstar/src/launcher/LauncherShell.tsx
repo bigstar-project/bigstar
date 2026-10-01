@@ -1,11 +1,10 @@
 import { Brain, Flask } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { css, cx } from 'styled-system/css';
+import { css } from 'styled-system/css';
 import { Badge } from '@/components/ui/badge';
 import { Kbd } from '@/components/ui/kbd';
 import * as Tabs from '@/components/ui/tabs';
-import launcherBg from '../assets/launcher-bg.png';
 import { type ActivityStatus, ActivityToasts } from './ActivityToasts';
 import { Brand } from './Brand';
 import { PageHeader } from './PageHeader';
@@ -43,7 +42,7 @@ export function LauncherShell({
   soloTestEnabled = false,
   children,
   hidden = false,
-  layout = 'panel',
+  layout = 'page',
   onCheckForUpdate,
   onViewChange,
   playerName = '',
@@ -60,8 +59,8 @@ export function LauncherShell({
   children: ReactNode;
   /** 初回セットアップの画面を出している間は、画面を隠してショートカットも止める */
   hidden?: boolean;
-  /** page: Kiso で組んだ画面。背景を無地にして、本文を 808px の列に収める */
-  layout?: 'panel' | 'page';
+  /** 本文の列の幅。page は 808px、wide は表や成果物を横に並べる AI 画面用に 982px */
+  layout?: 'page' | 'wide';
   onCheckForUpdate: () => void;
   onViewChange: (view: View) => void;
   playerName?: string;
@@ -72,8 +71,6 @@ export function LauncherShell({
   updateBusy: boolean;
   updateStatus: UpdateStatus;
 }) {
-  const pageLayout = layout === 'page';
-
   useHotkeys(
     viewShortcuts,
     (event) => {
@@ -212,53 +209,28 @@ export function LauncherShell({
         </aside>
 
         <div
-          className={cx(
-            css({
-              display: 'flex',
-              flexDirection: 'column',
-              h: 'full',
-              minH: '0',
-              minW: '0',
-            }),
-            pageLayout ? css({ bg: 'canvas' }) : undefined,
-          )}
-          style={
-            pageLayout
-              ? undefined
-              : {
-                  backgroundImage: `linear-gradient(180deg, rgba(7, 17, 31, 0.62) 0%, rgba(10, 21, 38, 0.5) 58%, rgba(6, 11, 20, 0.7) 100%), url(${launcherBg})`,
-                  backgroundPosition: 'center',
-                  backgroundRepeat: 'no-repeat',
-                  backgroundSize: 'cover',
-                }
-          }
+          className={css({
+            bg: 'canvas',
+            display: 'flex',
+            flexDirection: 'column',
+            h: 'full',
+            minH: '0',
+            minW: '0',
+          })}
         >
           <div className={css({ flex: '1', minH: '0', overflowY: 'auto' })}>
             <div
-              className={
-                pageLayout
-                  ? css({
-                      // 余白の内側で 808px を確保する
-                      boxSizing: 'content-box',
-                      display: 'grid',
-                      gap: '6',
-                      maxW: 'page',
-                      mx: 'auto',
-                      pb: '10',
-                      pt: '3',
-                      px: { base: '6', lg: '12' },
-                    })
-                  : css({
-                      display: 'grid',
-                      gap: '4',
-                      maxW: 'contentMax',
-                      mx: 'auto',
-                      pb: '4',
-                      pt: '3',
-                      px: { base: '3', md: '4', xl: '5' },
-                      w: 'full',
-                    })
-              }
+              className={css({
+                // 余白の内側で列の幅を確保する
+                boxSizing: 'content-box',
+                display: 'grid',
+                gap: '6',
+                maxW: layout === 'wide' ? 'contentMax' : 'page',
+                mx: 'auto',
+                pb: '10',
+                pt: '3',
+                px: { base: '6', lg: '12' },
+              })}
             >
               {/* 対戦画面は見出しの横に部屋を作るボタンを置くので、自分で見出しを出す */}
               {activeView === 'battle' ? null : (

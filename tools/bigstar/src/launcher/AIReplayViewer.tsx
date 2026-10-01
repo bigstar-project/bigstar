@@ -11,8 +11,9 @@ import {
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { css } from 'styled-system/css';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import * as Tabs from '@/components/ui/tabs';
-import { Button, Input } from '../components/park-ui';
 import {
   listAiArtifacts,
   openAiReplayLog,
@@ -1535,7 +1536,7 @@ export function AIReplayViewer() {
         >
           <LauncherCard
             title="AI Workbench"
-            icon={<TerminalWindow size={24} weight="fill" />}
+            icon={<TerminalWindow size={18} weight="fill" />}
             badge={
               commandRunning ? 'running' : commandResult ? 'done' : undefined
             }
@@ -1562,13 +1563,19 @@ export function AIReplayViewer() {
                     }));
                   }}
                 />
-                <Button type="button" onClick={() => void loadPath(pathInput)}>
+                <Button
+                  colorPalette="gray"
+                  type="button"
+                  variant="subtle"
+                  onClick={() => void loadPath(pathInput)}
+                >
                   <FileText size={18} weight="bold" />
                   開く
                 </Button>
                 <Button
+                  colorPalette="gray"
                   type="button"
-                  variant="outline"
+                  variant="subtle"
                   loading={artifactsLoading}
                   onClick={() => void refreshArtifacts()}
                 >
@@ -1839,6 +1846,7 @@ export function AIReplayViewer() {
                 })}
               >
                 <Button
+                  colorPalette="amber"
                   type="button"
                   loading={commandRunning}
                   onClick={() => void executeTask()}
@@ -1858,7 +1866,7 @@ export function AIReplayViewer() {
                 {commandError ? (
                   <span
                     className={css({
-                      color: 'red.subtle.fg',
+                      color: 'fg.error',
                       fontWeight: 'bold',
                       textStyle: 'sm',
                     })}
@@ -1881,11 +1889,11 @@ export function AIReplayViewer() {
                   </div>
                   <pre
                     className={css({
-                      bg: 'gray.12',
-                      borderColor: 'gray.surface.border',
-                      borderRadius: 'l1',
+                      bg: 'gray.1',
+                      borderColor: 'border',
+                      borderRadius: 'l2',
                       borderWidth: '1px',
-                      color: 'gray.1',
+                      color: 'fg.muted',
                       fontFamily: 'mono',
                       maxH: '64',
                       overflow: 'auto',
@@ -1906,13 +1914,11 @@ export function AIReplayViewer() {
 
           <LauncherCard
             title="AI成果物"
-            icon={<Database size={24} weight="fill" />}
+            icon={<Database size={18} weight="fill" />}
             badge={`${artifacts.length}`}
           >
             {artifactsError ? (
-              <div
-                className={css({ color: 'red.subtle.fg', fontWeight: 'bold' })}
-              >
+              <div className={css({ color: 'fg.error', fontWeight: 'bold' })}>
                 {artifactsError}
               </div>
             ) : null}
@@ -1927,7 +1933,7 @@ export function AIReplayViewer() {
                   className={css({
                     bg: 'gray.subtle.bg',
                     borderColor: 'gray.surface.border',
-                    borderRadius: 'l1',
+                    borderRadius: 'l2',
                     borderWidth: '1px',
                     color: 'fg.default',
                     display: 'grid',
@@ -1936,7 +1942,7 @@ export function AIReplayViewer() {
                     px: '3',
                     py: '2',
                     textAlign: 'left',
-                    _hover: { borderColor: 'blue.outline.border' },
+                    _hover: { borderColor: 'gray.8' },
                   })}
                   onClick={() => {
                     selectArtifact(artifact);
@@ -1953,7 +1959,7 @@ export function AIReplayViewer() {
                     className={css({
                       color:
                         artifactTone(artifact.kind) === 'green'
-                          ? 'green.subtle.fg'
+                          ? 'success.subtle.fg'
                           : 'fg.muted',
                       fontWeight: 'black',
                       textStyle: 'xs',
@@ -1979,7 +1985,7 @@ export function AIReplayViewer() {
 
         <LauncherCard
           title="AIログビューア"
-          icon={<FilmStrip size={24} weight="fill" />}
+          icon={<FilmStrip size={18} weight="fill" />}
           badge={
             totalFrameCount
               ? `${totalFrameCount} frames`
@@ -2009,20 +2015,27 @@ export function AIReplayViewer() {
                   if (file) void loadFile(file);
                 }}
               />
-              <Button type="button" onClick={() => void openReplayFile()}>
+              <Button
+                colorPalette="gray"
+                type="button"
+                variant="subtle"
+                onClick={() => void openReplayFile()}
+              >
                 <UploadSimple size={18} weight="bold" />
                 ログを開く
               </Button>
             </div>
             <div className={css({ display: 'flex', gap: '2' })}>
               <Button
-                variant={playerIndex === 0 ? 'solid' : 'outline'}
+                colorPalette="gray"
+                variant={playerIndex === 0 ? 'solid' : 'subtle'}
                 onClick={() => setPlayerIndex(0)}
               >
                 P0
               </Button>
               <Button
-                variant={playerIndex === 1 ? 'solid' : 'outline'}
+                colorPalette="gray"
+                variant={playerIndex === 1 ? 'solid' : 'subtle'}
                 onClick={() => setPlayerIndex(1)}
               >
                 P1
@@ -2030,20 +2043,18 @@ export function AIReplayViewer() {
             </div>
           </div>
           {error ? (
-            <div
-              className={css({ color: 'red.subtle.fg', fontWeight: 'bold' })}
-            >
+            <div className={css({ color: 'fg.error', fontWeight: 'bold' })}>
               {error}
             </div>
           ) : null}
           {notice ? (
             <div
               className={css({
-                bg: 'blue.subtle.bg',
-                borderColor: 'blue.outline.border',
+                bg: 'info.subtle.bg',
+                borderColor: 'info.outline.border',
                 borderRadius: 'l2',
                 borderWidth: '1px',
-                color: 'blue.subtle.fg',
+                color: 'info.subtle.fg',
                 fontWeight: 'bold',
                 px: '3',
                 py: '2',
@@ -2092,7 +2103,7 @@ export function AIReplayViewer() {
         {svgText ? (
           <LauncherCard
             title="生成SVG"
-            icon={<Crosshair size={24} weight="fill" />}
+            icon={<Crosshair size={18} weight="fill" />}
           >
             <iframe
               className={css({
@@ -2114,7 +2125,7 @@ export function AIReplayViewer() {
         {eventSampleRows.length ? (
           <LauncherCard
             title="記録イベント"
-            icon={<GameController size={22} weight="fill" />}
+            icon={<GameController size={18} weight="fill" />}
             badge={`${eventSampleRows.length}`}
           >
             <div
@@ -2183,7 +2194,7 @@ export function AIReplayViewer() {
           >
             <LauncherCard
               title="相対配置"
-              icon={<Crosshair size={24} weight="fill" />}
+              icon={<Crosshair size={18} weight="fill" />}
             >
               <ReplayScene frame={frame} playerIndex={playerIndex} />
             </LauncherCard>
@@ -2247,7 +2258,7 @@ export function AIReplayViewer() {
               />
               <LauncherCard
                 title="イベント"
-                icon={<GameController size={22} weight="fill" />}
+                icon={<GameController size={18} weight="fill" />}
               >
                 <div
                   className={css({
@@ -2264,7 +2275,7 @@ export function AIReplayViewer() {
                       <span
                         key={event}
                         className={css({
-                          bg: 'blue.subtle.bg',
+                          bg: 'gray.subtle.bg',
                           borderRadius: 'l1',
                           px: '2',
                           py: '1',
