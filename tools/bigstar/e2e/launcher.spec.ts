@@ -330,7 +330,6 @@ async function e2eCalls(page: Page) {
 }
 
 async function waitForGuiReady(page: Page) {
-  // 初回セットアップ中はサイドバーが読み上げ対象から外れるので、役割ではなく表示で待つ
   await expect(page.getByTestId('brand')).toBeVisible();
 }
 
@@ -351,33 +350,27 @@ test('初回セットアップでロム生成と入力設定を完了できる',
   await installRoomsApi(page);
 
   await page.goto('/');
-  await waitForGuiReady(page);
 
-  await expect(
-    page.getByRole('heading', { name: '初回セットアップ' }),
-  ).toBeVisible();
-  const onboardingDialog = page.getByRole('dialog', {
-    name: '初回セットアップ',
+  const onboardingHeading = page.getByRole('heading', {
+    name: '対戦の前に、3つだけ準備します',
   });
+  await expect(onboardingHeading).toBeVisible();
+  await page.getByRole('textbox', { name: 'プレイヤーネーム' }).fill('Alice');
+  await page.getByRole('button', { name: '保存' }).click();
+  await expect.poll(() => callNames(page)).toContain('save_player_name');
+  await page.getByRole('button', { name: 'ROMを選んで生成' }).click();
+  await expect.poll(() => callNames(page)).toContain('generate_roms');
+  await page.getByRole('button', { name: '入力設定を開く' }).click();
+  // すべて終えても、自分で進むまではセットアップの画面に残る
+  await expect(page.getByText('準備ができました')).toBeVisible();
+  await page.getByRole('button', { name: 'ロビーへ進む' }).click();
+
+  await expect(onboardingHeading).toBeHidden();
+  await expect(page.getByRole('heading', { name: '対戦' })).toBeVisible();
   // サイドバーの下端に今のバージョンを出す
   await expect(
     page.getByText(`v${packageJson.version}`, { exact: true }),
   ).toBeVisible();
-  await onboardingDialog.getByLabel('プレイヤーネーム').fill('Alice');
-  await onboardingDialog.getByRole('button', { name: '保存' }).click();
-  await expect.poll(() => callNames(page)).toContain('save_player_name');
-  await page.getByRole('button', { name: 'ROMを選んで生成' }).click();
-  await expect.poll(() => callNames(page)).toContain('generate_roms');
-  const inputConfigButton = page.getByRole('button', {
-    name: '入力設定を開く',
-  });
-  await expect(inputConfigButton).toBeEnabled();
-  await inputConfigButton.click();
-
-  await expect(
-    page.getByRole('heading', { name: '初回セットアップ' }),
-  ).toBeHidden();
-  await expect(page.getByRole('heading', { name: '対戦' })).toBeVisible();
 
   const calls = await e2eCalls(page);
   expect(calls.map((call) => call.name)).toContain('generate_roms');

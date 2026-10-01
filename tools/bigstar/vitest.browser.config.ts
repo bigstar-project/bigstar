@@ -20,6 +20,7 @@ export default defineConfig({
       '@base-ui/react/switch',
       '@base-ui/react/toggle',
       '@base-ui/react/toggle-group',
+      '@tauri-apps/api/webview',
       '@tauri-apps/api/window',
     ],
   },

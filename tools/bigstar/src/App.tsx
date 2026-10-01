@@ -5,6 +5,7 @@ import {
   areAiDevToolsEnabled,
   currentRuntimeCapabilities,
 } from './buildProfile';
+import type { ActivityStatus } from './launcher/ActivityToasts';
 import { BattleView } from './launcher/BattleView';
 import { CpuBattleView } from './launcher/CpuBattleView';
 import { HistoryView } from './launcher/HistoryView';
@@ -31,7 +32,18 @@ export function App() {
     (!launcher.onboarding.romsPrepared ||
       !launcher.onboarding.inputConfigOpened ||
       !launcher.onboarding.playerNameConfigured);
-  const onboardingOpen = onboardingMissing && launcher.activeView !== 'ai';
+  // そろっても「ロビーへ進む」を押すまでは、初回セットアップの画面を出し続ける
+  const [onboardingPending, setOnboardingPending] = useState(false);
+  if (onboardingMissing && !onboardingPending) setOnboardingPending(true);
+  const onboardingOpen =
+    (onboardingMissing || onboardingPending) && launcher.activeView !== 'ai';
+  // セットアップ中の結果はその画面で伝えたので、閉じたあとに通知として出さない
+  const [statusAtOnboardingEnd, setStatusAtOnboardingEnd] =
+    useState<ActivityStatus | null>(null);
+  const toastStatus =
+    onboardingOpen || launcher.activityStatus === statusAtOnboardingEnd
+      ? null
+      : launcher.activityStatus;
   // 終わった対戦は「ロビーに戻る」で閉じるまで対戦画面に残す
   const [dismissedMatchId, setDismissedMatchId] = useState<string | null>(null);
   const showMatch =
@@ -62,9 +74,8 @@ export function App() {
     <div className={css({ h: 'dvh', overflow: 'hidden' })}>
       <LauncherShell
         activeView={launcher.activeView}
-        // 初回セットアップの間は、セットアップの画面の中で状態を伝える
-        activityStatus={onboardingOpen ? null : launcher.activityStatus}
-        inert={onboardingOpen}
+        activityStatus={toastStatus}
+        hidden={onboardingOpen}
         layout={pageLayout ? 'page' : 'panel'}
         onCheckForUpdate={() => void launcher.actions.checkForUpdate()}
         onViewChange={launcher.changeView}
@@ -125,16 +136,22 @@ export function App() {
           updateField={launcher.updateField}
         />
       </LauncherShell>
-      <OnboardingGate
-        actions={launcher.actions}
-        activeView={launcher.activeView}
-        activityStatus={launcher.activityStatus}
-        form={launcher.form}
-        onboarding={launcher.onboarding}
-        aiDevToolsEnabled={aiDevToolsEnabled}
-        onOpenAi={() => launcher.changeView('ai')}
-        updateField={launcher.updateField}
-      />
+      {onboardingOpen ? (
+        <OnboardingGate
+          actions={launcher.actions}
+          activityStatus={launcher.activityStatus}
+          aiDevToolsEnabled={aiDevToolsEnabled}
+          form={launcher.form}
+          onboarding={launcher.onboarding}
+          onFinish={() => {
+            setOnboardingPending(false);
+            setStatusAtOnboardingEnd(launcher.activityStatus);
+            launcher.changeView('battle');
+          }}
+          onOpenAi={() => launcher.changeView('ai')}
+          updateField={launcher.updateField}
+        />
+      ) : null}
     </div>
   );
 }

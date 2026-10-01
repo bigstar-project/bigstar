@@ -69,9 +69,12 @@ export type LauncherActions = {
   openMelonds: () => Promise<void>;
   openMelondsInputConfig: () => Promise<void>;
   preflightCheck: () => Promise<void>;
+  /** ドロップなどで受け取ったパスのベースROMから、対戦用のROMを作る */
+  prepareBaseRomFromPath: (path: string) => Promise<void>;
   prepareRoms: () => Promise<void>;
   refreshRooms: () => Promise<void>;
-  savePlayerName: () => Promise<void>;
+  /** 保存できたら true。入力が空などで保存しなかったときは false */
+  savePlayerName: () => Promise<boolean>;
   selectBaseRomAndPrepare: () => Promise<void>;
   selectRomPath: (key: SelectRomKey) => Promise<void>;
   setStartupEnabled: (enabled: boolean) => Promise<void>;
@@ -93,8 +96,16 @@ export type OnboardingState = {
   loaded: boolean;
   romsPrepared: boolean;
   romGenerationBusy: boolean;
+  /** 直前のROM生成の失敗。次の生成を始めるまで残す */
+  romError: RomGenerationError | null;
   inputConfigOpened: boolean;
   playerNameConfigured: boolean;
+};
+
+export type RomGenerationError = {
+  message: string;
+  /** 生成に使おうとしたベースROM。選ぶ前に失敗したときは空 */
+  sourceRom: string;
 };
 
 export type MatchmakingRoomsState = {

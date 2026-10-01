@@ -18,7 +18,12 @@ function isTauriRuntime() {
   return '__TAURI_INTERNALS__' in window && !('__BIGSTAR_E2E__' in window);
 }
 
-export function AppTitlebar() {
+export function AppTitlebar({
+  navigation: showNavigation = true,
+}: {
+  /** 戻る・進むを出すか。初回セットアップでは戻る先がないので出さない */
+  navigation?: boolean;
+} = {}) {
   const navigation = browserNavigation();
   const [canGoBack, setCanGoBack] = useState(
     navigation?.canGoBack ?? window.history.length > 1,
@@ -67,26 +72,30 @@ export function AppTitlebar() {
 
   return (
     <div className={titlebarClassName}>
-      <div
-        className={css({ alignItems: 'center', display: 'flex', gap: '0.5' })}
-      >
-        <TitlebarButton
-          ariaLabel="戻る"
-          disabled={!canGoBack}
-          onClick={() => browserNavigation()?.back() ?? window.history.back()}
+      {showNavigation ? (
+        <div
+          className={css({ alignItems: 'center', display: 'flex', gap: '0.5' })}
         >
-          <ArrowLeft size={16} weight="bold" />
-        </TitlebarButton>
-        <TitlebarButton
-          ariaLabel="進む"
-          disabled={!canGoForward}
-          onClick={() =>
-            browserNavigation()?.forward() ?? window.history.forward()
-          }
-        >
-          <ArrowRight size={16} weight="bold" />
-        </TitlebarButton>
-      </div>
+          <TitlebarButton
+            ariaLabel="戻る"
+            disabled={!canGoBack}
+            onClick={() => browserNavigation()?.back() ?? window.history.back()}
+          >
+            <ArrowLeft size={16} weight="bold" />
+          </TitlebarButton>
+          <TitlebarButton
+            ariaLabel="進む"
+            disabled={!canGoForward}
+            onClick={() =>
+              browserNavigation()?.forward() ?? window.history.forward()
+            }
+          >
+            <ArrowRight size={16} weight="bold" />
+          </TitlebarButton>
+        </div>
+      ) : (
+        <div />
+      )}
 
       <div className={css({ h: 'full', minW: '0' })} data-tauri-drag-region />
 

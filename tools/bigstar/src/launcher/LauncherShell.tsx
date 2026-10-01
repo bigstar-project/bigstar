@@ -6,15 +6,14 @@ import { Badge } from '@/components/ui/badge';
 import { Kbd } from '@/components/ui/kbd';
 import * as Tabs from '@/components/ui/tabs';
 import launcherBg from '../assets/launcher-bg.png';
-import { currentEditionConfig } from '../buildProfile';
 import { AppTitlebar } from '../components/AppTitlebar';
 import { type ActivityStatus, ActivityToasts } from './ActivityToasts';
+import { Brand } from './Brand';
 import { PageHeader } from './PageHeader';
 import {
   PixelClock,
   PixelRobot,
   PixelSliders,
-  PixelStar,
   PixelVersus,
 } from './PixelIcons';
 import {
@@ -44,7 +43,7 @@ export function LauncherShell({
   aiDevToolsEnabled = true,
   soloTestEnabled = false,
   children,
-  inert = false,
+  hidden = false,
   layout = 'panel',
   onCheckForUpdate,
   onViewChange,
@@ -60,8 +59,8 @@ export function LauncherShell({
   aiDevToolsEnabled?: boolean;
   soloTestEnabled?: boolean;
   children: ReactNode;
-  /** 初回セットアップ中は、タイトルバー以外を操作できなくする */
-  inert?: boolean;
+  /** 初回セットアップの画面を出している間は、画面を隠してショートカットも止める */
+  hidden?: boolean;
   /** page: Kiso で組んだ画面。背景を無地にして、本文を 808px の列に収める */
   layout?: 'panel' | 'page';
   onCheckForUpdate: () => void;
@@ -74,11 +73,7 @@ export function LauncherShell({
   updateBusy: boolean;
   updateStatus: UpdateStatus;
 }) {
-  const edition = currentEditionConfig();
   const pageLayout = layout === 'page';
-  const inertProps = inert
-    ? ({ 'aria-hidden': true, inert: true } as const)
-    : undefined;
 
   useHotkeys(
     viewShortcuts,
@@ -86,7 +81,7 @@ export function LauncherShell({
       const view = viewOrder[Number(event.key) - 1];
       if (view) onViewChange(view);
     },
-    { enableOnFormTags: false, preventDefault: true },
+    { enabled: !hidden, enableOnFormTags: false, preventDefault: true },
     [onViewChange],
   );
 
@@ -99,7 +94,7 @@ export function LauncherShell({
         (currentIndex + direction + viewOrder.length) % viewOrder.length;
       onViewChange(viewOrder[nextIndex]);
     },
-    { enableOnFormTags: false, preventDefault: true },
+    { enabled: !hidden, enableOnFormTags: false, preventDefault: true },
     [activeView, onViewChange],
   );
 
@@ -113,6 +108,7 @@ export function LauncherShell({
           h: 'full',
           overflow: 'hidden',
         })}
+        hidden={hidden}
         orientation="vertical"
         value={activeView}
         // line だとリストの左に線が出るので、背景で選択を示す subtle にする
@@ -133,60 +129,9 @@ export function LauncherShell({
             pt: '5',
             px: '3',
           })}
-          {...inertProps}
         >
-          <div
-            className={css({
-              alignItems: 'center',
-              display: 'flex',
-              gap: '2.5',
-              pt: '0.5',
-              px: '2.5',
-              userSelect: 'none',
-              '& > *': { pointerEvents: 'none' },
-            })}
-            data-tauri-drag-region
-          >
-            <PixelStar
-              className={css({ color: 'amber.9', flexShrink: '0' })}
-              eyeColor="var(--colors-app-sidebar)"
-            />
-            <span
-              className={css({
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '1',
-              })}
-              data-testid="brand"
-            >
-              <span
-                className={css({
-                  fontFamily: 'display',
-                  fontSize: 'xl',
-                  letterSpacing: 'wider',
-                  lineHeight: 'none',
-                })}
-              >
-                BIGSTAR
-              </span>
-              {edition.edition === 'insiders' ? (
-                <span
-                  className={css({
-                    color: 'amber.9',
-                    fontFamily: 'mono',
-                    // 2xs（8px）だと読みにくいので、ロゴのこの文字だけトークン外の大きさにする
-                    fontSize: '[9.5px]',
-                    fontWeight: 'semibold',
-                    letterSpacing: 'widest',
-                    lineHeight: 'none',
-                    textTransform: 'uppercase',
-                  })}
-                  data-testid="edition-badge"
-                >
-                  {edition.badge}
-                </span>
-              ) : null}
-            </span>
+          <div className={css({ pt: '0.5', px: '2.5' })}>
+            <Brand eyeColor="var(--colors-app-sidebar)" testIds />
           </div>
 
           <Tabs.List
@@ -290,10 +235,7 @@ export function LauncherShell({
           }
         >
           <AppTitlebar />
-          <div
-            className={css({ flex: '1', minH: '0', overflowY: 'auto' })}
-            {...inertProps}
-          >
+          <div className={css({ flex: '1', minH: '0', overflowY: 'auto' })}>
             <div
               className={
                 pageLayout

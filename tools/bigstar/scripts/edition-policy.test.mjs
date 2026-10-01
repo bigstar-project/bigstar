@@ -322,6 +322,11 @@ test('Bigstarの版名・識別子・保存先を使用する', () => {
     new URL('../src/launcher/LauncherShell.tsx', import.meta.url),
     'utf8',
   );
+  // サイドバーと初回セットアップが共通で使うロゴ
+  const brand = readFileSync(
+    new URL('../src/launcher/Brand.tsx', import.meta.url),
+    'utf8',
+  );
 
   assert.equal(packageJson.name, 'bigstar');
   assert.match(cargoManifest, /^name = "bigstar"$/m);
@@ -348,7 +353,9 @@ test('Bigstarの版名・識別子・保存先を使用する', () => {
   assert.match(publicEdition.defaultSignalUrl, /bigstar-signaling-public/);
   assert.match(insiders.defaultSignalUrl, /bigstar-signaling-insiders/);
   assert.doesNotMatch(launcherShell, /\bNSMB\b|Mario vs Luigi Online/);
-  assert.match(launcherShell, />\s*BIGSTAR\s*</);
+  assert.doesNotMatch(brand, /\bNSMB\b|Mario vs Luigi Online/);
+  assert.match(launcherShell, /<Brand\b/);
+  assert.match(brand, />\s*BIGSTAR\s*</);
 });
 
 test('ウィンドウ状態を版別のアプリデータへ保存する', () => {

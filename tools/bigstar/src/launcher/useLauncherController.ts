@@ -81,6 +81,7 @@ import {
   isUpdateRequired,
   type LauncherActions,
   type LauncherSummary,
+  type RomGenerationError,
   type SelectRomKey,
   type UpdateStatus,
   type View,
@@ -367,6 +368,8 @@ export function useLauncherController() {
   const [onboardingRomsPrepared, setOnboardingRomsPrepared] = useState(false);
   const [romEnsureBusy, setRomEnsureBusy] = useState(false);
   const [romGenerationBusy, setRomGenerationBusy] = useState(false);
+  const [romGenerationError, setRomGenerationError] =
+    useState<RomGenerationError | null>(null);
   const [onboardingInputConfigOpened, setOnboardingInputConfigOpened] =
     useState(false);
   const [onboardingPlayerNameConfigured, setOnboardingPlayerNameConfigured] =
@@ -807,6 +810,7 @@ export function useLauncherController() {
 
     try {
       setRomGenerationBusy(true);
+      setRomGenerationError(null);
       setOnboardingRomsPrepared(false);
       setActivityStatus({ text: '基準セーブを初期化中', kind: 'idle' });
       const response = await generateRoms(request);
@@ -829,6 +833,10 @@ export function useLauncherController() {
       setActivityStatus({ text: '共通 ROM の準備が完了しました', kind: 'ok' });
     } catch (error) {
       setOnboardingRomsPrepared(false);
+      setRomGenerationError({
+        message: String(error),
+        sourceRom: sourceForm.baseRomPath,
+      });
       setActivityStatus({ text: String(error), kind: 'error' });
     } finally {
       setRomGenerationBusy(false);
@@ -839,22 +847,40 @@ export function useLauncherController() {
     await prepareRomsFor(form);
   };
 
+  const prepareBaseRom = async (selected: string) => {
+    const nextForm = { ...form, baseRomPath: selected };
+    setForm(nextForm);
+    setOnboardingRomsPrepared(false);
+    await persistSettingMutation.mutateAsync({
+      kind: 'baseRomPath',
+      value: selected,
+    });
+    await prepareRomsFor(nextForm);
+  };
+
+  const failBaseRomSelection = (error: unknown, sourceRom: string) => {
+    setRomGenerationError({ message: String(error), sourceRom });
+    setActivityStatus({ text: String(error), kind: 'error' });
+  };
+
   const selectBaseRomAndPrepare = async () => {
+    let selected: string | null = null;
     try {
-      const selected = await selectRomFile(form.baseRomPath);
+      selected = await selectRomFile(form.baseRomPath);
       if (!selected) {
         return;
       }
-      const nextForm = { ...form, baseRomPath: selected };
-      setForm(nextForm);
-      setOnboardingRomsPrepared(false);
-      await persistSettingMutation.mutateAsync({
-        kind: 'baseRomPath',
-        value: selected,
-      });
-      await prepareRomsFor(nextForm);
+      await prepareBaseRom(selected);
     } catch (error) {
-      setActivityStatus({ text: String(error), kind: 'error' });
+      failBaseRomSelection(error, selected ?? '');
+    }
+  };
+
+  const prepareBaseRomFromPath = async (path: string) => {
+    try {
+      await prepareBaseRom(path);
+    } catch (error) {
+      failBaseRomSelection(error, path);
     }
   };
 
@@ -930,6 +956,7 @@ export function useLauncherController() {
     startupRomPreparationKeyRef.current = key;
     const initializingCanonicalSave = !onboardingRomsPrepared;
     if (initializingCanonicalSave) {
+      setRomGenerationError(null);
       setActivityStatus({ text: '基準セーブを初期化中', kind: 'idle' });
     }
     void ensurePreparedRoms(form)
@@ -940,6 +967,10 @@ export function useLauncherController() {
       })
       .catch((error) => {
         startupRomPreparationKeyRef.current = null;
+        if (initializingCanonicalSave) {
+          // 初回セットアップの ROM の手順で、失敗した理由と選び直しを出す
+          setRomGenerationError({ message: String(error), sourceRom: key });
+        }
         setActivityStatus({
           text: `起動時のROM準備に失敗しました: ${String(error)}`,
           kind: 'warn',
@@ -1524,14 +1555,14 @@ export function useLauncherController() {
         text: 'プレイヤーネームを入力してください',
         kind: 'warn',
       });
-      return;
+      return false;
     }
     if ([...playerName].length > 32) {
       setActivityStatus({
         text: 'プレイヤーネームは32文字以内で入力してください',
         kind: 'warn',
       });
-      return;
+      return false;
     }
 
     try {
@@ -1542,8 +1573,9 @@ export function useLauncherController() {
         text: 'プレイヤーネームを保存しました',
         kind: 'ok',
       });
+      return true;
     } catch {
-      return;
+      return false;
     }
   };
 
@@ -1597,6 +1629,7 @@ export function useLauncherController() {
     openMelonds,
     openMelondsInputConfig,
     preflightCheck,
+    prepareBaseRomFromPath,
     prepareRoms,
     refreshRooms,
     savePlayerName,
@@ -1678,6 +1711,7 @@ export function useLauncherController() {
       romsPrepared: onboardingRomsPrepared,
       romGenerationBusy:
         romGenerationBusy || (romEnsureBusy && !onboardingRomsPrepared),
+      romError: romGenerationError,
       inputConfigOpened: onboardingInputConfigOpened,
       playerNameConfigured: onboardingPlayerNameConfigured,
     },
