@@ -808,7 +808,8 @@ function WinRateChart({
           className={css({
             columnGap: '2.5',
             display: 'grid',
-            gridTemplateColumns: '2.25rem minmax(0, 1fr)',
+            // 右の列は最新の勝率を出す場所。線は最新の点より右へ伸びないので、どんな推移でも重ならない
+            gridTemplateColumns: '2.25rem minmax(0, 1fr) 3rem',
           })}
         >
           <div
@@ -917,21 +918,22 @@ function WinRateChart({
               })}
               style={{ left: `${last.x}%`, top: `${last.y}%` }}
             />
+          </div>
+          <div
+            aria-hidden="true"
+            className={css({ color: 'amber.9', h: '36', position: 'relative' })}
+          >
             <span
               className={css({
                 fontVariantNumeric: 'tabular-nums',
                 fontWeight: 'semibold',
+                left: '1',
                 position: 'absolute',
-                right: '2.5',
                 textStyle: 'sm',
+                transform: 'translateY(-50%)',
+                whiteSpace: 'nowrap',
               })}
-              // 上端の近くでは、線にかぶらないよう点の下に出す
-              style={{
-                top:
-                  last.y < 25
-                    ? `calc(${last.y}% + 0.5rem)`
-                    : `calc(${last.y}% - 1.75rem)`,
-              }}
+              style={{ top: `${last.y}%` }}
             >
               {latest}%
             </span>
@@ -955,6 +957,8 @@ function WinRateChart({
               />
             ))}
           </div>
+          {/* この行の右の列と、次の行の目盛りの列を空ける */}
+          <span />
           <span />
           <div
             className={css({
