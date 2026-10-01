@@ -73,6 +73,7 @@ import type {
   SessionStatus,
   StatusKind,
 } from '../types';
+import type { ActivityStatus } from './ActivityToasts';
 import {
   type BattleMatchRecord,
   type BattleMatchStatus,
@@ -356,10 +357,9 @@ export function useLauncherController() {
       text: '初期化中',
       kind: 'idle' as StatusKind,
     });
-  const [activityStatus, setActivityStatus] = useState<{
-    text: string;
-    kind: StatusKind;
-  } | null>(null);
+  const [activityStatus, setActivityStatus] = useState<ActivityStatus | null>(
+    null,
+  );
   const [lastLogDir, setLastLogDir] = useState('');
 
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
@@ -1159,14 +1159,16 @@ export function useLauncherController() {
     }
     if (connectionActive) {
       setActivityStatus({
-        text: '実行中の対戦を停止してから部屋を作成してください',
+        text: 'いまは部屋を作れません',
+        description: '実行中の対戦を停止してから作成してください。',
         kind: 'warn',
       });
       return;
     }
     if (hostedRoom) {
       setActivityStatus({
-        text: '作成済みの部屋を閉じてから新しい部屋を作成してください',
+        text: 'いまは部屋を作れません',
+        description: '作成済みの部屋を閉じてから作成してください。',
         kind: 'warn',
       });
       return;
@@ -1230,7 +1232,9 @@ export function useLauncherController() {
         },
       });
       setActivityStatus({
-        text: `部屋を作成しました: ${response.room_id}。参加者を待っています`,
+        // 部屋コードは待機中の画面に出す
+        text: '部屋を作成しました',
+        description: '参加者を待っています。',
         kind: 'ok',
       });
     } catch (error) {
@@ -1256,14 +1260,16 @@ export function useLauncherController() {
     }
     if (connectionActive) {
       setActivityStatus({
-        text: '実行中の対戦を停止してから部屋に参加してください',
+        text: 'いまは部屋に参加できません',
+        description: '実行中の対戦を停止してから参加してください。',
         kind: 'warn',
       });
       return;
     }
     if (hostedRoom) {
       setActivityStatus({
-        text: '作成済みの部屋を閉じてから別の部屋に参加してください',
+        text: 'いまは部屋に参加できません',
+        description: '作成済みの部屋を閉じてから参加してください。',
         kind: 'warn',
       });
       return;
@@ -1326,7 +1332,8 @@ export function useLauncherController() {
       nextForm.signalUrl = response.signal_url;
       setForm(nextForm);
       setActivityStatus({
-        text: '部屋に参加しました。接続を確立してからmelonDSを起動します',
+        text: '部屋に参加しました',
+        description: '接続を確立してから melonDS を起動します。',
         kind: 'idle',
       });
       await startMatchFor(
@@ -1368,7 +1375,8 @@ export function useLauncherController() {
       setMatchmakingActionBusy(true);
       setHostedRoom(null);
       setActivityStatus({
-        text: '参加者を検出しました。接続を確立してからmelonDSを起動します',
+        text: '参加者を検出しました',
+        description: '接続を確立してから melonDS を起動します。',
         kind: 'idle',
       });
       await startMatchForRef.current(
@@ -1497,10 +1505,7 @@ export function useLauncherController() {
         description: feedback.description,
         include_performance: feedback.includePerformance,
       });
-      setActivityStatus({
-        text: `フィードバックを送信しました: ${response.report_id}`,
-        kind: 'ok',
-      });
+      // 送れたこととレポート ID は、問題の報告のダイアログが伝える
       return response.report_id;
     } catch (error) {
       setActivityStatus({ text: String(error), kind: 'error' });

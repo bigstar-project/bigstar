@@ -4,7 +4,12 @@ import * as Toast from '@/components/ui/toast';
 import type { StatusKind } from '../types';
 import { StatusDot, type StatusTone } from './StatusDot';
 
-export type ActivityStatus = { text: string; kind: StatusKind };
+export type ActivityStatus = {
+  text: string;
+  kind: StatusKind;
+  /** 見出しの下に添える、理由や次にすること */
+  description?: string;
+};
 
 // 進み具合の通知は同じトーストを書き換えるので、最後の表示から数えて消す
 const visibleMs = 5000;
@@ -45,6 +50,7 @@ function ActivityStatusSync({ status }: { status: ActivityStatus | null }) {
     if (!status) return;
     const options = {
       title: status.text,
+      description: status.description,
       type: status.kind,
       priority: status.kind === 'error' ? 'high' : 'low',
       timeout: status.kind === 'error' ? errorVisibleMs : visibleMs,
@@ -94,6 +100,7 @@ function ActivityToaster() {
   );
 }
 
-const viewportClass = css({ bottom: '5', insetInlineEnd: '5' });
+// 見出しと説明の 2 行で収まるように、Kiso の既定（sm）より広げる
+const viewportClass = css({ bottom: '5', insetInlineEnd: '5', w: 'md' });
 
 const rootClass = css({ overflowWrap: 'anywhere' });
