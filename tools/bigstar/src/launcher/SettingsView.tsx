@@ -436,7 +436,7 @@ function CleanupLogsRow({ onCleanup }: { onCleanup: () => Promise<void> }) {
         <AlertDialog.Trigger
           render={<Button colorPalette="danger" size="sm" variant="outline" />}
         >
-          削除…
+          削除
         </AlertDialog.Trigger>
         <AlertDialog.Portal>
           <AlertDialog.Backdrop />

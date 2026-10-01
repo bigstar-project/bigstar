@@ -308,7 +308,7 @@ function DeleteMatchButton({
         className={css({ ml: 'auto' })}
         render={<Button colorPalette="danger" size="xs" variant="outline" />}
       >
-        削除…
+        削除
       </AlertDialog.Trigger>
       <AlertDialog.Portal>
         <AlertDialog.Backdrop />

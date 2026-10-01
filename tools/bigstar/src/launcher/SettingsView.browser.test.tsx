@@ -278,7 +278,7 @@ describe('設定ビュー', () => {
   test('古い詳細ログの削除を確認して実行する', async () => {
     const { launcherActions, screen } = await renderSettingsView();
 
-    await screen.getByRole('button', { name: '削除…' }).click();
+    await screen.getByRole('button', { name: '削除', exact: true }).click();
     await expect
       .element(screen.getByRole('alertdialog'))
       .toHaveTextContent('古い詳細ログを削除しますか？');
@@ -295,7 +295,7 @@ describe('設定ビュー', () => {
   test('古い詳細ログの削除はキャンセルできる', async () => {
     const { launcherActions, screen } = await renderSettingsView();
 
-    await screen.getByRole('button', { name: '削除…' }).click();
+    await screen.getByRole('button', { name: '削除', exact: true }).click();
     await expect.element(screen.getByRole('alertdialog')).toBeVisible();
     await screen.getByRole('button', { name: 'キャンセル' }).click();
 
