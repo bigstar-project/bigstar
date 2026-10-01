@@ -61,10 +61,11 @@ export function PixelVersus(props: PixelIconProps) {
   );
 }
 
+// 高さを VS・つまみと同じ 7 段にして、9×9 の枠の上下中央に置く
 export function PixelRobot(props: PixelIconProps) {
   return (
     <PixelIcon viewBox="0 0 9 9" {...props}>
-      <path d="M4 0h1v1H4zM4 1h1v1H4zM1 2h7v1H1zM1 3h1v1H1zM7 3h1v1H7zM0 4h2v1H0zM3 4h1v1H3zM5 4h1v1H5zM7 4h2v1H7zM1 5h1v1H1zM7 5h1v1H7zM1 6h1v1H1zM3 6h3v1H3zM7 6h1v1H7zM1 7h7v1H1z" />
+      <path d="M4 1h1v1H4zM1 2h7v1H1zM1 3h1v1H1zM7 3h1v1H7zM0 4h2v1H0zM3 4h1v1H3zM5 4h1v1H5zM7 4h2v1H7zM1 5h1v1H1zM7 5h1v1H7zM1 6h1v1H1zM3 6h3v1H3zM7 6h1v1H7zM1 7h7v1H1z" />
     </PixelIcon>
   );
 }
