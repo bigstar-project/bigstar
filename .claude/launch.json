@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "bigstar-browser",
+      "runtimeExecutable": "corepack",
+      "runtimeArgs": ["pnpm", "--dir", "tools/bigstar", "run", "preview:browser"],
+      "port": 1421,
+      "url": "http://127.0.0.1:1421"
+    }
+  ]
+}
