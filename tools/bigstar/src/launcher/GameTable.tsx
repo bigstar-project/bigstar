@@ -279,6 +279,19 @@ const cellStateClass = {
   empty: css({ borderColor: 'gray.5', borderStyle: 'dashed' }),
 };
 
+type WinCause = 'stars' | 'lives';
+
+/** 勝った側のマスで、決着の理由になったほうのアイコンに付ける色 */
+const winCauseIconClass: Record<WinCause, string> = {
+  stars: css({ color: 'amber.9' }),
+  lives: css({ color: 'danger.11' }),
+};
+
+const winCauseLabel: Record<WinCause, string> = {
+  stars: 'スターで勝ち',
+  lives: '相手のライフ切れで勝ち',
+};
+
 function GameCell({ side, slot }: { side: PlayerSide; slot: GameSlot }) {
   if (slot.state === 'empty') {
     return (
@@ -310,10 +323,14 @@ function GameCell({ side, slot }: { side: PlayerSide; slot: GameSlot }) {
   const won = slot.winner === side;
   const decided = slot.winner !== null;
   const tone = won ? 'won' : decided ? 'lost' : 'cut';
+  // 勝者の判定と同じく、負けた側のライフが尽きていればライフ切れ、そうでなければスターで決着
+  const loser = slot.result[side === 'mario' ? 'luigi' : 'mario'];
+  const cause: WinCause | null = won ? (loser.dead ? 'lives' : 'stars') : null;
+  const iconClass = css({ color: won ? 'fg.muted' : 'gray.8' });
 
   return (
     <td
-      aria-label={`スター ${player.stars}、残機 ${lives}${won ? '、勝ち' : ''}`}
+      aria-label={`スター ${player.stars}、残機 ${lives}${cause ? `、${winCauseLabel[cause]}` : ''}`}
       className={cellPaddingClass}
     >
       <div className={cx(cellBaseClass, cellStateClass[tone])}>
@@ -332,7 +349,7 @@ function GameCell({ side, slot }: { side: PlayerSide; slot: GameSlot }) {
           )}
         >
           <PixelIcon
-            className={css({ color: won ? 'fg.muted' : 'gray.8' })}
+            className={cause === 'stars' ? winCauseIconClass.stars : iconClass}
             path={pixelStar}
           />
           {player.stars}
@@ -348,7 +365,7 @@ function GameCell({ side, slot }: { side: PlayerSide; slot: GameSlot }) {
           })}
         >
           <PixelIcon
-            className={css({ color: won ? 'fg.muted' : 'gray.8' })}
+            className={cause === 'lives' ? winCauseIconClass.lives : iconClass}
             path={pixelHeart}
           />
           {lives}

@@ -295,7 +295,7 @@ describe('対戦ビュー', () => {
       .element(screen.getByRole('columnheader', { name: '第3ゲーム' }))
       .toBeVisible();
     expect(gameRows()).toEqual([
-      ['あなた', 'スター 5、残機 3、勝ち', 'プレイ中', '未実施'],
+      ['あなた', 'スター 5、残機 3、スターで勝ち', 'プレイ中', '未実施'],
       ['Bob', 'スター 0、残機 2', 'プレイ中', '未実施'],
     ]);
     await expect
@@ -317,7 +317,61 @@ describe('対戦ビュー', () => {
       .toBeVisible();
     expect(gameRows()).toEqual([
       ['あなた', 'スター 0、残機 2', 'プレイ中', '未実施'],
-      ['Alice', 'スター 5、残機 3、勝ち', 'プレイ中', '未実施'],
+      ['Alice', 'スター 5、残機 3、スターで勝ち', 'プレイ中', '未実施'],
+    ]);
+  });
+
+  test('ライフ切れで決まったゲームは勝った側にライフ切れで勝ったと出す', async () => {
+    const [first] = currentMatch.stages;
+    await renderBattleView({
+      connectionStatus: connected,
+      currentMatch: {
+        ...currentMatch,
+        stages: [
+          first,
+          {
+            ...first,
+            frame: 8200,
+            game_index: 2,
+            line: 'NSMB MvL auto restart: result inst=0 frame=8200 winner=1 stars=3/2 displayed=3/2 collected=3/2 lives=0/1 deaths=3/2 dead=1/0 matchWins=1/1 target=2',
+            luigi: {
+              ...first.luigi,
+              collected_stars: 2,
+              deaths: 2,
+              displayed_stars: 2,
+              lives: 1,
+              stars: 2,
+            },
+            luigi_match_wins: 1,
+            mario: {
+              ...first.mario,
+              collected_stars: 3,
+              dead: true,
+              deaths: 3,
+              displayed_stars: 3,
+              lives: 0,
+              stars: 3,
+            },
+            stage: 3,
+            winner: 1,
+          },
+        ],
+      },
+    });
+
+    expect(gameRows()).toEqual([
+      [
+        'あなた',
+        'スター 5、残機 3、スターで勝ち',
+        'スター 3、残機 0',
+        'プレイ中',
+      ],
+      [
+        'Bob',
+        'スター 0、残機 2',
+        'スター 2、残機 1、相手のライフ切れで勝ち',
+        'プレイ中',
+      ],
     ]);
   });
 
@@ -403,7 +457,7 @@ describe('対戦ビュー', () => {
       .toHaveTextContent('対戦を中断しました');
     await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
     expect(gameRows()).toEqual([
-      ['あなた', 'スター 5、残機 3、勝ち', '中断', '未実施'],
+      ['あなた', 'スター 5、残機 3、スターで勝ち', '中断', '未実施'],
       ['Bob', 'スター 0、残機 2', '中断', '未実施'],
     ]);
     await expect
