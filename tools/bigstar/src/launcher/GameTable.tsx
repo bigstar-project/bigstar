@@ -361,8 +361,9 @@ function GameCell({ side, slot }: { side: PlayerSide; slot: GameSlot }) {
 // 7×7 のドット絵。拡大してもにじまないよう crispEdges で描く
 const pixelStar =
   'M3 0h1v1H3zM2 1h3v1H2zM0 2h7v1H0zM1 3h5v1H1zM2 4h3v1H2zM1 5h2v1H1zM4 5h2v1H4zM1 6h1v1H1zM5 6h1v1H5z';
+// ハートは 6 段なので、下端をスターにそろえて 1 段下げる
 const pixelHeart =
-  'M1 0h2v1H1zM4 0h2v1H4zM0 1h7v1H0zM0 2h7v1H0zM1 3h5v1H1zM2 4h3v1H2zM3 5h1v1H3z';
+  'M1 1h2v1H1zM4 1h2v1H4zM0 2h7v1H0zM0 3h7v1H0zM1 4h5v1H1zM2 5h3v1H2zM3 6h1v1H3z';
 
 function PixelIcon({ className, path }: { className?: string; path: string }) {
   return (
