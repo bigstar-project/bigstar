@@ -4,6 +4,7 @@
     "includes": [
       "src/**/*.{ts,tsx}",
       "e2e/**/*.ts",
+      "scripts/**/*.ts",
       "!src/bindings.ts",
       "!src/components/ui",
       "!src/theme/*.ts",

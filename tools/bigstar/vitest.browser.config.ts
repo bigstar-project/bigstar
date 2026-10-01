@@ -2,6 +2,7 @@ import react from '@vitejs/plugin-react';
 import { playwright } from '@vitest/browser-playwright';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { defineConfig } from 'vitest/config';
+import { fontsourcePlugin } from './scripts/fontsource-plugin';
 
 export default defineConfig({
   define: {
@@ -24,6 +25,7 @@ export default defineConfig({
     ],
   },
   plugins: [
+    fontsourcePlugin(),
     react({
       babel: {
         plugins: ['babel-plugin-react-compiler'],

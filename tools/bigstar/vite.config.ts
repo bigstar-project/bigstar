@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig } from 'vite';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import packageJson from './package.json';
 import {
@@ -8,6 +8,7 @@ import {
   resolveRuntimeCapabilities,
 } from './scripts/build-profile-config.mjs';
 import { loadEditionConfig } from './scripts/edition-config.mjs';
+import { fontsourcePlugin } from './scripts/fontsource-plugin';
 
 const buildProfileName = process.env.BIGSTAR_BUILD_PROFILE || 'local';
 const buildProfile = loadBuildProfileConfig(buildProfileName);
@@ -20,18 +21,6 @@ const runtimeCapabilities = resolveRuntimeCapabilities(
 const devPort = Number(process.env.BIGSTAR_DEV_PORT || editionConfig.devPort);
 const aiDevToolsEnabled = runtimeCapabilities.aiDevTools;
 const appVersion = process.env.BIGSTAR_APP_VERSION || packageJson.version;
-
-// WebView2 は woff2 を読めるので、Fontsource の woff 代替を同梱しない（和文フォントは woff だけで約 6MB）
-function woff2OnlyFonts(): Plugin {
-  return {
-    name: 'bigstar-woff2-only-fonts',
-    enforce: 'pre',
-    transform(code, id) {
-      if (!/\/@fontsource\/.+\.css$/.test(id)) return null;
-      return code.replace(/,\s*url\([^)]+\.woff\) format\('woff'\)/g, '');
-    },
-  };
-}
 
 export default defineConfig({
   clearScreen: false,
@@ -46,7 +35,7 @@ export default defineConfig({
     __BIGSTAR_GUI_VERSION__: JSON.stringify(appVersion),
   },
   plugins: [
-    woff2OnlyFonts(),
+    fontsourcePlugin(),
     react({
       babel: {
         plugins: ['babel-plugin-react-compiler'],
