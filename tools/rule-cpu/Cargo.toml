@@ -1,0 +1,12 @@
+[package]
+name = "bigstar-rule-cpu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+flate2 = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
