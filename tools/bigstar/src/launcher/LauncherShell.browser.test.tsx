@@ -1,6 +1,7 @@
 import { type ComponentProps, useState } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
+import * as Tabs from '@/components/ui/tabs';
 import { LauncherShell } from './LauncherShell';
 import type { View } from './types';
 
@@ -11,6 +12,7 @@ afterEach(() => {
 });
 
 function ShortcutTestShell({
+  children = <div />,
   initialView = 'battle',
   ...props
 }: ShellProps & { initialView?: View }) {
@@ -28,11 +30,76 @@ function ShortcutTestShell({
         updateStatus={{ phase: 'idle' }}
         {...props}
       >
-        <div />
+        {children}
       </LauncherShell>
     </>
   );
 }
+
+function ScrollTestShell(props: ShellProps) {
+  return (
+    <div style={{ height: 500 }}>
+      <ShortcutTestShell {...props}>
+        <Tabs.Panel keepMounted value="battle">
+          <div style={{ height: 2200 }}>対戦の本文</div>
+        </Tabs.Panel>
+        <Tabs.Panel keepMounted value="cpu">
+          <div>短い本文</div>
+        </Tabs.Panel>
+        <Tabs.Panel keepMounted value="settings">
+          <div style={{ height: 2600 }}>設定の本文</div>
+        </Tabs.Panel>
+      </ShortcutTestShell>
+    </div>
+  );
+}
+
+function pageScroller() {
+  const element = document.querySelector<HTMLElement>('[data-page-scroll]');
+  if (!element) throw new Error('本文のスクロール領域がありません');
+  return element;
+}
+
+async function scrollPageTo(top: number) {
+  const element = pageScroller();
+  await new Promise<void>((resolve) => {
+    element.addEventListener('scroll', () => resolve(), { once: true });
+    element.scrollTop = top;
+  });
+  expect(element.scrollTop).toBe(top);
+}
+
+describe('ページごとのスクロール位置', () => {
+  test('初回は先頭を表示し、短いページを挟んでも各ページの位置を復元する', async () => {
+    const screen = await render(<ScrollTestShell />);
+    await scrollPageTo(900);
+
+    await screen.getByRole('tab', { name: '設定', exact: true }).click();
+    await expect.poll(() => pageScroller().scrollTop).toBe(0);
+    await scrollPageTo(1300);
+
+    await screen.getByRole('tab', { name: 'CPU対戦', exact: true }).click();
+    await expect.poll(() => pageScroller().scrollTop).toBe(0);
+
+    pressShortcut('1');
+    await expect.poll(() => pageScroller().scrollTop).toBe(900);
+    pressShortcut('4');
+    await expect.poll(() => pageScroller().scrollTop).toBe(1300);
+  });
+
+  test('外部からのページ切り替えでも復元し、アプリを開き直すと先頭になる', async () => {
+    const screen = await render(<ScrollTestShell activeView="settings" />);
+    await scrollPageTo(1000);
+    await screen.rerender(<ScrollTestShell activeView="cpu" />);
+    await expect.poll(() => pageScroller().scrollTop).toBe(0);
+    await screen.rerender(<ScrollTestShell activeView="settings" />);
+    await expect.poll(() => pageScroller().scrollTop).toBe(1000);
+
+    await screen.unmount();
+    await render(<ScrollTestShell activeView="settings" />);
+    await expect.poll(() => pageScroller().scrollTop).toBe(0);
+  });
+});
 
 function pressShortcut(key: string, shiftKey = false) {
   const init: KeyboardEventInit = {

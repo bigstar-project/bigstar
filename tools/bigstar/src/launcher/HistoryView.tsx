@@ -6,7 +6,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import { parseAsString, parseAsStringLiteral, useQueryStates } from 'nuqs';
-import { useEffect, useId, useMemo, useRef } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
 import { css, cx } from 'styled-system/css';
 import { card } from 'styled-system/recipes';
 import * as Alert from '@/components/ui/alert';
@@ -117,6 +117,23 @@ export function HistoryView({
     opponentId === 'all' || opponentsQuery.isPending || selectedOpponent
       ? opponentId
       : 'all';
+  const panelRef = useRef<HTMLDivElement>(null);
+  const filterKey = JSON.stringify([
+    period,
+    effectiveOpponentId,
+    stage,
+    outcome,
+  ]);
+  const previousFilterKey = useRef(filterKey);
+
+  useLayoutEffect(() => {
+    if (previousFilterKey.current === filterKey) return;
+    previousFilterKey.current = filterKey;
+    const panel = panelRef.current;
+    if (!panel || panel.closest('[hidden], [inert]')) return;
+    // 表示対象が変わったら見出し・条件から確認する。window ではなく本文を動かす。
+    panel.scrollIntoView({ block: 'start', behavior: 'instant' });
+  }, [filterKey]);
 
   const baseFilter = useMemo(
     () => createHistoryFilter(period, effectiveOpponentId, stage),
@@ -190,7 +207,6 @@ export function HistoryView({
       opponentName: playerName,
       outcome: 'completed',
     });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   useEffect(() => {
@@ -220,7 +236,12 @@ export function HistoryView({
   ]);
 
   return (
-    <Tabs.Panel className={panelClass} keepMounted value="history">
+    <Tabs.Panel
+      className={panelClass}
+      keepMounted
+      ref={panelRef}
+      value="history"
+    >
       {detailName ? (
         <div
           className={css({

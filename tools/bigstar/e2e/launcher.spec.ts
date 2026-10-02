@@ -357,6 +357,54 @@ test('設定済みの起動は初回設定や準備バナーを表示せず対�
   ).toBeHidden();
 });
 
+test('ページごとのスクロール位置を戻る・進むでも復元し、再読み込みで初期化する', async ({
+  page,
+}) => {
+  await installRoomsApi(page);
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await page.goto('/?preview=ready&view=settings');
+  await expect(
+    page.getByRole('heading', { name: '設定', exact: true }),
+  ).toBeVisible();
+  const scroller = page.locator('[data-page-scroll]');
+  const scrollTop = () => scroller.evaluate((element) => element.scrollTop);
+  const scrollTo = (top: number) =>
+    scroller.evaluate(
+      (element, position) =>
+        new Promise<void>((resolve) => {
+          element.addEventListener('scroll', () => resolve(), { once: true });
+          element.scrollTop = position;
+        }),
+      top,
+    );
+
+  await scrollTo(300);
+  await expect.poll(scrollTop).toBe(300);
+  await page.getByRole('tab', { name: '対戦履歴', exact: true }).click();
+  await expect(page.getByText('3件', { exact: true })).toBeVisible();
+  await expect.poll(scrollTop).toBe(0);
+  await scrollTo(200);
+  await expect.poll(scrollTop).toBe(200);
+
+  await page.getByRole('button', { name: '戻る', exact: true }).click();
+  await expect(
+    page.getByRole('tab', { name: '設定', exact: true }),
+  ).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(scrollTop).toBe(300);
+  // 同じ履歴エントリーでも、ページ内で最後に見ていた位置を使う。
+  await scrollTo(400);
+  await page.getByRole('button', { name: '進む', exact: true }).click();
+  await expect.poll(scrollTop).toBe(200);
+  await page.getByRole('button', { name: '戻る', exact: true }).click();
+  await expect.poll(scrollTop).toBe(400);
+
+  await page.reload();
+  await expect(
+    page.getByRole('heading', { name: '設定', exact: true }),
+  ).toBeVisible();
+  await expect.poll(scrollTop).toBe(0);
+});
+
 test('設定で同じROMを選び直しても対戦可能な状態へ戻る', async ({ page }) => {
   await installRoomsApi(page);
   await page.goto('/?preview=ready');

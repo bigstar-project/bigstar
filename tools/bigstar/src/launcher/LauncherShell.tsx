@@ -1,5 +1,5 @@
 import { Brain, Flask } from '@phosphor-icons/react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useLayoutEffect, useRef } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { css } from 'styled-system/css';
 import { Badge } from '@/components/ui/badge';
@@ -73,6 +73,15 @@ export function LauncherShell({
   updateBusy: boolean;
   updateStatus: UpdateStatus;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollPositions = useRef<Partial<Record<View, number>>>({});
+
+  useLayoutEffect(() => {
+    if (hidden || !scrollRef.current) return;
+    // 描画前に移動先の位置へ戻す。保存先はメモリだけなので、再起動時は先頭になる。
+    scrollRef.current.scrollTop = scrollPositions.current[activeView] ?? 0;
+  }, [activeView, hidden]);
+
   useHotkeys(
     viewShortcuts,
     (event) => {
@@ -220,7 +229,23 @@ export function LauncherShell({
             minW: '0',
           })}
         >
-          <div className={css({ flex: '1', minH: '0', overflowY: 'auto' })}>
+          <div
+            className={css({
+              flex: '1',
+              minH: '0',
+              // タブを隠す際のブラウザによる自動補正で、復元した位置をずらさない。
+              overflowAnchor: 'none',
+              overflowY: 'auto',
+            })}
+            data-page-scroll=""
+            onScroll={(event) => {
+              if (hidden) return;
+              // 切り替え後は本文の高さで位置が丸められるため、スクロール時に保存する。
+              scrollPositions.current[activeView] =
+                event.currentTarget.scrollTop;
+            }}
+            ref={scrollRef}
+          >
             <div
               className={css({
                 // 余白の内側で列の幅を確保する

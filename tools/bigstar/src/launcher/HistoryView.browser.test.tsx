@@ -119,16 +119,20 @@ describe('履歴ビュー', () => {
   });
 
   test('対戦相手の名前から個別戦績へ移動する', async () => {
-    const scrollTo = vi
-      .spyOn(window, 'scrollTo')
-      .mockImplementation(() => undefined);
     const screen = await render(
       <HistoryTestProviders>
-        <HistoryView matches={previewMatchHistory()} />
+        <div data-history-scroll style={{ height: 500, overflowY: 'auto' }}>
+          <HistoryView matches={previewMatchHistory()} />
+        </div>
       </HistoryTestProviders>,
     );
+    const scroller = document.querySelector<HTMLElement>(
+      '[data-history-scroll]',
+    );
+    if (!scroller) throw new Error('履歴のスクロール領域がありません');
 
     await screen.getByText('3–1').click();
+    await expect.poll(() => scroller.scrollTop).toBeGreaterThan(0);
     await screen.getByRole('button', { name: 'Rivalとの戦績を見る' }).click();
 
     await vi.waitFor(() => {
@@ -141,13 +145,12 @@ describe('履歴ビュー', () => {
       .element(screen.getByRole('heading', { name: 'Rivalとの戦績' }))
       .toBeVisible();
     await expect.element(screen.getByText(/^1勝 0敗/)).toBeVisible();
-    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' });
+    await expect.poll(() => scroller.scrollTop).toBe(0);
     expect(openRows()).toHaveLength(0);
     await screen.getByRole('button', { name: 'すべての履歴に戻る' }).click();
     await expect
       .element(screen.getByRole('heading', { name: 'Rivalとの戦績' }))
       .not.toBeInTheDocument();
-    scrollTo.mockRestore();
   });
 
   test('対戦相手フィルターをルート履歴に記録して復元する', async () => {
