@@ -28,7 +28,10 @@ unsigned long long NowUnixMs() {
 InputState NeutralInput() { return {}; }
 
 bool RecoveryEnabled(Context context) {
-  return context.Input.NetplayOnly && !context.Rollback.Enabled;
+  return context.Input.NetplayOnly &&
+         (!context.Rollback.Enabled ||
+          (context.Rollback.Backend == Config::RollbackBackend::RomLoop &&
+           context.Rollback.PredictionHorizonFrames > 0));
 }
 
 void WriteRecoveryStatus(const char *state, unsigned long long deadline = 0,
@@ -547,8 +550,10 @@ void PumpLocked(Context context, const Hooks &hooks, melonDS::NDS *nds,
           context.State.Handshake.RemoteReadyFrame().value_or(kNoFrame),
           context.State.Handshake.RemoteReadyAfterLocal() ? 1 : 0, event.data);
       context.Transport.HandleDisconnected(event.peer);
-      if (context.State.ConnectedOnce)
+      if (context.State.ConnectedOnce && RecoveryEnabled(context)) {
+        context.State.ResumeValidated = false;
         BeginRecovery(context);
+      }
       UpdateHangSnapshotLocked(context, localFrame);
       std::fflush(stdout);
       break;
@@ -1357,6 +1362,7 @@ void WaitForRollbackPredictionHorizon(
   for (;;) {
     std::optional<melonDS::u32> unconfirmedFrames;
     std::optional<melonDS::u32> contiguousFrame;
+    bool sessionReady = false;
     {
       std::lock_guard<std::mutex> lock(context.Mutex);
       PumpLocked(context, hooks, nds, rawFrame);
@@ -1364,20 +1370,34 @@ void WaitForRollbackPredictionHorizon(
       unconfirmedFrames =
           context.Inputs.UnconfirmedRemoteFrameCountThrough(logicalFrame);
       contiguousFrame = context.Inputs.HighestContiguousRemoteFrame();
+      sessionReady =
+          context.Transport.IsConnected() && context.State.ResumeValidated;
       if (unconfirmedFrames &&
           *unconfirmedFrames > static_cast<melonDS::u32>(
                                    context.Rollback.PredictionHorizonFrames)) {
         MaybeResendLatestInputForFrameLeadLocked(context, hooks);
       }
+      if (sessionReady && (!unconfirmedFrames ||
+                           *unconfirmedFrames <=
+                               static_cast<melonDS::u32>(
+                                   context.Rollback.PredictionHorizonFrames))) {
+        CompleteRecovery(context);
+      } else if (RecoveryEnabled(context) &&
+                 std::chrono::steady_clock::now() - start >=
+                     std::chrono::seconds(1)) {
+        BeginRecovery(context);
+      }
     }
 
-    if (!unconfirmedFrames ||
-        *unconfirmedFrames <= static_cast<melonDS::u32>(
-                                  context.Rollback.PredictionHorizonFrames)) {
+    if (sessionReady &&
+        (!unconfirmedFrames ||
+         *unconfirmedFrames <= static_cast<melonDS::u32>(
+                                   context.Rollback.PredictionHorizonFrames))) {
       if (blocked && context.Input.NetplayTrace) {
-        const auto waitedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                  std::chrono::steady_clock::now() - start)
-                                  .count();
+        const auto waitedMs =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start)
+                .count();
         TraceOutput::Printf(
             "NSMB Rollback: prediction horizon resumed rawFrame=%u "
             "logicalFrame=%u contiguous=%u waitedMs=%lld horizon=%d\n",
@@ -1397,7 +1417,7 @@ void WaitForRollbackPredictionHorizon(
           "logicalFrame=%u contiguous=%u unconfirmed=%u horizon=%d "
           "sendFrame=%u\n",
           rawFrame, logicalFrame, contiguousFrame.value_or(kNoFrame),
-          *unconfirmedFrames, context.Rollback.PredictionHorizonFrames,
+          unconfirmedFrames.value_or(0), context.Rollback.PredictionHorizonFrames,
           sendFrame);
     }
 
@@ -1410,9 +1430,11 @@ void WaitForRollbackPredictionHorizon(
           "logicalFrame=%u contiguous=%u unconfirmed=%u horizon=%d "
           "waitedMs=%lld\n",
           rawFrame, logicalFrame, contiguousFrame.value_or(kNoFrame),
-          *unconfirmedFrames, context.Rollback.PredictionHorizonFrames,
+          unconfirmedFrames.value_or(0), context.Rollback.PredictionHorizonFrames,
           static_cast<long long>(waitedMs));
       TraceOutput::Flush();
+      if (RecoveryEnabled(context))
+        FailRecovery("prediction-horizon-timeout");
       std::_Exit(73);
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(1));

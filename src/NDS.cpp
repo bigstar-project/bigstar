@@ -672,6 +672,7 @@ void NDS::SetupDirectBoot(const std::string& romname)
 void NDS::Reset()
 {
     NSMLGameStageCallback = {};
+    NSMLGameRAMCheckpointCallback = {};
     Platform::FileHandle* f;
     u32 i;
 
@@ -2642,6 +2643,8 @@ void NDS::CaptureNSMLGameRAMCheckpointAtGate(u32 displayFrame)
     checkpoint.DisplayFrame = displayFrame;
     checkpoint.GameFrame = ARM9Read32(0x0208B668);
     memcpy(checkpoint.MainRAM.data(), MainRAM, length);
+    if (NSMLGameRAMCheckpointCallback)
+        NSMLGameRAMCheckpointCallback(displayFrame);
     NSMLNextGameRAMCheckpoint =
         (NSMLNextGameRAMCheckpoint + 1) % capacity;
 }

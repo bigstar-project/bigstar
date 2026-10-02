@@ -34,13 +34,14 @@ def udp_socket():
 
 
 class Proxy:
-    def __init__(self, host_port):
+    def __init__(self, host_port, trace_path):
         self.front, self.back = udp_socket(), udp_socket()
         self.host = ("127.0.0.1", host_port)
         self.client = None
         self.drop = "none"
         self.stopped = threading.Event()
         self.dropped = 0
+        self.trace = open(trace_path, "w", encoding="utf-8")
         self.thread = threading.Thread(target=self.run, daemon=True)
 
     def run(self):
@@ -51,6 +52,9 @@ class Proxy:
                 for key, _ in selector.select(0.02):
                     payload, source = key.fileobj.recvfrom(65536)
                     to_host = key.fileobj is self.front
+                    self.trace.write(json.dumps({"unix_ms": time.time_ns() // 1000000,
+                        "to": "host" if to_host else "client", "drop": self.drop,
+                        "hex": payload.hex()}) + "\n")
                     if to_host:
                         self.client = source
                     if self.drop == "both" or self.drop == ("host" if to_host else "client"):
@@ -65,6 +69,7 @@ class Proxy:
         self.thread.join(2)
         self.front.close()
         self.back.close()
+        self.trace.close()
 
 
 class SignalProxy:
@@ -122,7 +127,7 @@ def suspend(child, enabled):
         raise RuntimeError("could not suspend/resume test child")
 
 
-def verify(output, expect_timeout):
+def verify(output, expect_timeout, rollback=False, outages=()):
     result = {"generations": [], "roles": {}}
     for role in ("host", "client"):
         text = (output / role / "stdout.txt").read_text(encoding="utf-8", errors="replace")
@@ -131,6 +136,7 @@ def verify(output, expect_timeout):
             "verified": text.count("NSMB Recovery: peer verified"),
             "resumed": text.count("NSMB Recovery: resumed"),
             "deadline_exceeded": "reason=deadline-exceeded" in text,
+            "horizon_timeout": "reason=prediction-horizon-timeout" in text,
             "frame_limit": "frame limit reached" in text,
             "critical": len(re.findall(r"game state mismatch[^\n]+playerGlobal=0\s", text)),
         }
@@ -142,20 +148,41 @@ def verify(output, expect_timeout):
             with p.open(encoding="utf-8", newline="") as handle:
                 rows = list(csv.DictReader(handle))
             frames = [int(row["frame"]) for row in rows]
-            if frames and frames != list(range(frames[0], frames[-1] + 1)):
+            if frames != sorted(set(frames)):
+                raise AssertionError(f"duplicate or reversed game ticks: {p}")
+            # ROM-loop replay does not visit the checkpoint gate on every
+            # tick. Require coverage around the actual outage below instead.
+            if not rollback and frames and frames != list(range(frames[0], frames[-1] + 1)):
                 raise AssertionError(f"noncontiguous game ticks: {p}")
             return {int(row["frame"]): tuple(row[k] for k in FIELDS) for row in rows}
         host, client = read(path), read(peer)
         common = sorted(host.keys() & client.keys())
         differences = [frame for frame in common if host[frame] != client[frame]]
         result["generations"].append({"trace": path.name, "common_ticks": len(common),
-                                      "mismatches": len(differences), "first_differences": differences[:10]})
+            "first_tick": common[0] if common else None, "last_tick": common[-1] if common else None,
+            "mismatches": len(differences), "first_differences": differences[:10]})
+        for outage in outages:
+            if path.name != f"game-tick-g{outage['generation']}.csv":
+                continue
+            frame = outage["frame"]
+            # Compare both the interruption and at least 200 subsequent ticks;
+            # a startup-only trace must never certify successful recovery.
+            before = sum(frame - 100 <= tick <= frame for tick in common)
+            after = sum(frame < tick <= frame + 300 for tick in common)
+            outage["compared_before"] = before
+            outage["compared_after"] = after
     result["ok"] = bool(result["generations"]) and all(g["common_ticks"] > 0 and g["mismatches"] == 0 for g in result["generations"])
-    result["ok"] &= all(v["critical"] == 0 for v in result["roles"].values())
+    # Display-frame hashes include speculative state in rollback mode. Its
+    # comparison is the confirmed pre-input gate trace, rewritten by replay.
+    if not rollback:
+        result["ok"] &= all(v["critical"] == 0 for v in result["roles"].values())
     if expect_timeout:
-        result["ok"] &= all(v["deadline_exceeded"] for v in result["roles"].values())
+        result["ok"] &= all(v["deadline_exceeded"] or v["horizon_timeout"] for v in result["roles"].values())
     else:
         result["ok"] &= all(v["frame_limit"] and v["resumed"] > 0 for v in result["roles"].values())
+        result["ok"] &= all(o.get("compared_before", 0) >= 90 and
+                            o.get("compared_after", 0) >= 200 for o in outages)
+    result["outages"] = list(outages)
     return result
 
 
@@ -174,12 +201,15 @@ def main():
     parser.add_argument("--frames", type=int, default=5000)
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--expect-timeout", action="store_true")
+    parser.add_argument("--rollback", action="store_true", help="Use the production D=2/P=7 ROM-loop settings")
     args = parser.parse_args()
+    if args.direction != "both" and args.mode != "udp":
+        parser.error("--direction applies only to --mode udp")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     with udp_socket() as reservation:
         host_port = reservation.getsockname()[1]
-    proxy = Proxy(host_port)
+    proxy = Proxy(host_port, output / "enet-packets.jsonl")
     proxy.thread.start()
     children, bridges, handles = {}, {}, []
     outage_file = output / "outage"
@@ -188,6 +218,7 @@ def main():
     signaling_proxy = None
     injected = False
     injections = 0
+    outages = []
     start = time.monotonic()
     try:
         if args.mode in ("webrtc", "signaling"):
@@ -209,7 +240,9 @@ def main():
                              "match_seed": fixture_env["MELONDS_NSML_MATCH_SEED"],
                              "rng_seeds": fixture_env["MELONDS_NSML_MATCH_SEED_SEQUENCE"].split(','),
                              "wins": int(fixture_env["MELONDS_NSML_MVL_WINS"]),
-                             "input_delay_frames": 3, "input_max_frame_lead": 4, "rollback_enabled": False}})
+                             "input_delay_frames": 2 if args.rollback else 3,
+                             "input_max_frame_lead": 0 if args.rollback else 4,
+                             "rollback_enabled": args.rollback}})
             joined = post(f'/rooms/{room["room_id"]}/join', {"rom_pair_id": identity["rom_pair_id"]})
             if args.mode == "signaling":
                 signaling_proxy = SignalProxy(urllib.parse.urlparse(args.signal).port or 80)
@@ -227,8 +260,9 @@ def main():
                     "--local-bind", "127.0.0.1:0" if role == "host" else f"127.0.0.1:{client_port}",
                     "--signal", signal_url + "?token=" + token, "--session", room["room_id"],
                     "--status-file", str(log_dir / "status.json")]
-                if role == "host": command += ["--local-target", f"127.0.0.1:{host_port}"]
+                if role == "host": command += ["--local-target", f"127.0.0.1:{proxy.front.getsockname()[1]}"]
                 env = dict(os.environ)
+                env["BIGSTAR_DETAILED_LOGS"] = "1"
                 if role == "host": env["BIGSTAR_NET_BRIDGE_OUTAGE_FILE"] = str(outage_file)
                 bridges[role] = subprocess.Popen(command, env=env, stdout=out, stderr=err, creationflags=subprocess.CREATE_NO_WINDOW)
             while True:
@@ -254,6 +288,24 @@ def main():
                         "MELONDS_NSML_TEST_FRAMES": str(args.frames), "MELONDS_NSML_WAIT_TIMEOUT_MS": "60000",
                         "MELONDS_NSML_GAME_TICK_TRACE": str(dest / "game-tick"),
                         "MELONDS_NSML_RECOVERY_STATUS": str(dest / "recovery.json")})
+            env["MELONDS_NSML_ENET_TRACE"] = "1"
+            env["QT_QPA_PLATFORM"] = "offscreen"
+            if args.rollback:
+                env.update({"MELONDS_NSML_ROLLBACK": "1", "MELONDS_NSML_ROLLBACK_BACKEND": "romloop",
+                    "MELONDS_NSML_ROLLBACK_WINDOW": "16", "MELONDS_NSML_ROLLBACK_CHECKPOINT_INTERVAL": "1",
+                    "MELONDS_NSML_ROLLBACK_RESIMULATE": "1", "MELONDS_NSML_ROLLBACK_MAX_RESIM_FRAMES": "7",
+                    "MELONDS_NSML_ROLLBACK_PREDICTION_HORIZON_FRAMES": "7",
+                    "MELONDS_NSML_ROLLBACK_HORIZON_TIMEOUT_MS": "60000",
+                    "MELONDS_NSML_ROLLBACK_PHASE_RECOVERY": "1", "MELONDS_NSML_FIXED_FRAME_SLEEP": "1",
+                    "MELONDS_NSML_ROM_GAME_TICK_PROBE_GAME_RAM_ROLLBACK": "1",
+                    "MELONDS_NSML_ROM_GAME_TICK_PROBE_DEFER_LCD": "1",
+                    "MELONDS_NSML_ROM_GAME_TICK_PROBE_REPLAY_RENDER": "1",
+                    "MELONDS_NSML_ROM_GAME_TICK_PROBE_DISCARD_INTERMEDIATE_3D": "1",
+                    "MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN": "1",
+                    "MELONDS_NSML_JIT_EXACT_BLOCK_CHAIN_ALLOW_ROM_PROBE": "1",
+                    "MELONDS_NSML_JIT_SELF_LOOP_FAST_PATH": "1",
+                    "MELONDS_NSML_INPUT_MAX_FRAME_LEAD": "0", "MELONDS_NSML_INPUT_BUNDLE_HISTORY": "12",
+                    "MELONDS_NSML_DELAY": "2"})
             (dest / "environment.json").write_text(json.dumps({k: v for k, v in env.items() if k.startswith("MELONDS_")}, indent=2))
             stdout, stderr = open(dest / "stdout.txt", "wb"), open(dest / "stderr.txt", "wb")
             handles.extend((stdout, stderr))
@@ -272,6 +324,7 @@ def main():
                         and int(frames[-1]) >= args.trigger_frame + injections * 800):
                     injected = True
                     injections += 1
+                    outages.append({"generation": args.trigger_generation, "frame": int(frames[-1])})
                     resume_at = now + args.outage
                     if args.mode == "udp": proxy.drop = args.direction
                     elif args.mode == "webrtc": outage_file.touch()
@@ -301,7 +354,7 @@ def main():
         for handle in handles: handle.close()
         proxy.close()
         if signaling_proxy: signaling_proxy.close()
-    result = verify(output, args.expect_timeout)
+    result = verify(output, args.expect_timeout, args.rollback, outages)
     result.update({"mode": args.mode, "outage_seconds": args.outage, "dropped_datagrams": proxy.dropped,
                    "exit_codes": {role: child.returncode for role, child in children.items()},
                    "elapsed_seconds": round(time.monotonic() - start, 2)})

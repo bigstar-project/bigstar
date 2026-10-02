@@ -316,6 +316,9 @@ public: // TODO: Encapsulate the rest of these members
         std::vector<u8> MainRAM;
     };
     std::vector<NSMLGameRAMCheckpoint> NSMLGameRAMCheckpoints;
+    // Optional observer for diagnostics at the same pre-input boundary used
+    // by normal execution and ROM-loop replay. Never changes emulated state.
+    std::function<void(u32)> NSMLGameRAMCheckpointCallback;
     u32 NSMLNextGameRAMCheckpoint = 0;
     NSMLGameRAMRollback::CheckpointFrameTimeline NSMLGameRAMCheckpointTimeline;
     void SetNSMLGameRAMCheckpointFrame(u32 logicalFrame);

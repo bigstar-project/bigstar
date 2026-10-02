@@ -57,6 +57,7 @@
 #include <mutex>
 #include <filesystem>
 #include <limits>
+#include <map>
 #include <random>
 #include <set>
 #include <sstream>
@@ -866,6 +867,71 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
 std::array<PacketBridge::GameTickInputQueue, 16> GameTickInputs;
 std::array<GameStateTraceWriter, 16> GameTickTraces;
 
+struct RollbackTickTrace {
+    melonDS::u32 Generation = 0xFFFFFFFF;
+    melonDS::u32 WrittenThrough = 0;
+    std::map<melonDS::u32, GameStateSample> Pending;
+    GameStateTraceWriter Writer;
+};
+std::array<RollbackTickTrace, 16> RollbackTickTraces;
+
+void PrepareRollbackTickTrace(int instanceID, melonDS::NDS* nds)
+{
+    const char* path = std::getenv("MELONDS_NSML_GAME_TICK_TRACE");
+    if (!path || !*path || !G.Enabled || !G.Ready || !G.Rollback.Enabled ||
+        !G.NetplaySession.Handshake.LogicalEpochEstablished() ||
+        !G.NetplaySession.Handshake.WaitedForPeerAtStart() ||
+        G.Rollback.Backend != Config::RollbackBackend::RomLoop)
+        return;
+    auto& trace = RollbackTickTraces[instanceID];
+    const auto generation = G.NetplaySession.Handshake.Generation();
+    if (trace.Generation != generation || !nds->NSMLGameRAMCheckpointCallback)
+    {
+        trace.Generation = generation;
+        trace.WrittenThrough = 0;
+        trace.Pending.clear();
+        trace.Writer.Close();
+        const auto output = std::string(path) + "-g" + std::to_string(generation) + ".csv";
+        if (!trace.Writer.Open(output, false))
+            std::fprintf(stderr, "NSMB RollbackTickTrace: cannot open %s\n", output.c_str());
+        nds->NSMLGameRAMCheckpointCallback = [instanceID, nds, generation](melonDS::u32 frame) {
+            auto& current = RollbackTickTraces[instanceID];
+            if (G.NetplaySession.Handshake.Generation() != generation ||
+                frame <= current.WrittenThrough)
+                return;
+            // Replay replaces speculative samples at exactly the same gate.
+            current.Pending[frame] = ReadGameStateSample(nds);
+        };
+    }
+}
+
+void FlushRollbackTickTrace(int instanceID, melonDS::NDS* nds)
+{
+    auto& trace = RollbackTickTraces[instanceID];
+    if (!trace.Writer.IsOpen() ||
+        trace.Generation != G.NetplaySession.Handshake.Generation() ||
+        nds->IsNSMLGameRAMRollbackTransactionInFlight())
+        return;
+    melonDS::u32 through = 0;
+    {
+        std::lock_guard<std::mutex> lock(G.Mutex);
+        const auto confirmed = G.InputRuntime.HighestContiguousRemoteFrame();
+        if (!confirmed) return;
+        // A pre-input sample F only depends on inputs through F-1. A queued
+        // correction at M invalidates samples after M until replay completes.
+        through = *confirmed + 1;
+        if (const auto mismatch = G.InputRuntime.RollbackInputs.PendingRollbackFrame())
+            through = std::min(through, *mismatch);
+    }
+    auto it = trace.Pending.begin();
+    while (it != trace.Pending.end() && it->first <= through)
+    {
+        trace.Writer.Write(instanceID, it->first, it->second, nullptr);
+        trace.WrittenThrough = it->first;
+        it = trace.Pending.erase(it);
+    }
+}
+
 [[noreturn]] void FailGameTickInputs(int instanceID, const char* reason)
 {
     std::fprintf(stderr, "NSMB GameTickInput: inst=%d fatal=%s\n", instanceID, reason);
@@ -1544,7 +1610,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             MvlLifecycleContext(), instanceID, nds);
 
     if (pauseInputNetplayForRestart)
+    {
         nds->NSMLGameStageCallback = {};
+        nds->NSMLGameRAMCheckpointCallback = {};
+    }
 
     RunBeforeFramePatchPhase(instanceID, inputFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Patch);
@@ -1632,6 +1701,10 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
             G.NetRole == Role::Host ? "host" : "client", rollbackFrame);
     }
 
+    if (!pauseInputNetplayForRestart && (G.TestEnabled || G.Enabled) &&
+        instanceID >= 0 && instanceID < 16 && nds)
+        PrepareRollbackTickTrace(instanceID, nds);
+
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         RollbackRuntime::SaveCheckpointIfNeeded(
             RollbackContext(), instanceID, rollbackFrame, nds);
@@ -1642,7 +1715,18 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         WritePacketBridgeJitScratchIfNeeded(instanceID, syncFrame, nds, testInput);
     if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds
         && G.Rollback.Backend == Config::RollbackBackend::RomLoop)
+    {
         RollbackResimulateIfNeeded(instanceID, rollbackFrame, nds);
+        if (nds->NSMLGameRAMRestorePending)
+        {
+            // Invalidate the same suffix as the checkpoint ring. Replay may
+            // skip a gate, so retaining an old sample there would publish a
+            // speculative state as confirmed after the correction completes.
+            auto& pending = RollbackTickTraces[instanceID].Pending;
+            pending.erase(pending.upper_bound(nds->NSMLGameRAMReplayDisplayStartFrame),
+                          pending.end());
+        }
+    }
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Scratch);
 
     if (G.Enabled && G.Input.NetplayOnly)
@@ -1934,6 +2018,8 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
             logFrame);
     }
     const auto afterHeartbeat = std::chrono::steady_clock::now();
+    if (G.Rollback.Enabled)
+        FlushRollbackTickTrace(instanceID, nds);
     TraceHangPhase("begin", "after-frame", instanceID, logFrame, logFrame, logFrame);
     GameStateSync::UpdateHangSnapshot(
         GameStateSyncContext(), instanceID, logFrame, nds);

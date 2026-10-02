@@ -56,6 +56,8 @@ private:
   ENetPeer *Peer = nullptr;
   bool ENetAcquired = false;
   InitializeOptions Options;
+  bool TraceENet = false;
+  enet_uint32 LastTraceTime = 0;
 };
 
 } // namespace NsmbNetplayTransport

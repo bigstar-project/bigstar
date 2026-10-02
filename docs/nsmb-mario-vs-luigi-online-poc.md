@@ -1,5 +1,16 @@
 # NSMB Mario vs Luigi Online PoC
 
+## ロールバック対戦の再接続 - 2026-10-02 実装・ローカル検証完了
+
+- 対象障害: 9月30日の両者ログで、WebRTC再接続後約3秒でclientのENetが切断し、入力送信が停止したことを確認。hostからclient bridgeへの転送はその後も継続し、両エミュレーターはprediction horizonの60秒待機後exit 73。両者の実行binaryは一致する。
+- 旧版の制約: 9月29日の復帰実装・試験は通常lockstepのみで、`RecoveryEnabled()`がrollbackを除外していた。WebRTCには5秒のheartbeat監視があり、実障害の最初の再交渉はclient側のheartbeat timeoutで始まった。
+- 残る確認: 実WAN・別PCで更新した両クライアントの対戦を確認する。実障害の最初の通信停滞の原因と、ENet内部の切断理由は当時のログだけでは未確定。再現試験では未応答PINGの再送timeoutを確認したが、元の実障害の内部理由まで同一とは断定しない。Wi-Fi原因やENetの誤判定とも断定しない。
+- 実装: bounded ROM-loop rollbackでもENet再接続とセッション照合・不足入力再送を有効化。horizon待機は接続と照合の完了も要求し、復旧不能時はGUI向けfailed状態を出してexit 70。ENetの内部timeout判定自体は変更せず、既存lockstepの復帰用peer timeout設定（limit 32 / minimum 3000ms / maximum 5000ms）を適用する。opt-inのENet切断前snapshotと、訂正で無効になった予測値を除外するゲーム状態traceを追加した。
+- 再現: mainの旧復帰条件を保ち診断を追加した比較用binaryで、7秒WebRTC遮断後に両bridgeの再接続回数が2となってもENet切断後に入力が戻らず、両側exit 73となった。切断前の未応答commandはPING（5）、ACK ageはhost 16566ms / client 8166ms。proxy記録にDISCONNECT commandはなく、再送期限による局所切断と整合する。`logs/recovery-rollback-20261002/baseline-webrtc7/`。
+- 検証済み: 修正後の7/55秒WebRTC遮断、10秒片方向遮断（両方向を個別に）、10秒WebRTC遮断2回、通常lockstepの10秒遮断、2試合目の10秒WebRTC遮断で復帰・位置/速度/乱数/入力の18 field差0。再戦試験は3世代の9071標本を比較した。65秒遮断は両側がhorizonの60秒でexit 70、`recovery.json`も`failed / prediction-horizon-timeout`となった。成功7条件では同fileが`connected`。CMake build / CTest 17件 / verifier 5件pass。
+- 検証結果: `logs/recovery-rollback-20261002/summary.json` と各runの `verification.json`。成功runは `fixed-webrtc7-final` / `udp-host10` / `udp-client10` / `webrtc-repeat10` / `lockstep-udp10` / `rematch-webrtc10-final` / `webrtc55`、期限超過は `udp-timeout65`。起動中や訂正前の予測sampleを除外し、訂正で無効になったsampleを破棄してから確定gateを比較した。既存のdisplay-frame hashは予測中も比較するため、rollbackの合否には使用しない。比較は18 fieldであり、全RAMの同一性を保証する試験ではない。
+- 検証の準備: ローカルのROM・fixture・ビルド環境を利用済み。追加インストールは不要。実WAN確認時は両側のエミュレーターを更新する。配布物・インストール版・本番サーバーは未更新、pushなし。
+
 ## 一時切断からの復帰 - 2026-09-29 実装・ローカル検証完了
 
 - 対象: 両側のエミュレーターと対戦状態が残っている通常lockstep対戦。通信断・処理停滞時は60秒の復帰待ちとし、再接続後に不足入力を補完する。アプリ再起動・クラッシュからの状態復元は対象外。
@@ -25,6 +36,8 @@ python scripts/test-nsmb-recovery.py --fixture logs/codex-desync-replay-20260919
 python scripts/test-nsmb-recovery.py --fixture logs/codex-desync-replay-20260919/session0-fixed-final --output logs/recovery-repeat/stall --mode stall-client --outage 10
 python scripts/test-nsmb-recovery.py --fixture logs/codex-desync-replay-20260919/session0-fixed-final --output logs/recovery-repeat/timeout --outage 65 --expect-timeout
 ```
+
+`--rollback` は本番のROM-loop `D=2/P=7` 設定で実行する。rollbackでは訂正後に確定したpre-input gateの18 fieldを比較し、遮断前100 tick区間の90点以上・遮断後300 tick区間の200点以上を双方で観測することも要求する。ROM-loopが通らないgateは補間せず、通常lockstepのみtraceの完全連続性を要求する。`enet-packets.jsonl`はテスト専用UDP proxyのpacket記録、`MELONDS_NSML_ENET_TRACE=1`は未応答ENet commandと切断直前状態の診断出力である。verifier単体試験は `python -m unittest discover -s scripts -p test_nsmb_recovery_verifier.py`。
 
 `--direction host/client` は片方向遮断、`--repeat 2` は800入力間隔で2回、`--trigger-generation 1 --frames 10500` は2試合目の遮断。`--mode webrtc` はローカル仲介サーバーで部屋を作り、2つのbridgeと実エミュレーターを接続して通信断を注入する。`--mode signaling` はhost専用localhost TCP proxyで仲介WebSocketのみを切断し、同じ参加tokenによる再接続を確認する。既定は`http://127.0.0.1:18888`。試験用の`BIGSTAR_NET_BRIDGE_OUTAGE_FILE`は本番ランチャーでは設定しない。
 

@@ -126,7 +126,7 @@ rollback有効時の現行`InputMaxFrameLead`は、future labelである`sendFra
 3. 予測値は「packet到着順で最後に確認した入力」ではなく、対象frameより前で最も新しい確定入力から選ぶ。現行`PredictionRuntime::Confirm()`は再順序化した古いpacketでも`LastConfirmedInput_`を上書きするため、real-WAN gateより前にframe順の探索へ直す。
 4. horizon gateが正しければ、後着不一致は必ず保持history内にある。現行のdepth 11超 `ClampResimulationMismatch()`は古い不一致を捨てて最近のframeだけ直すため削除し、範囲外不一致やcheckpoint欠落は同期継続不能の明示的なfatal invariant errorとする。無言でplayを続けない。
 5. script経路は`InputBundleHistory=11`をrollback訂正historyとして維持する一方、wire bundle version 3のcontiguous ACKと最大32 entryの未ACK再送windowを独立に持つ。bundleは`UNSEQUENCED`送信し、stall中も同じ未ACK bundleを50ms間隔で再送する。結果sceneへ入るときは人工遅延queueに残る旧generation payloadを先に全送信し、結果timer中もnetwork pumpを継続してからgeneration resetする。ACK、遅延queue、frontierはgeneration resetで同時に消去する。新しいgame inputを生成してhorizonを押し広げることはしない。
-6. horizonでの連続停止は60秒でexit 73にする。通常の`RollbackInputWaitUs`は0を既定にし、毎frameの短い待ちと安全上限でのhard waitを混同しない。Bigstar/manualとも同じtimeoutを使い、Bigstarは`P=7`を表示する。明示切断後の再接続は未実装なので、復旧不能時にも最大60秒静止し得る点は既知のUX制約である。
+6. horizonでの連続停止は既定60秒で打ち切る。通常の`RollbackInputWaitUs`は0を既定にし、毎frameの短い待ちと安全上限でのhard waitを混同しない。Bigstar/manualとも同じtimeoutを使い、Bigstarは`P=7`を表示する。2026-10-02の変更でbounded ROM-loopにENet再接続・セッション照合・不足入力再送を追加した。復帰には接続・照合・horizon解消を要求し、復旧不能時はGUI向けfailed状態を出してexit 70とする。復帰対象外のbackendは従来のexit 73を維持する。実ROM検証の状況は[PoC進捗](nsmb-mario-vs-luigi-online-poc.md)の再接続調査節を参照する。
 7. `D/P`、protocol version、ROM-loop backend/history契約を開始handshakeとruntime identityへ含め、peer間不一致は対戦開始前に拒否する。再戦generation resetではcontiguous frontier、ACK、prediction、pending rollbackを同時に初期化する。
 
 ### 実装と昇格の順序
