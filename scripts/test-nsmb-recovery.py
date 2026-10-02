@@ -127,11 +127,12 @@ def suspend(child, enabled):
         raise RuntimeError("could not suspend/resume test child")
 
 
-def verify(output, expect_timeout, rollback=False, outages=()):
+def verify(output, expect_timeout, rollback=False, outages=(), recovery_roles=("host", "client")):
     result = {"generations": [], "roles": {}}
     for role in ("host", "client"):
         text = (output / role / "stdout.txt").read_text(encoding="utf-8", errors="replace")
         result["roles"][role] = {
+            "waiting": text.count("NSMB Recovery: waiting"),
             "disconnected": text.count("peer disconnected"),
             "verified": text.count("NSMB Recovery: peer verified"),
             "resumed": text.count("NSMB Recovery: resumed"),
@@ -179,7 +180,10 @@ def verify(output, expect_timeout, rollback=False, outages=()):
     if expect_timeout:
         result["ok"] &= all(v["deadline_exceeded"] or v["horizon_timeout"] for v in result["roles"].values())
     else:
-        result["ok"] &= all(v["frame_limit"] and v["resumed"] > 0 for v in result["roles"].values())
+        result["ok"] &= all(v["frame_limit"] and not v["deadline_exceeded"] and
+                            not v["horizon_timeout"] and v["resumed"] >= v["waiting"]
+                            for v in result["roles"].values())
+        result["ok"] &= all(result["roles"][role]["resumed"] > 0 for role in recovery_roles)
         result["ok"] &= all(o.get("compared_before", 0) >= 90 and
                             o.get("compared_after", 0) >= 200 for o in outages)
     result["outages"] = list(outages)
@@ -201,6 +205,8 @@ def main():
     parser.add_argument("--frames", type=int, default=5000)
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--expect-timeout", action="store_true")
+    parser.add_argument("--recovery-role", choices=("both", "host", "client"), default="both",
+                        help="Peers that must resume; a short one-sided stall may only make the other peer wait")
     parser.add_argument("--rollback", action="store_true", help="Use the production D=2/P=7 ROM-loop settings")
     args = parser.parse_args()
     if args.direction != "both" and args.mode != "udp":
@@ -354,7 +360,8 @@ def main():
         for handle in handles: handle.close()
         proxy.close()
         if signaling_proxy: signaling_proxy.close()
-    result = verify(output, args.expect_timeout, args.rollback, outages)
+    recovery_roles = ("host", "client") if args.recovery_role == "both" else (args.recovery_role,)
+    result = verify(output, args.expect_timeout, args.rollback, outages, recovery_roles)
     result.update({"mode": args.mode, "outage_seconds": args.outage, "dropped_datagrams": proxy.dropped,
                    "exit_codes": {role: child.returncode for role, child in children.items()},
                    "elapsed_seconds": round(time.monotonic() - start, 2)})

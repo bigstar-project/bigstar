@@ -96,6 +96,10 @@ void PrintInputHealthLocked(Context context, const char *event,
 int CurrentInputLead(Context context, melonDS::u32 sendFrame);
 void PrimeInputEpochLocked(Context context, melonDS::u32 localFrame);
 bool IsPastTestInputRange(Context context, melonDS::u32 targetFrame);
+// Requires context.Mutex. Consume only a validated session's buffered input,
+// completing gameplay recovery even when no blocking wait is necessary.
+bool TryGetRemoteInputLocked(Context context, melonDS::u32 targetFrame,
+                             InputState &input);
 InputState WaitForRemoteInput(Context context, const Hooks &hooks,
                               melonDS::u32 targetFrame);
 bool TryWaitForRollbackRemoteInputLocked(Context context, const Hooks &hooks,

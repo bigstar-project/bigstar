@@ -1,5 +1,21 @@
 # NSMB Mario vs Luigi Online PoC
 
+## CPU対戦の復旧期限切れ - 2026-10-02 修正・ローカル回帰試験完了
+
+- **結論・現在の状態:** 通常lockstepの復旧タイマー解除漏れを修正し、実エミュレーター回帰試験まで完了。受信済み入力の取得とblocking waitを`TryGetRemoteInputLocked()`へ統一し、接続・セッション照合・必要入力の存在を確認して復旧完了を通知する。`CompleteRecovery()`も接続中を要求する。60秒の復旧期限は維持。次は配布版への反映と実CPU GUI・実WANでの確認。現在の作業阻害要因なし、追加のユーザー準備は不要。
+- **修正前の原因:** `ThrottleFrameLead()`は1秒以上の待ちで`BeginRecovery()`を呼ぶが、待ち解消時は解除しない。CPU設定は入力遅延D=2・先行上限L=2であり、throttle解消後は`lastRecv >= sendFrame - L = logicalFrame`となり、通常連続受信では必要なremote inputが既に存在する。`NsmbMvlNetplayRuntime.cpp`の受信済み入力経路は`WaitForRemoteInput()`を通らず、そこでしか呼ばれないlockstep用`CompleteRecovery()`も実行しない。ゲーム再開後も残った開始時刻を`PumpLocked()`が60秒後に検出し、`deadline-exceeded`でexit 70する。0.12.0と本修正前のコードにこの経路があった。
+- **影響範囲:** CPU固有ではなく、ロールバック無効の対人戦も同じthrottle・受信済み入力経路を使う。独立再現はCPUワーカーを使わず録画入力を再生しており、CPU AIは発生の必要条件ではない。実WANでの再現は未実施。0.12.0のrollback有効時は`RecoveryEnabled()`自体がfalse。現在の標準ROM-loop rollbackはhorizon待ち側で復旧完了を通知するため、今回のlockstep経路の解除漏れと同一扱いしない。
+- **元のCPU対戦ログ:** Avast VMの0.12.0更新後2試行は、host raw frame 863 / sendFrame 845でそれぞれ1554.140ms・1731.464ms待った後、`throttle-resolved`を記録。ENet切断なし、`Recovery: resumed`なし。終了直前まで入力がlogical frame 4300台へ進んでいた。`basic`単独不一致はGUI判定対象外で、原因には含めない。
+- **独立再現:** Avastなし・Defenderのみ登録されたホストで、VMとSHA256が一致する配布版melonDS 0.12.0を検証用ディレクトリから実行。既存replay fixtureのD/LをCPUと同じ2/2にし、検証子プロセスのclientをinput frame 1003付近で2秒だけ停止・再開した。hostは復旧待ちを解除せず、約68秒の試験中にexit 70。ENet切断0、復旧完了0、共通14486標本の位置・速度・乱数・入力18 field差0。相手プロセスはhostのexit 70を捕捉した後に検証ハーネスが停止しており、その終了コード1は別の復旧障害ではない。
+- **対照:** 同じD=2/L=2・配布版binaryで停止注入なしは87.62秒・20000 raw framesを両側exit 0で完走。共通18290標本の18 field差0。D=3/L=4の既存fixtureでは2秒停止後にhostの`Recovery: resumed`が出た。D=2/L=2でも約34秒で打ち切る6500-frame試験はexit 0だったが、`recovering`は残っており、60秒未満の完走だけでは本欠陥を検出できない。
+- **調査時の検証器の注意:** 修正前のハーネスは「両側でresumed」「frame-limit到達」を必須とするため、片側だけの短い停止、無停止対照、故意に起こす期限切れの各出力は汎用`ok=false`となる。診断は`diagnosis.json`に実験別の終了コード・期限切れ・切断・状態差を照合して保存した。期限切れ捕捉後のUDP proxyのconnection resetは後処理時の例外で、原因判定には使っていない。
+- **残る不確実性:** 元の約1.6〜1.7秒の初回停滞は、clientでCPUワーカーを同期起動してREADYを待つ時期と重なるが、その待ち時間の計測ログがないため、Avastの解析・CPU起動・VM負荷の寄与は未確定。終了自体にはAvastは不要で、上記解除漏れが直接原因。修正後の同条件回帰試験は下記のとおり完了。実CPU GUI・実WANでの修正版の試験は未実施。
+- **証拠:** `G:\VMs\Bigstar-Avast-Lab\Results\2026-10-02\recovery-investigation\`の`diagnosis.json`、`release-d2-lead2-deadline/`、`release-d2-lead2-control/`。VM内の配布版0.12.0とAV設定は維持。修正済みローカルbinaryは`build/release-windows-x86_64/melonDS.exe`。
+
+- **修正後検証:** D=2/L=2でclientを2秒停止する元の再現条件は、hostのwaiting/resumed各1回、約84.73秒・20000 raw frames、両側exit 0で完走。共通18290標本の18 field差0、終了時recovery状態はconnected。10秒UDP遮断も再接続・peer検証・復旧完了を両側で確認し、6500 frames、共通5642標本差0、両側exit 0。65秒UDP遮断は両側exit 70 / failed / deadline-exceededとなり、復旧できない停止を誤って解除しないことを確認。Build / CTest 17件 / verifier 8件pass。
+- **回帰試験の維持:** `scripts/test-nsmb-recovery.py`に`--recovery-role host|client|both`を追加（既定both）。片側の短い停止で待った側だけの復旧を指定できるが、全peerで未解除のwaitingが残る場合・期限切れの場合は成功にしない。検証器に片側指定と解除漏れを見逃さない3テストを追加。
+- **修正後証拠:** `G:\VMs\Bigstar-Avast-Lab\Results\2026-10-02\recovery-fix\summary.json`と各runの`verification.json`。fixtureは調査時の`recovery-investigation/fixture-d2-lead2`、元のreplay fixtureからD/L=2/2と固定sleepフラグを設定したもの。`stall-client2`は`--mode stall-client --outage 2 --trigger-frame 1000 --frames 20000 --recovery-role host`、`udp-reconnect10`は`--mode udp --outage 10 --trigger-frame 1000 --frames 6500`、`udp-timeout65`は`--mode udp --outage 65 --trigger-frame 1000 --frames 20000 --expect-timeout`。すべて修正済み標準buildを使用。
+
 ## ロールバック対戦の再接続 - 2026-10-02 実装・ローカル検証完了
 
 - 対象障害: 9月30日の両者ログで、WebRTC再接続後約3秒でclientのENetが切断し、入力送信が停止したことを確認。hostからclient bridgeへの転送はその後も継続し、両エミュレーターはprediction horizonの60秒待機後exit 73。両者の実行binaryは一致する。

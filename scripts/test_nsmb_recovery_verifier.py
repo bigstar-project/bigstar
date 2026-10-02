@@ -41,6 +41,26 @@ class RecoveryVerifierTests(unittest.TestCase):
     def test_matching_recovery(self):
         self.assertTrue(self.verify())
 
+    def test_only_waiting_peer_must_resume_when_explicitly_selected(self):
+        (self.output / "host/stdout.txt").write_text(
+            "NSMB Recovery: waiting\nNSMB Recovery: resumed\nframe limit reached\n", encoding="utf-8")
+        (self.output / "client/stdout.txt").write_text("frame limit reached\n", encoding="utf-8")
+        self.assertFalse(self.verify())
+        self.assertTrue(recovery.verify(self.output, False, True,
+            [{"generation": 0, "frame": 1500}], ("host",))["ok"])
+
+    def test_unfinished_recovery_cannot_pass_after_prior_resume(self):
+        (self.output / "host/stdout.txt").write_text(
+            "NSMB Recovery: waiting\nNSMB Recovery: resumed\nNSMB Recovery: waiting\nframe limit reached\n",
+            encoding="utf-8")
+        self.assertFalse(self.verify())
+
+    def test_unselected_peer_with_pending_recovery_cannot_pass(self):
+        (self.output / "client/stdout.txt").write_text(
+            "NSMB Recovery: waiting\nframe limit reached\n", encoding="utf-8")
+        self.assertFalse(recovery.verify(self.output, False, True,
+            [{"generation": 0, "frame": 1500}], ("host",))["ok"])
+
     def test_sparse_replay_gates(self):
         self.write_trace("host", [f for f in range(1000, 1900) if f != 1530])
         self.assertTrue(self.verify())

@@ -1105,9 +1105,9 @@ void WritePacketBridgeJitScratchIfNeeded(
         const auto resolveStart = std::chrono::steady_clock::now();
         {
             std::unique_lock<std::mutex> lock(G.Mutex);
-            auto it = G.InputRuntime.RemoteInputs.find(logicalFrame);
             if (rollbackInputActive)
             {
+                auto it = G.InputRuntime.RemoteInputs.find(logicalFrame);
                 if (it == G.InputRuntime.RemoteInputs.end())
                     (void)NetplaySession::TryWaitForRollbackRemoteInputLocked(
                         NetplaySessionContext(),
@@ -1121,10 +1121,10 @@ void WritePacketBridgeJitScratchIfNeeded(
                     RollbackContext(), logicalFrame, remoteInput,
                     predictedRemoteInput);
             }
-            else if (it != G.InputRuntime.RemoteInputs.end())
+            else
             {
-                remoteInput = it->second;
-                hasRemoteInput = true;
+                hasRemoteInput = NetplaySession::TryGetRemoteInputLocked(
+                    NetplaySessionContext(), logicalFrame, remoteInput);
             }
         }
         networkUs += static_cast<unsigned long long>(ElapsedUs(resolveStart));

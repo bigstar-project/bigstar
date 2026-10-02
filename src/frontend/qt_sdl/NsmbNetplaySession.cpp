@@ -64,7 +64,8 @@ void BeginRecovery(Context context) {
 }
 
 void CompleteRecovery(Context context) {
-  if (!context.State.RecoveryStarted || !context.State.ResumeValidated)
+  if (!context.State.RecoveryStarted || !context.State.ResumeValidated ||
+      !context.Transport.IsConnected())
     return;
   context.State.RecoveryStarted.reset();
   WriteRecoveryStatus("connected");
@@ -849,6 +850,19 @@ bool IsPastTestInputRange(Context context, melonDS::u32 targetFrame) {
          targetFrame >= context.Bootstrap.TestFrames;
 }
 
+bool TryGetRemoteInputLocked(Context context, melonDS::u32 targetFrame,
+                             InputState &input) {
+  if (!context.State.ResumeValidated ||
+      (RecoveryEnabled(context) && !context.Transport.IsConnected()))
+    return false;
+  const auto received = context.Inputs.RemoteInputs.find(targetFrame);
+  if (received == context.Inputs.RemoteInputs.end())
+    return false;
+  input = received->second;
+  CompleteRecovery(context);
+  return true;
+}
+
 InputState WaitForRemoteInput(Context context, const Hooks &hooks,
                               melonDS::u32 targetFrame) {
   if ((context.PacketBridge.Only || context.Input.NetplayOnly) &&
@@ -873,9 +887,8 @@ InputState WaitForRemoteInput(Context context, const Hooks &hooks,
       MaybeResendStartReadyLocked(context, hooks);
       MaybeResendLatestInputForFrameLeadLocked(context, hooks);
 
-      const auto input = context.Inputs.RemoteInputs.find(targetFrame);
-      if (input != context.Inputs.RemoteInputs.end() && context.State.ResumeValidated) {
-        CompleteRecovery(context);
+      InputState input;
+      if (TryGetRemoteInputLocked(context, targetFrame, input)) {
         const auto elapsed =
             std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - start)
@@ -902,7 +915,7 @@ InputState WaitForRemoteInput(Context context, const Hooks &hooks,
         context.DiagnosticsRuntime.EndRemoteWait();
         TraceHangPhase(context, "end", "remote-input-wait", -1, targetFrame,
                        targetFrame, context.Inputs.LastSentInputFrame);
-        return input->second;
+        return input;
       }
 
       if (RecoveryEnabled(context) &&
