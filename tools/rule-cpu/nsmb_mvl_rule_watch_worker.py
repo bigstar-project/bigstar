@@ -1,8 +1,10 @@
 """Standalone local CPU worker. Standard input/output is a frame-synchronous protocol."""
 import argparse
+import gzip
 import json
 import os
 import sys
+from contextlib import ExitStack
 from nsmb_mvl_rule_profiles import PROFILES, make_rule
 
 
@@ -17,13 +19,17 @@ def main():
         return
     profile = os.environ.get('MELONDS_NSML_RULE_PROFILE', 'beginner')
     controller = make_rule(profile, 1, period=48 if profile == 'beginner' else 60)
-    generation = None
-    origin = 0
-    last = -1
-    next_decision = 0
-    held = 0
-    print('READY', flush=True)
-    for line in sys.stdin:
+    # Opt-in diagnostics only: normal GUI matches perform no recording I/O.
+    with ExitStack() as resources:
+        capture_path = os.environ.get('MELONDS_NSML_RULE_CAPTURE')
+        capture = resources.enter_context(gzip.open(capture_path, 'xt', encoding='utf8', compresslevel=1)) if capture_path else None
+        print('READY', flush=True)
+        run(controller, sys.stdin, capture)
+
+
+def run(controller, requests, capture=None):
+    generation, origin, last, next_decision, held = None, 0, -1, 0, 0
+    for line in requests:
         request = json.loads(line)
         decision = request['decision']
         time = decision['time']
@@ -44,6 +50,9 @@ def main():
         elif frame >= next_decision:
             held = controller.act(decision, frame-origin, int(request['previousHeld']))
             next_decision = frame + 6
+        if capture is not None:
+            capture.write(json.dumps(dict(decision=decision, previousHeld=request['previousHeld'],
+                                          held=held, trace=getattr(controller, 'trace', {})), separators=(',', ':'))+'\n')
         print(f'{frame} {held}', flush=True)
 
 if __name__ == '__main__':

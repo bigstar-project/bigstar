@@ -210,7 +210,12 @@ class RoutedHumanRule(HumanInspiredRule):
         x=me['pos']['x']/4096; depth=-me['pos']['y']/4096; vx=me['vel']['x']/4096
         grounded=bool(raw['collisionFlagRaw']&(1|0x8000)) and not raw['actionFlagRaw']&4
         if frame-self.last_route>=24:self.navigator.update(me)
-        if self.previous_x is not None and abs(wrap(x,self.previous_x))<.5 and previous_held&48:
+        # PlayerPhysicsFlag::entranceOut: spawning/pipe exit has not yet
+        # handed horizontal movement to the player. Waiting here is not a
+        # failed path and must not arm a reverse escape on regaining control.
+        if raw.get('physicsFlagRaw', 0) & 1:
+            self.stuck_frames=0;self.escape_until=-1
+        elif self.previous_x is not None and abs(wrap(x,self.previous_x))<.5 and previous_held&48:
             self.stuck_frames+=elapsed
         else:self.stuck_frames=0
         self.previous_x=x
@@ -341,6 +346,7 @@ class RoutedHumanRule(HumanInspiredRule):
         if intentional_drop:jump=False
         danger=False
         landing_avoid=0
+        landing_avoid_causes=[]
         item_avoid=0
         body_avoid=0
         body_jump=(other['found'] and not other['dead'] and me['battleStars']>0
@@ -393,6 +399,12 @@ class RoutedHumanRule(HumanInspiredRule):
                 future=hx+(entity['vel']['x']/4096-vx)*time_to_level
                 if time_to_level<24 and abs(future)<28:
                     landing_avoid=-1 if hx>0 else 1
+                    # Retain every contributor: another NPC can keep this
+                    # override active after one suspected hazard is excluded.
+                    landing_avoid_causes.append(dict(guid=entity.get('actorGuid'),category=category,
+                        dx=hx,dy=hy,vx=entity['vel']['x']/4096,vy=entity['vel']['y']/4096,
+                        shell_mode=entity.get('koopaShellModeRaw'),time_to_level=time_to_level,
+                        projected_dx=future,direction=landing_avoid))
         if self.stuck_frames>90:
             self.escape_until=frame+30;self.stuck_frames=0
         if frame<self.escape_until:
@@ -472,6 +484,7 @@ class RoutedHumanRule(HumanInspiredRule):
                           stomp_attempt=stomp_attempt,close_stomp=close_stomp,ascent_run=ascent_run,
                           landing_brake=landing_brake,runup=self.runup.copy() if self.runup else None,
                           contact_advantage=contact_advantage,overhead_evade=overhead_evade,body_jump=body_jump,body_avoid=body_avoid,body_evade=body_evade,ascent_retries=attempts)
+        if landing_avoid_causes:self.trace['landing_avoid_causes']=landing_avoid_causes
         # Experimental default running, preserving explicit precision phases.
         precision=(recovery or ledge_reset or landing_brake or runup_active or close_stomp
                    or (kind=='powerup_box' and abs(tx)<16))
@@ -517,11 +530,15 @@ class RoutedHumanRule(_OriginalRule):
     def reset(self):
         super().reset()
         self.emergence_plan = None
+        # Scope the new route to the first equipment after controller reset.
+        # Re-equipment later in the match keeps the established planner.
+        self.first_equipment_seen = False
 
     def act(self, decision, frame, previous_held=0):
         held = super().act(decision, frame, previous_held)
         me = decision['observation']['players'][self.player]
         raw = decision['runtimePlayers'][self.player]
+        self.first_equipment_seen |= raw['currentPowerupRaw'] != 0
         entities = decision['observation']['entities']
         active = getattr(self, 'emergence_plan', None)
         eligible = (raw['currentPowerupRaw'] == 0 and not me['dead']
@@ -535,6 +552,8 @@ class RoutedHumanRule(_OriginalRule):
         if active:
             reason = ('player_state' if not eligible else
                       invalidation_reason(active, frame, me, entities, terrain_signature))
+            if reason is None:
+                reason = _edge_world_reason(active, decision, self.player, frame, self.navigator)
             if reason:
                 self.trace['emergence_plan_cancel'] = reason
                 active = None
@@ -548,6 +567,11 @@ class RoutedHumanRule(_OriginalRule):
                 if e.get('category') not in ('enemy_goomba', 'enemy_koopa', 'player_fireball'):
                     continue
                 if abs(delta(e['pos'], me['pos'])[0]) > 256:
+                    continue
+                # ROM-verified flattened state cannot damage the player.
+                # Restrict this exclusion to item planning; do not loosen combat paths.
+                if (not self.first_equipment_seen and e.get('category') == 'enemy_goomba'
+                        and e.get('goombaBehaviorFunctionRaw') == 0x020E13D0):
                     continue
                 if e.get('category') != 'enemy_goomba' or abs(e['vel']['x']) != 2048:
                     known = False; break
@@ -563,9 +587,21 @@ class RoutedHumanRule(_OriginalRule):
                     plans = [planner(initial, previous_held,
                         int(decision['time'].get('inputDelay', 2)), item,
                         self.navigator.occupied, paths) for planner in
-                        (plan_ground_interception, plan_ascent_interception)]
+                        (plan_ground_interception, _PreviousAscent if self.first_equipment_seen else plan_ascent_interception)]
                     valid = [plan for plan in plans if plan]
                     plan = min(valid, key=lambda p:p['pickup_frame']) if valid else None
+                    if plan and plan.get('edge_route'):
+                        other = decision['observation']['players'][self.player ^ 1]
+                        if (raw.get('subActionFlagRaw',1)&1 or
+                                (other['found'] and not other['dead']
+                                 and abs(delta(other['pos'], me['pos'])[0]) < 128)):
+                            # Keep the old safe alternatives when the new edge
+                            # approach is ineligible near another player.
+                            fallback = _PreviousAscent(initial, previous_held,
+                                int(decision['time'].get('inputDelay', 2)), item,
+                                self.navigator.occupied, paths)
+                            plan = min((p for p in (plans[0], fallback) if p),
+                                       key=lambda p:p['pickup_frame'], default=None)
                     if plan:
                         active = dict(plan, start=frame, terrain_signature=terrain_signature)
                         break
@@ -578,6 +614,8 @@ class RoutedHumanRule(_OriginalRule):
             self.landing_support = None
             self.trace['emergence_intercept'] = {k:active[k] for k in
                 ('start', 'held', 'duration', 'pickup_frame', 'item_guid', 'item_x', 'item_depth')}
+            if active.get('edge_route'):
+                self.trace['emergence_edge_route'] = active['edge_route']
         self.trace['held'] = held
         return held
 
@@ -1940,7 +1978,8 @@ class RoutedHumanRule(_SkidJumpBase):
         held=super().act(decision,frame,previous_held)
         obs=decision['observation'];me=obs['players'][self.player];raw=decision['runtimePlayers'][self.player]
         delay=int(decision.get('time',{}).get('inputDelay',-1))
-        allowed=(not me['dead'] and raw['currentPowerupRaw'] in (0,1)
+        allowed=(not me['dead'] and (raw['currentPowerupRaw'] in (0,1)
+                 or (raw['currentPowerupRaw']==2 and held&2048 and previous_held&2048))
                  and not raw.get('damageStateRaw',1) and not raw.get('updateLockedRaw',1)
                  and raw['actionFlagRaw'] in (0,0x100000) and 0<=delay<=6
                  and 'tileGround' in me.get('contact',{}))
@@ -2747,4 +2786,899 @@ class RoutedHumanRule(_OverheadPitBase):
             held=plan['held']
             self.trace.update(held=held,overhead_pit_jump={k:v for k,v in plan.items() if k!='points'})
         self.overhead_pit_plan=plan
+        return held
+
+
+from nsmb_mvl_recovery_finish import landing_plan as _recovery_landing_plan, plan_valid as _recovery_plan_valid
+
+_RecoveryFinishBase = RoutedHumanRule
+class RoutedHumanRule(_RecoveryFinishBase):
+    def reset(self):
+        super().reset()
+        self.last_pit_recovery = -1000
+        self.recovery_finish_plan = None
+        self.recovery_finish_nav = GrassNavigator()
+
+    def act(self, decision, frame, previous_held=0):
+        held = super().act(decision, frame, previous_held)
+        if self.trace.get('recovery') and self.trace.get('in_shaft'):
+            self.last_pit_recovery = frame
+        plan = self.recovery_finish_plan
+        other = decision['observation']['players'][self.player^1]
+        me = decision['observation']['players'][self.player]
+        ort = decision['runtimePlayers'][self.player^1]
+        dx, dy = delta(other['pos'], me['pos'])
+        # Landing support alone is insufficient in immediate close combat.
+        # This is a short local risk filter, not a guarantee against new shots.
+        combat_clear = (not other['found'] or other['dead'] or
+                        (ort.get('currentPowerupRaw') in (0,1,2)
+                         and not ort.get('physicsFlagRaw',32)&32
+                         and (abs(dx)>=32 or abs(dy)>=64)))
+        if plan:
+            self.recovery_finish_nav.update(me)
+            elapsed = frame-plan['start']
+            combat_clear = combat_clear and _counterjump_hazards_clear(
+                decision, self.player, plan['points'][elapsed:elapsed+6], self.recovery_finish_nav.occupied)
+        if plan and (not combat_clear or not _recovery_plan_valid(plan, decision, self.player, frame)):
+            self.trace['recovery_finish_end'] = frame
+            plan = None
+        if plan is None and combat_clear and 0 <= frame-self.last_pit_recovery <= 18 and self.trace.get('target') == 'protect_lead':
+            proposal = _recovery_landing_plan(decision, self.player, held, previous_held,
+                                              self.recovery_finish_nav, forecast_player)
+            if proposal and _counterjump_hazards_clear(decision, self.player, proposal['points'][:proposal['landing_after']], self.recovery_finish_nav.occupied):
+                plan = dict(proposal, start=frame,
+                            form=decision['runtimePlayers'][self.player]['currentPowerupRaw'])
+        if plan:
+            held = plan['held']
+            self.trace.update(held=held, recovery_finish={k:v for k,v in plan.items() if k != 'points'})
+        self.recovery_finish_plan = plan
+        return held
+
+
+from nsmb_mvl_npc_landing import choose_plan as _npc_landing_plan, valid_plan as _npc_landing_valid
+_NpcLandingBase = RoutedHumanRule
+class RoutedHumanRule(_NpcLandingBase):
+    def reset(self):
+        super().reset()
+        self.npc_landing_plan = None
+        self.npc_landing_retry = -1
+        self.npc_landing_nav = GrassNavigator()
+
+    def act(self, decision, frame, previous_held=0):
+        held = super().act(decision, frame, previous_held)
+        plan = self.npc_landing_plan
+        if plan and not _npc_landing_valid(plan, decision, self.player, frame-plan['start']):
+            self.trace['npc_landing_end'] = dict(start=plan['start'], elapsed=frame-plan['start'])
+            plan = None
+        if plan is None and frame >= self.npc_landing_retry:
+            proposal = _npc_landing_plan(decision, self.player, held, previous_held, self.npc_landing_nav)
+            if proposal:
+                plan = dict(proposal, start=frame)
+                self.npc_landing_retry = frame+48
+        if plan:
+            held = plan['held']
+            self.trace.update(held=held, npc_landing_brake={k:v for k,v in plan.items() if k not in ('points','track')})
+        self.npc_landing_plan = plan
+        return held
+
+
+from nsmb_mvl_wait_wall import choose_plan as _wait_wall_plan, plan_valid as _wait_wall_valid
+
+_WaitWallBase = RoutedHumanRule
+class RoutedHumanRule(_WaitWallBase):
+    def reset(self):
+        super().reset()
+        self.wait_wall_plan = None
+        self.wait_wall_nav = GrassNavigator()
+
+    def act(self, decision, frame, previous_held=0):
+        held = super().act(decision, frame, previous_held)
+        plan = self.wait_wall_plan
+        if plan and not _wait_wall_valid(plan, decision, self.player, frame):
+            plan = None
+        if (plan is None and self.trace.get('target') == 'wait'
+                and frame >= self.wall_depart_until):
+            proposal = _wait_wall_plan(decision,self.player,held,previous_held,
+                                      self.wait_wall_nav,_shaft_contact_forecast,
+                                      _late_wall_contact_depth_bound)
+            if proposal:
+                plan = dict(proposal,start=frame)
+        if plan:
+            me = decision['observation']['players'][self.player]
+            contact = me.get('contact',{}).get('wallRight' if plan['held']&16 else 'wallLeft')
+            held = plan['held'] | (2 if contact and not previous_held&2 else 0)
+            self.trace.update(held=held,wait_wall={k:v for k,v in plan.items() if k!='points'})
+        self.wait_wall_plan = plan
+        return held
+
+
+"""Brake on support before an overhead walking/falling Goomba intercepts us.
+
+Small ordinary form only. No actor-contact response is simulated; the route
+must remain separated and supported. Revalidate actual positions every tick.
+"""
+_FallingGoombaBase=RoutedHumanRule
+class RoutedHumanRule(_FallingGoombaBase):
+    def reset(self):
+        super().reset()
+        self.falling_goomba_plan=None
+        self.falling_goomba_nav=GrassNavigator()
+
+    def act(self,decision,frame,previous_held=0):
+        held=super().act(decision,frame,previous_held)
+        obs=decision['observation'];me=obs['players'][self.player];raw=decision['runtimePlayers'][self.player]
+        plan=self.falling_goomba_plan
+        eligible=(me.get('found') and raw.get('found') and not me['dead']
+                  and obs.get('stage',{}).get('group')==9 and obs.get('stage',{}).get('id')==0
+                  and raw.get('currentPowerupRaw')==0
+                  and me.get('contact',{}).get('tileGround')
+                  and raw.get('physicsFlagRaw') in (0,130)
+                  and raw.get('actionFlagRaw') in (0,0x100000)
+                  and not raw.get('damageStateRaw',1) and not raw.get('damageCooldownRaw',1)
+                  and not raw.get('updateLockedRaw',1))
+        other=obs['players'][self.player^1]
+        if other['found'] and not other['dead'] and abs(delta(other['pos'],me['pos'])[0])<128:
+            eligible=False
+        entities=[e for e in obs['entities']
+                  if e.get('category') in ('enemy_goomba','enemy_koopa','player_fireball')
+                  and not (e.get('entityUpdateStateFound') and e.get('entityUpdateStateRaw')==2)
+                  and abs(delta(e['pos'],me['pos'])[0])<160
+                  and abs(delta(e['pos'],me['pos'])[1])<128]
+        if len(entities)!=1 or entities[0].get('category')!='enemy_goomba':eligible=False
+        if plan:
+            elapsed=frame-plan['start']
+            if not eligible or not 0<elapsed<48 or entities[0].get('actorGuid')!=plan['guid']:
+                self.trace['falling_goomba_end']=dict(start=plan['start'],frame=frame,reason='state_or_hazards')
+                plan=None
+            else:
+                expected=plan['points'][elapsed-1];target=plan['track'][elapsed-1];enemy=entities[0]
+                error=max(abs(wrap(me['pos']['x']/4096,expected['x'])),abs(-me['pos']['y']/4096-expected['depth']),
+                          abs(wrap(enemy['pos']['x']/4096,target['x'])),abs(-enemy['pos']['y']/4096-target['depth']))
+                if error>.25 or enemy.get('goombaBehaviorFunctionRaw')!=0x020E1538:
+                    self.trace['falling_goomba_end']=dict(start=plan['start'],frame=frame,reason='forecast_or_enemy_state',error=error)
+                    plan=None
+        delay=decision.get('time',{}).get('inputDelay',-1)
+        vx=me['vel']['x']/4096
+        direction=int(bool(held&16))-int(bool(held&32))
+        if (plan is None and eligible and 0<=delay<=6 and not previous_held&3
+                # High-speed reversal enters native skid phase 2 (.09375/f).
+                # This forecast models the ordinary turn only. With <=6 queued
+                # frames, 2.25 leaves margin before the 2.5 skid threshold.
+                and not held&(64|128|1024) and direction*vx>.1 and abs(vx)<2.25
+                and raw.get('facingKnown') and raw.get('behaviorFuncRaw')==0x02115AAC):
+            enemy=entities[0];dx,dy=delta(enemy['pos'],me['pos'])
+            hb=me.get('hitbox',{})
+            if 12<direction*dx<80 and 24<dy<96 and hb.get('found') and hb.get('fixedPointShift')==12:
+                nav=self.falling_goomba_nav;nav.update(me)
+                track,status=_short_jump_goomba_forecast(enemy,nav.occupied,48)
+                if status=='horizon' and len(track)==48 and track[-1]['depth']>track[0]['depth']+8:
+                    cx,cy,hw,hh=[hb[k]/4096 for k in ('centerOffsetX','centerOffsetY','halfWidth','halfHeight')]
+                    def clearance(points,margin=0):
+                        return min(max(abs(wrap(p['x']+cx,e['x']))-hw-7-margin,
+                                       abs(p['depth']-cy-(e['depth']-8))-hh-8-margin)
+                                   for p,e in zip(points,track))
+                    initial=dict(x=me['pos']['x']/4096,depth=-me['pos']['y']/4096,
+                                 vx=vx,vy=me['vel']['y']/4096,grounded=True,
+                                 previous_input=previous_held,occupied=nav.occupied,height=16,facing=raw['facing'])
+                    nominal,end=forecast_player(**initial,inputs=[previous_held]*delay+[held]*(48-delay))
+                    if len(nominal)>=30 and clearance(nominal[:30])<0:
+                        brake=(32 if direction>0 else 16)|2048
+                        for duration in (6,12,18,24):
+                            commands=[previous_held]*delay+[brake]*duration+[0]*(48-delay-duration)
+                            points,end=forecast_player(**initial,inputs=commands)
+                            if (end!='horizon' or len(points)!=48 or clearance(points,2)<0
+                                    or any(not p['grounded'] or p['contact'] is not None for p in points)
+                                    or any(not nav.occupied(p['x']+o,p['depth']+1) for p in points for o in (-hw,hw))):continue
+                            plan=dict(start=frame,held=brake,duration=duration,delay=delay,points=points,track=track,
+                                      guid=enemy['actorGuid'],clearance=clearance(points,2))
+                            break
+        if plan:
+            held=plan['held'] if frame-plan['start']<plan['duration'] else 0
+            self.trace.update(held=held,falling_goomba_brake={k:v for k,v in plan.items() if k not in ('points','track')})
+        self.falling_goomba_plan=plan
+        return held
+
+"""Bounded diagnostic: release a wall-jump hold before overshooting support."""
+from nsmb_mvl_wall_flight_forecast import forecast_wall_flight as _short_wall_flight
+from nsmb_mvl_player_motion_forecast import forecast_player as _short_wall_free
+
+def _wall_short_path(decision,player,commands,navigator,counter_landing_turn=False):
+    me=decision['observation']['players'][player];raw=decision['runtimePlayers'][player]
+    height=16 if raw['currentPowerupRaw']==0 else 27
+    points,status=_short_wall_flight(me['pos']['x']/4096,-me['pos']['y']/4096,
+        me['vel']['x']/4096,me['vel']['y']/4096,commands,navigator.occupied,height=height,
+        wall_left=me['contact']['wallLeft'],wall_right=me['contact']['wallRight'])
+    if status!='vertical_release' or not points:return None
+    n=len(points);last=points[-1]
+    tail,status=_short_wall_free(last['x'],last['depth'],last['vx'],last['vy'],False,
+        commands[n-1],commands[n:],navigator.occupied,height=height,facing=raw['facing'],
+        counter_landing_turn=counter_landing_turn)
+    return [dict(p,grounded=False,contact=None) for p in points]+tail,status
+
+def _wall_short_hazards(decision,player,points,navigator):
+    obs=decision['observation'];me=obs['players'][player];hb=me.get('hitbox',{})
+    if not hb.get('found') or hb.get('fixedPointShift')!=12:return False
+    other=obs['players'][player^1]
+    if _skid_opponent_can_reach_plan(other,decision['runtimePlayers'][player^1],points):return False
+    for e in obs['entities']:
+        if e.get('category') not in ('enemy_goomba','enemy_koopa'):continue
+        if e.get('entityUpdateStateFound') and e.get('entityUpdateStateRaw')==2:continue
+        dx,dy=delta(e['pos'],me['pos'])
+        if abs(dx)>240 or abs(dy)>160:continue
+        if e['category']=='enemy_goomba':track,status=_short_jump_goomba_forecast(e,navigator.occupied,len(points))
+        elif (e.get('koopaShellModeRaw')==1 and e.get('koopaBehaviorFunctionRaw')==0x020DF9F8
+                and e['vel']['x']==0 and e['vel']['y']==0 and e.get('koopaCollisionRaw',0)&0x100):
+            # A distant resting shell cannot be kicked by either player along
+            # this bounded route. Allow an ordinary wake-up walking envelope
+            # of 1 px/frame (measured walking speed is .5), in either direction.
+            ex=e['pos']['x']/4096;ed=-e['pos']['y']/4096;n=len(points)
+            if (other.get('found') and not other.get('dead')
+                    and abs(wrap(other['pos']['x']/4096,ex))<=24+4*n):return False
+            if not all(navigator.occupied(ex+o,ed+1) for o in range(-n,n+1)):return False
+            if any(abs(wrap(p['x'],ex))<=24+i for i,p in enumerate(points,1)):return False
+            continue
+        elif e.get('koopaShellModeRaw')==0 and e.get('koopaBehaviorFunctionRaw')==0x020DFC58:
+            track,status=forecast_ground_koopa(e,navigator.occupied,len(points))
+        else:return False
+        if status!='horizon' or len(track)!=len(points):return False
+        for p,q in zip(points,track):
+            separation=max(abs(wrap(p['x']+hb['centerOffsetX']/4096,q['x']))-hb['halfWidth']/4096-8,
+                abs(p['depth']-hb['centerOffsetY']/4096-(q['depth']-8))-hb['halfHeight']/4096-8)
+            if separation<4:return False
+    reduced=dict(decision,observation=dict(obs,entities=[e for e in obs['entities'] if e.get('category')=='player_fireball']))
+    return _counterjump_hazards_clear(reduced,player,points,navigator.occupied)
+
+_WallShortBase=RoutedHumanRule
+class RoutedHumanRule(_WallShortBase):
+    def reset(self):
+        super().reset();self.wall_short_nav=GrassNavigator()
+
+    def act(self,decision,frame,previous_held=0):
+        held=super().act(decision,frame,previous_held)
+        obs=decision['observation'];me=obs['players'][self.player];raw=decision['runtimePlayers'][self.player]
+        delay=decision.get('time',{}).get('inputDelay',-1)
+        direction=int(bool(held&16))-int(bool(held&32));vx=me['vel']['x']/4096;vy=me['vel']['y']/4096
+        if (not me.get('found') or not raw.get('found') or me['dead'] or obs.get('stage',{}).get('group')!=9
+                or obs.get('stage',{}).get('id')!=0 or raw.get('currentPowerupRaw') not in (0,1,2)
+                or raw.get('physicsFlagRaw')!=2 or raw.get('actionFlagRaw')!=0x100020
+                or raw.get('behaviorFuncRaw')!=0x021135B8 or raw.get('behaviorStepRaw')!=1
+                or raw.get('damageStateRaw',1) or raw.get('damageCooldownRaw',1) or raw.get('updateLockedRaw',1)
+                or not 0<=delay<=6 or not held&2 or not previous_held&2
+                or held&~(2|48|2048) or previous_held&~(2|48|2048)
+                or direction*vx>=0 or abs(vx)!=2.25 or not 2.5<vy<=3.4375
+                or not 160<=-me['pos']['y']/4096<272
+                or self.trace.get('target')!='carrier'
+                or (raw['currentPowerupRaw']==2 and not (held&2048 and previous_held&2048))):return held
+        remaining=min(48,int(math.ceil(max(0,self.jump_until-frame)/6))*6)
+        if remaining<6:return held
+        nav=self.wall_short_nav;nav.update(me);horizon=72
+        nominal_commands=[previous_held]*delay+[held]*remaining+[held&~3]*(horizon-delay-remaining)
+        nominal=_wall_short_path(decision,self.player,nominal_commands,nav)
+        if nominal is None:return held
+        baseline,end=nominal
+        if not baseline or any(p.get('contact')=='floor' for p in baseline) or baseline[-1]['depth']<320:return held
+        commands=nominal_commands[:];commands[delay:delay+6]=[held&~3]*6
+        proposed=_wall_short_path(decision,self.player,commands,nav)
+        if proposed is None:return held
+        # Counter-input landing can enter a turn state, even after facing
+        # changed in free air. Require support and clearance in both branches.
+        turning=_wall_short_path(decision,self.player,commands,nav,counter_landing_turn=True)
+        if turning is None:return held
+        for points,end in (proposed,turning):
+            landing=next((i+1 for i,p in enumerate(points) if p.get('contact')=='floor'),None)
+            if (landing is None or landing>48 or len(points)<landing+6
+                    or not all(p['grounded'] and p['depth']<=272 for p in points[landing-1:landing+6])
+                    or not _wall_short_hazards(decision,self.player,points[:landing+6],nav)):return held
+        held&=~3
+        self.trace.update(held=held,wall_short=dict(start=frame,landing_after=landing,
+            nominal_end_depth=baseline[-1]['depth'],nominal_remaining_hold=remaining))
+        return held
+
+def _shot_recovery_landing_plan(decision, player, held, previous, navigator, forecast):
+    me = decision['observation']['players'][player]
+    raw = decision['runtimePlayers'][player]
+    vx, vy = me['vel']['x']/4096, me['vel']['y']/4096
+    direction = 1 if vx > 0 else -1
+    wanted = int(bool(held & 16))-int(bool(held & 32))
+    delay = decision.get('time', {}).get('inputDelay', -1)
+    if (me['dead'] or me.get('contact', {}).get('tileGround', True)
+            or not .1 <= abs(vx) <= 3 or not -4 <= vy <= 3.5
+            or wanted != -direction or held & (3 | 64 | 128)
+            or raw.get('currentPowerupRaw') not in (0, 1, 2)
+            or raw.get('physicsFlagRaw') not in (2, 128)
+            or raw.get('behaviorFuncRaw') not in (0x02115AAC, 0x021135B8, 0x02110DC0)
+            or raw.get('damageStateRaw', 1) or raw.get('damageCooldownRaw', 1)
+            or raw.get('updateLockedRaw', 1) or not 0 <= delay <= 6):
+        return None
+    navigator.update(me)
+    initial = dict(x=me['pos']['x']/4096, depth=-me['pos']['y']/4096,
+                   vx=vx, vy=vy, grounded=False, previous_input=previous,
+                   occupied=navigator.occupied,
+                   height=16 if raw['currentPowerupRaw'] == 0 else 27,
+                   facing=raw['facing'])
+    horizon = 36
+    nominal, status = forecast(**initial, inputs=[previous]*delay+[held]*(horizon-delay))
+    # A forecast reaching below the grass floor stops at a shaft wall.
+    # It cannot assert a later death or
+    # wall kick. It can still establish that this reversal misses support.
+    if (status not in ('deep', 'wall') or not nominal
+            or nominal[-1]['depth'] < 280
+            or nominal[-1]['vy'] > -2 or any(p['contact'] for p in nominal)):
+        return None
+    forward = (16 if direction > 0 else 32) | 2048
+    points, status = forecast(**initial, inputs=[previous]*delay+[forward]*(horizon-delay))
+    landing = next((i+1 for i, p in enumerate(points) if p['contact'] == 'floor'), None)
+    if landing is None or landing > 30 or any(p['contact'] not in (None, 'floor') for p in points[:landing]):
+        return None
+    return dict(held=forward, points=points, landing_after=landing,
+                nominal_end_depth=nominal[-1]['depth'])
+
+
+
+def _shot_recovery_clear(decision,player,points,occupied):
+    obs=decision['observation'];hb=obs['players'][player].get('hitbox',{})
+    if not hb.get('found') or hb.get('fixedPointShift')!=12:return False
+    # A flattened Goomba cannot damage the player (verified US damagePlayer).
+    entities=[e for e in obs['entities'] if not (e.get('category')=='enemy_goomba' and e.get('goombaBehaviorFunctionRaw')==0x020E13D0)]
+    filtered=dict(decision,observation=dict(obs,entities=entities))
+    return (_counterjump_hazards_clear(filtered,player,points,occupied)
+            and not _skid_opponent_can_reach_plan(obs['players'][player^1],decision['runtimePlayers'][player^1],points))
+
+_ShotRecoveryBase=RoutedHumanRule
+class RoutedHumanRule(_ShotRecoveryBase):
+    def reset(self):
+        super().reset();self.shot_recovery_plan=None;self.shot_recovery_nav=GrassNavigator()
+    def act(self,decision,frame,previous_held=0):
+        held=super().act(decision,frame,previous_held)
+        obs=decision['observation'];me=obs['players'][self.player];raw=decision['runtimePlayers'][self.player]
+        nav=self.shot_recovery_nav;nav.update(me);plan=self.shot_recovery_plan
+        if plan:
+            elapsed=frame-plan['start']
+            if (not _recovery_plan_valid(plan,decision,self.player,frame)
+                    or not _shot_recovery_clear(decision,self.player,plan['points'][elapsed:plan['landing_after']+6],nav.occupied)):
+                plan=None
+        flat_near=any(e.get('category')=='enemy_goomba' and e.get('goombaBehaviorFunctionRaw')==0x020E13D0
+            and abs(delta(e['pos'],me['pos'])[0])<32 and abs(delta(e['pos'],me['pos'])[1])<48 for e in obs['entities'])
+        if (plan is None and me.get('found') and raw.get('found')
+                and obs.get('stage',{}).get('group')==9 and obs.get('stage',{}).get('id')==0
+                and raw.get('currentPowerupRaw')==2 and raw.get('physicsFlagRaw')==128
+                and raw.get('behaviorFuncRaw')==0x02110DC0 and raw.get('behaviorStepRaw')==1
+                and self.trace.get('target')=='carrier' and abs(self.trace.get('dx',0))>=128
+                and 0<=frame-self.last_pit_recovery<=18 and flat_near
+                and held&2048 and previous_held&2048):
+            proposed=_shot_recovery_landing_plan(decision,self.player,held,previous_held,nav,forecast_player)
+            if proposed:
+                landing=proposed['landing_after'];points=proposed['points']
+                if (len(points)>=landing+6 and all(p['grounded'] and p['depth']<=272 for p in points[landing-1:landing+6])
+                        and _shot_recovery_clear(decision,self.player,points[:landing+6],nav.occupied)):
+                    plan=dict(proposed,start=frame,form=2)
+        if plan:
+            held=plan['held'];self.trace.update(held=held,shot_recovery={k:v for k,v in plan.items() if k!='points'})
+        self.shot_recovery_plan=plan
+        return held
+
+"""Opening mushroom approach via either end of its supporting platform.
+
+Both endpoints come from terrain. Move out from under the ceiling, brake,
+jump with optional neutral lift, then turn back. This is a candidate generator,
+not an exact shortest-path solver. The caller limits this to first equipment.
+"""
+from nsmb_mvl_item_forecast import forecast_emerging
+from nsmb_mvl_native_interception import select_interception
+from nsmb_mvl_player_motion_forecast import MovementForecastCache, forecast_player
+
+
+def _edge_wrap(value):
+    return (value + 512) % 1024 - 512
+
+
+def plan_edge_interception(initial, previous, delay, entity, occupied,
+                           enemy_paths=(), horizon=160, only_side=None):
+    # The ground prefix releases jump before launching again, even when the
+    # preceding box-hit input still holds B at the moment of landing.
+    if (not initial['grounded'] or delay not in range(7)
+            or abs(initial['vx']) >= 2.25):
+        return None
+    items = forecast_emerging(entity, occupied, horizon)
+    if items is None:
+        return None
+    raw = entity['itemEmergenceTargetYRaw']
+    surface = -(raw - 2**32 if raw >= 2**31 else raw) / 4096
+    item_x = initial['x'] + _edge_wrap(entity['pos']['x']/4096 - initial['x'])
+    if not 40 <= initial['depth'] - surface <= 80:
+        return None
+    if not occupied(item_x, surface + 1):
+        return None
+    left = (item_x // 16) * 16
+    right = left + 16
+    for _ in range(8):
+        if not occupied(left - 1, surface + 1):
+            break
+        left -= 16
+    else:
+        return None
+    for _ in range(8):
+        if not occupied(right, surface + 1):
+            break
+        right += 16
+    else:
+        return None
+    if not left - 24 <= initial['x'] <= right + 24:
+        return None
+    cache = MovementForecastCache(initial, previous, occupied)
+    candidates = []
+    for side, away in ((-1, 32), (1, 16)):
+        if only_side is not None and side != only_side:
+            continue
+        toward = 48 - away
+        for back in range(6, 67, 6):
+            for brake in (0, 6, 12, 18):
+                ground = [previous]*delay + [away | 2048]*back + [toward | 2048]*brake
+                points, _ = cache.forecast(ground)
+                if len(points) != len(ground) or not all(p['grounded'] for p in points):
+                    continue
+                takeoff = points[-1]
+                clearance = left-takeoff['x'] if side < 0 else takeoff['x']-right
+                if not 8 <= clearance <= 32:
+                    continue
+                # An above-platform launch would merely reproduce the earlier
+                # one-sided wall model error, not establish a safe new route.
+                if any(occupied(takeoff['x']+x, y) for x in (-8,0,8)
+                       for y in range(int(surface), int(initial['depth'])-15, 8)):
+                    continue
+                for lift in (0, 6, 12):
+                    for jump in (18, 24, 30):
+                        inputs = ground + [2]*lift + [toward | 2050]*jump
+                        inputs += [toward | 2048]*(horizon-len(inputs))
+                        candidates.append(dict(side=side, back=back, brake=brake,
+                            lift=lift, jump=jump, held=toward | 2048,
+                            duration=back+brake+lift+jump, inputs=inputs))
+    if not candidates:
+        return None
+    native = select_interception(initial, previous, occupied, items, enemy_paths, candidates, 1)
+    if native is None:
+        # Offline fallback uses the same conservative pickup and enemy margins.
+        best = None
+        for index, trial in enumerate(candidates):
+            points, _ = forecast_player(**initial, previous_input=previous,
+                                        inputs=trial['inputs'], occupied=occupied)
+            for i, (point, item) in enumerate(zip(points, items)):
+                if (point['depth'] > 288 or any(i >= len(path) or
+                    (abs(_edge_wrap(point['x']-path[i]['x'])) < 16 and
+                     abs(point['depth']-path[i]['depth']) < 24) for path in enemy_paths)):
+                    break
+                if (item['collectable'] and abs(_edge_wrap(point['x']-item['x'])) < 10
+                        and abs(point['depth']-item['depth']) < 10):
+                    if best is None or i+1 < best[1]:
+                        best = (index, i+1)
+                    break
+        native = best
+    if native is None or native[0] < 0:
+        return None
+    index, pickup = native
+    trial = candidates[index]
+    points, _ = forecast_player(**initial, previous_input=previous,
+                                inputs=trial['inputs'], occupied=occupied)
+    if len(points) < pickup:
+        return None
+    # The existing integrator checks only the side matching velocity. Observed
+    # native frame 199 also corrects overlap on the opposite side while rising.
+    # Do not accept that unmodeled contact or just increase deviation tolerance.
+    if any(not p['grounded'] and any(occupied(p['x']+x, p['depth']-h)
+           for x in (-8,8) for h in (4,11)) for p in points[:pickup]):
+        return None
+    return dict(pickup_frame=pickup, held=trial['held'], duration=horizon-delay,
+                input_sequence=trial['inputs'][delay:], points=points,
+                item_points=items, item_guid=entity['actorGuid'],
+                item_x=items[pickup-1]['x'], item_depth=items[pickup-1]['depth'],
+                edge_route={k:trial[k] for k in ('side','back','brake','lift','jump')},
+                candidate_count=len(candidates))
+
+"""Preserve the established ascent planner for later equipment and fallbacks."""
+_PreviousAscent = plan_ascent_interception
+
+
+def plan_ascent_interception(initial, previous_input, delay, entity, occupied,
+                             enemy_paths=(), horizon=130):
+    original = _PreviousAscent(initial, previous_input, delay, entity, occupied,
+                               enemy_paths, horizon)
+    edge = plan_edge_interception(initial, previous_input, delay, entity, occupied,
+                                  enemy_paths, horizon)
+    return min((p for p in (original, edge) if p),
+               key=lambda p:p['pickup_frame'], default=None)
+
+
+def _edge_world_reason(plan, decision, player, frame, navigator):
+    """Recheck threats from current observations during the new edge route."""
+    if not plan.get('edge_route'):
+        return None
+    if decision['runtimePlayers'][player].get('subActionFlagRaw',1)&1:
+        return 'edge_carrying_or_unknown'
+    elapsed = frame-plan['start']
+    obs = decision['observation']
+    me, other = obs['players'][player], obs['players'][player ^ 1]
+    if other['found'] and not other['dead'] and abs(delta(other['pos'], me['pos'])[0]) < 128:
+        return 'edge_opponent_near'
+    future = plan['points'][elapsed:elapsed+12]
+    # A projectile anywhere within 256px is not an immediate collision. Reuse
+    # the shipped short ballistic check instead of cancelling into a different
+    # jump while still below the platform. Recheck every controller decision;
+    # this is not a guarantee against shots created after this observation.
+    fire_observation = dict(obs, entities=[e for e in obs['entities']
+                                          if e['category'] == 'player_fireball'])
+    fire_decision = dict(decision, observation=fire_observation)
+    if not _counterjump_hazards_clear(fire_decision, player, future,
+                                     navigator.occupied):
+        return 'edge_projectile_approaching'
+    for entity in obs['entities']:
+        if entity['category'] not in ('enemy_goomba', 'enemy_koopa'):
+            continue
+        if abs(delta(entity['pos'], me['pos'])[0]) > 256:
+            continue
+        if (entity['category'] == 'enemy_goomba'
+                and entity.get('goombaBehaviorFunctionRaw') == 0x020E13D0):
+            continue
+        # Observed ground turn state (Goomba::turnState) pauses, then resumes
+        # at 0.5 px/frame. No exact remaining pause is assumed. If even either
+        # horizontal direction cannot reach this short prefix, keep the plan.
+        # Re-evaluate in six frames; unknown actors still invalidate it.
+        if (future and entity['category'] == 'enemy_goomba'
+                and entity.get('goombaBehaviorFunctionRaw') == 0x020E1478
+                and entity['vel']['x'] == 0 and entity['vel']['y'] == 0
+                and navigator.occupied(entity['pos']['x']/4096,
+                                       -entity['pos']['y']/4096+1)
+                and all(abs(wrap(p['x'], entity['pos']['x']/4096))
+                        > 24+.5*(i+1) for i,p in enumerate(future))):
+            continue
+        if (entity['category'] != 'enemy_goomba'
+                or entity.get('goombaBehaviorFunctionRaw') != 0x020E1538
+                or abs(entity['vel']['x']) != 2048 or entity['vel']['y'] != 0):
+            return 'edge_unknown_hazard'
+        path, _ = forecast_ground_goomba(entity['pos']['x']/4096,
+            -entity['pos']['y']/4096, entity['vel']['x']/4096,
+            navigator.occupied, len(future))
+        if len(path) < len(future):
+            return 'edge_hazard_forecast_incomplete'
+        if any(abs(wrap(p['x'], e['x'])) < 16 and abs(p['depth']-e['depth']) < 24
+               for p, e in zip(future, path)):
+            return 'edge_hazard_approaching'
+    return None
+
+
+"""Diagnostic box approach: spacing before jumping, not a time-coded opening.
+
+Optimizes the first intended ceiling contact only. The caller must separately
+validate recovery and collection. A predicted contact with an NPC is rejected.
+"""
+from nsmb_mvl_player_motion_forecast import MovementForecastCache
+from nsmb_mvl_player_motion_forecast import forecast_player
+from nsmb_mvl_goomba_forecast import forecast_ground_goomba
+
+
+def box_abort_jump(decision, player, previous, navigator, fallback):
+    """Check an immediate short jump when abandoning a box approach.
+
+    This guards against the observed NPC collision caused by reverting to a
+    ground run. It does not solve adversarial player contact or guarantee the
+    remainder of the match. Unknown NPC motion makes this intervention ineligible.
+    """
+    obs = decision['observation']
+    me = obs['players'][player]
+    raw = decision['runtimePlayers'][player]
+    delay = decision['time'].get('inputDelay',-1)
+    if (previous & ~(48|2048) or fallback & ~(48|2048) or delay not in range(7)
+            or raw.get('subActionFlagRaw',1)&1
+            or not me['contact'].get('tileGround')
+            or abs(me['vel']['x']/4096) >= 2.25
+            or raw.get('behaviorFuncRaw') != 0x02115AAC):
+        return None
+    held = fallback | 2050
+    horizon = 18
+    x,depth = me['pos']['x']/4096,-me['pos']['y']/4096
+    points,_ = forecast_player(x,depth,me['vel']['x']/4096,me['vel']['y']/4096,
+        True,previous,[previous]*delay+[held]*(horizon-delay),navigator.occupied,
+        facing=raw['facing'])
+    if len(points)!=horizon or any(p['depth']>depth+1 for p in points):
+        return None
+    hb = me['hitbox']
+    threat = False
+    for e in obs['entities']:
+        if e['category'] not in ('enemy_goomba','enemy_koopa','player_fireball'):
+            continue
+        if abs((e['pos']['x']/4096-x+512)%1024-512)>128:
+            continue
+        if e['category']!='enemy_goomba' or e.get('goombaBehaviorFunctionRaw')!=0x020E1538:
+            return None
+        if abs(e['vel']['x'])!=2048 or e['vel']['y']!=0 or not e.get('npcContactFound'):
+            return None
+        path,_ = forecast_ground_goomba(e['pos']['x']/4096,-e['pos']['y']/4096,
+                                       e['vel']['x']/4096,navigator.occupied,horizon)
+        if len(path)!=horizon:
+            return None
+        threat |= abs((e['pos']['x']/4096-x+512)%1024-512)<32
+        for p,q in zip(points,path):
+            if (abs((p['x']-q['x']+512)%1024-512) <
+                    (hb['halfWidth']+e['npcColliderHalfWidthRaw'])/4096+1
+                    and abs(p['depth']-hb['centerOffsetY']/4096
+                            -q['depth']+e['npcColliderCenterYRaw']/4096) <
+                    (hb['halfHeight']+e['npcColliderHalfHeightRaw'])/4096+1):
+                return None
+    return dict(held=held,points=points) if threat else None
+
+
+def choose_box_approach(decision, player, previous, navigator, box_x, box_bottom):
+    obs = decision['observation']
+    me, other = obs['players'][player], obs['players'][player ^ 1]
+    raw = decision['runtimePlayers'][player]
+    delay = decision['time'].get('inputDelay', -1)
+    stage, hitbox = obs.get('stage', {}), me.get('hitbox', {})
+    if (stage.get('id') != 0 or stage.get('group') != 9 or not me['found']
+            or not hitbox.get('found') or hitbox.get('fixedPointShift') != 12
+            or delay not in range(7) or not me['contact'].get('tileGround')
+            or raw['currentPowerupRaw'] != 0 or me['dead']
+            or raw['physicsFlagRaw'] not in (0,130)
+            or raw.get('behaviorFuncRaw') != 0x02115AAC
+            or raw.get('damageStateRaw',1) != 0 or raw.get('updateLockedRaw',1) != 0
+            or raw.get('actionFlagRaw') not in (0,0x100000)
+            or raw.get('subActionFlagRaw',1)&1 or previous & ~(48|2048)):
+        return []
+    x, depth = me['pos']['x']/4096, -me['pos']['y']/4096
+    dx = (box_x-x+512)%1024-512
+    if not 0 <= abs(dx) < 112 or not 32 <= depth-box_bottom <= 64:
+        return []
+    if other['found'] and not other['dead'] and abs((other['pos']['x']/4096-x+512)%1024-512) < 64:
+        return []
+    direction = 1 if dx > 0 else -1
+    toward = 16 if direction > 0 else 32
+    away = 48-toward
+    enemies = []
+    for e in obs['entities']:
+        if e['category'] not in ('enemy_goomba','enemy_koopa','player_fireball'):
+            continue
+        ex = x + (e['pos']['x']/4096-x+512)%1024-512
+        if abs(ex-x) > 160:
+            continue
+        if (e['category'] != 'enemy_goomba' or e.get('goombaBehaviorFunctionRaw') != 0x020E1538
+                or abs(e['vel']['x']) != 2048 or e['vel']['y'] != 0
+                or not e.get('npcContactFound')):
+            return []
+        enemies.append(e)
+    if not enemies:
+        return []
+    state = dict(x=x, depth=depth, vx=me['vel']['x']/4096,
+                 vy=me['vel']['y']/4096, grounded=True, facing=raw['facing'])
+    half_width = me['hitbox']['halfWidth']/4096
+    half_height = me['hitbox']['halfHeight']/4096
+    center_y = me['hitbox']['centerOffsetY']/4096
+    choices = []
+    cache = MovementForecastCache(state, previous, navigator.occupied)
+    collision_cache = {}
+    for coast in range(0,61,6):
+        for lead in (0,6,12,18):
+            for brake in (6,12,18):
+                sequence = ([0]*coast + [toward|2048]*lead + [toward|2050]*brake
+                            + [away|2050]*18 + [away|2048]*18)
+                inputs = [previous]*delay+sequence
+                points = []
+                hit = None
+                safe = True
+                for i, p in enumerate(cache.iter_points(inputs)):
+                    points.append(p)
+                    if p['depth'] > depth+1:
+                        safe = False
+                        break
+                    # Conservative measured collider overlap; do not shrink a
+                    # safety margin merely to reproduce one successful input.
+                    key = (i, p['x'], p['depth'])
+                    safe = collision_cache.get(key)
+                    if safe is None:
+                        safe = True
+                        for e in enemies:
+                            ex = e['pos']['x']/4096 + e['vel']['x']/4096*(i+1)
+                            ey = -e['pos']['y']/4096 - e['npcColliderCenterYRaw']/4096
+                            ew = e['npcColliderHalfWidthRaw']/4096
+                            eh = e['npcColliderHalfHeightRaw']/4096
+                            if (abs((p['x']-ex+512)%1024-512) < half_width+ew+1
+                                    and abs((p['depth']-center_y)-ey) < half_height+eh+1):
+                                safe = False
+                                break
+                        collision_cache[key] = safe
+                    if not safe:
+                        break
+                    if p['contact'] == 'ceiling':
+                        # The first ceiling impact must hit the intended block
+                        # near its centre, not its neighbouring brick.
+                        if (abs((p['x']-box_x+512)%1024-512) <= 4
+                                and abs(p['depth']-(box_bottom+16)) < .01):
+                            hit = i+1
+                        break
+                if safe and hit:
+                    choices.append(dict(coast=coast,lead=lead,brake=brake,
+                                        hit=hit,sequence=sequence,points=points,
+                                        box_x=box_x,box_bottom=box_bottom))
+    return sorted(choices, key=lambda p:(p['hit'],abs(p['points'][p['hit']-1]['x']-box_x)))
+
+
+"""Near-box first-equipment strike, using an isolated prediction tile map."""
+_SpacingBoxBase = RoutedHumanRule
+
+
+class RoutedHumanRule(_SpacingBoxBase):
+    def reset(self):
+        super().reset()
+        self.spacing_box_plan = None
+        self.spacing_box_retry = -1
+        self.spacing_box_nav = GrassNavigator()
+
+    def act(self, decision, frame, previous_held=0):
+        held = super().act(decision, frame, previous_held)
+        obs = decision['observation']
+        me, other = obs['players'][self.player], obs['players'][self.player ^ 1]
+        raw = decision['runtimePlayers'][self.player]
+        active = self.spacing_box_plan
+        stage = obs.get('stage', {})
+        valid = (stage.get('id') == 0 and stage.get('group') == 9
+                 and me['found'] and not me['dead'] and raw['currentPowerupRaw'] == 0
+                 and raw.get('physicsFlagRaw') in (0,2,130,2050)
+                 and raw.get('behaviorFuncRaw') in (0x02115AAC,0x021135B8)
+                 and raw.get('actionFlagRaw') in (0,0x100000)
+                 and not raw.get('subActionFlagRaw',1)&1
+                 and raw.get('damageStateRaw',1) == 0
+                 and raw.get('updateLockedRaw',1) == 0)
+        if active:
+            elapsed = frame-active['start']
+            reason = None
+            if not valid or elapsed < 0 or elapsed >= active['hit']:
+                reason = 'finished_or_state_changed'
+            elif elapsed:
+                point = active['points'][elapsed-1]
+                if (abs(wrap(me['pos']['x']/4096,point['x'])) > .5
+                        or abs(-me['pos']['y']/4096-point['depth']) > .5):
+                    reason = 'motion_deviation'
+            if not reason and _skid_opponent_can_reach_plan(
+                    other, decision['runtimePlayers'][self.player ^ 1],
+                    active['points'][elapsed:elapsed+12]):
+                # Distance-only cancellation removed a needed jump and caused
+                # a native Goomba death. Use a bounded reach test including
+                # possible new shots, rechecked at each six-frame decision.
+                reason = 'opponent_can_reach'
+            if not reason:
+                for enemy in obs['entities']:
+                    if enemy['category'] not in ('enemy_goomba','enemy_koopa','player_fireball'):
+                        continue
+                    if abs(delta(enemy['pos'],me['pos'])[0]) > 96:
+                        continue
+                    # Fireballs have no stable actorGuid in this observation.
+                    # A newly entering projectile invalidates this box plan;
+                    # it must not raise while checking an unrelated NPC map.
+                    original = active['enemies'].get(enemy.get('actorGuid'))
+                    if original is None:
+                        reason = 'new_hazard'
+                        break
+                    ex = original['pos']['x']/4096 + original['vel']['x']/4096*elapsed
+                    if (enemy.get('goombaBehaviorFunctionRaw') != 0x020E1538
+                            or abs(wrap(enemy['pos']['x']/4096,ex)) > .5
+                            or enemy['pos']['y'] != original['pos']['y']):
+                        reason = 'enemy_changed'
+                        break
+            if reason:
+                self.trace['spacing_box_cancel'] = reason
+                if reason == 'opponent_can_reach' and valid:
+                    escape = box_abort_jump(decision,self.player,previous_held,self.spacing_box_nav,held)
+                    if escape:
+                        held = escape['held']
+                        self.jump_until = frame+12
+                        self.trace['spacing_box_abort_jump'] = True
+                        self.trace['held'] = held
+                active = None
+        if (active is None and valid and frame >= self.spacing_box_retry
+                and self.trace.get('target') == 'powerup_box'
+                and not self.first_equipment_seen and abs(self.trace.get('dx',999)) < 32 and not previous_held & 3):
+            self.spacing_box_nav.update(me)
+            box_x = me['pos']['x']/4096+self.trace['dx']
+            box_bottom = -me['pos']['y']/4096-self.trace['dy']+8
+            choices = choose_box_approach(decision, self.player, previous_held,
+                                          self.spacing_box_nav, box_x, box_bottom)
+            self.spacing_box_retry = frame+12
+            if choices:
+                active = dict(choices[0], start=frame,
+                              enemies={e['actorGuid']:e for e in obs['entities']
+                                       if e['category'] == 'enemy_goomba'})
+        self.spacing_box_plan = active
+        if active:
+            held = active['sequence'][frame-active['start']]
+            self.jump_until = frame
+            self.landing_support = None
+            self.trace.update(held=held, spacing_box={k:active[k] for k in
+                ('start','coast','lead','brake','hit','box_x','box_bottom')})
+        return held
+
+
+"""Diagnostic: turn on a supported platform before jumping into a ceiling.
+
+This is not a general instruction to walk more slowly. Dash and direction are
+retained; only a new jump predicted to hit the overhead block is deferred.
+"""
+from nsmb_mvl_player_motion_forecast import forecast_player
+from nsmb_mvl_goomba_forecast import forecast_ground_goomba
+
+
+def departure_brake(decision, player, previous, held, trace, nav):
+    obs = decision['observation']
+    p = obs['players'][player]
+    raw = decision['runtimePlayers'][player]
+    direction = int(bool(held&16))-int(bool(held&32))
+    vx = p['vel']['x']/4096
+    delay = decision.get('time', {}).get('inputDelay', -1)
+    stage = obs.get('stage', {})
+    if (stage.get('group') != 9 or stage.get('id') != 0
+            or trace.get('target') != 'natural_star' or not held&2 or previous&3
+            or held&~(48|2050) or not held&2048 or not direction
+            or abs(vx)>=2.25 or not p['contact'].get('tileGround')
+            or p['dead'] or raw.get('currentPowerupRaw') not in (1,2)
+            or raw.get('behaviorFuncRaw') != 0x02115AAC
+            or raw.get('physicsFlagRaw') not in (0,130)
+            or raw.get('actionFlagRaw') not in (0,0x100000)
+            or raw.get('subActionFlagRaw',1)&1
+            or raw.get('damageStateRaw',1) or raw.get('updateLockedRaw',1)
+            or delay not in range(7)):
+        return None
+    nav.update(p)
+    initial = dict(x=p['pos']['x']/4096,depth=-p['pos']['y']/4096,
+                   vx=vx,vy=p['vel']['y']/4096,grounded=True,
+                   previous_input=previous,occupied=nav.occupied,
+                   height=27,facing=raw['facing'])
+    nominal,_ = forecast_player(**initial,inputs=[previous]*delay+[held]*18)
+    if not any(x['contact']=='ceiling' for x in nominal):
+        return None
+    alternative = held&~3
+    points,_ = forecast_player(**initial,inputs=[previous]*delay+[alternative]*12)
+    if (len(points) != delay+12 or any(not x['grounded'] or
+            x['depth'] != initial['depth'] or x['contact'] for x in points)
+            or _skid_opponent_can_reach_plan(obs['players'][player^1],
+                        decision['runtimePlayers'][player^1],points)):
+        return None
+    filtered = dict(obs,entities=[e for e in obs['entities'] if e['category']=='player_fireball'])
+    if not _counterjump_hazards_clear(dict(decision,observation=filtered),player,points,nav.occupied):
+        return None
+    hb = p['hitbox']
+    for e in obs['entities']:
+        if e['category'] not in ('enemy_goomba','enemy_koopa'):
+            continue
+        if abs(wrap(e['pos']['x']/4096,initial['x']))>256:
+            continue
+        if e.get('goombaBehaviorFunctionRaw')==0x020E13D0:
+            continue
+        if (e['category']!='enemy_goomba' or e.get('goombaBehaviorFunctionRaw')!=0x020E1538
+                or abs(e['vel']['x'])!=2048 or e['vel']['y']!=0 or not e.get('npcContactFound')):
+            return None
+        enemies,_ = forecast_ground_goomba(e['pos']['x']/4096,-e['pos']['y']/4096,
+                              e['vel']['x']/4096,nav.occupied,len(points))
+        if len(enemies)!=len(points):
+            return None
+        for me,enemy in zip(points,enemies):
+            if (abs(wrap(me['x'],enemy['x'])) < (hb['halfWidth']+e['npcColliderHalfWidthRaw'])/4096+2
+                    and abs(me['depth']-hb['centerOffsetY']/4096-enemy['depth']+e['npcColliderCenterYRaw']/4096)
+                    < (hb['halfHeight']+e['npcColliderHalfHeightRaw'])/4096+2):
+                return None
+    return dict(held=alternative,points=points,
+                predicted_ceiling=next(i+1 for i,x in enumerate(nominal) if x['contact']=='ceiling'))
+
+
+_DepartureBase = RoutedHumanRule
+
+
+class RoutedHumanRule(_DepartureBase):
+    def reset(self):
+        super().reset()
+        self.departure_nav = GrassNavigator()
+
+    def act(self, decision, frame, previous_held=0):
+        held = super().act(decision,frame,previous_held)
+        plan = departure_brake(decision,self.player,previous_held,held,self.trace,self.departure_nav)
+        if plan:
+            held = plan['held']
+            self.jump_until = frame
+            self.next_jump = frame+6
+            self.trace.update(held=held,departure_brake=dict(predicted_ceiling=plan['predicted_ceiling']))
         return held
