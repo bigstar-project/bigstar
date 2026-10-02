@@ -423,6 +423,8 @@ jobs:
         with:
           node-version: 24
       - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
       - name: Restore Tauri Rust build cache
         uses: Swatinem/rust-cache@v2
         with:
