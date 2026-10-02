@@ -13,14 +13,16 @@ import { roomRuleParts } from './roomRules';
 import { MatchRuleFields } from './SegmentedField';
 import { StatusDot } from './StatusDot';
 
+/** 強さの段階の数。今後もっと強い CPU を足せるよう、今の相手は下のほうに置く */
+const maxStrength = 10;
+
 export const cpuOpponents = [
-  { value: 'beginner', label: 'クリボー', level: 'やさしい', strength: 1 },
-  { value: 'combat_v2', label: 'ノコノコ', level: 'ふつう', strength: 2 },
-  { value: 'development', label: 'カロン', level: '手ごわい', strength: 3 },
+  { value: 'beginner', label: 'クリボー', strength: 1 },
+  { value: 'combat_v2', label: 'ノコノコ', strength: 2 },
+  { value: 'development', label: 'カロン', strength: 3 },
 ] satisfies {
   value: CpuOpponent;
   label: string;
-  level: string;
   strength: number;
 }[];
 
@@ -125,7 +127,7 @@ export function CpuBattleView({
       ) : null}
 
       <Section
-        aside="右ほど手ごわくなります"
+        aside={`強さは${maxStrength}段階`}
         labelId={opponentHeadingId}
         title="対戦相手"
       >
@@ -147,7 +149,6 @@ export function CpuBattleView({
             <OpponentCard
               key={entry.value}
               label={entry.label}
-              level={entry.level}
               selected={entry.value === displayed}
               strength={entry.strength}
               value={entry.value}
@@ -249,13 +250,11 @@ function Section({
 
 function OpponentCard({
   label,
-  level,
   selected,
   strength,
   value,
 }: {
   label: string;
-  level: string;
   selected: boolean;
   strength: number;
   value: CpuOpponent;
@@ -287,8 +286,14 @@ function OpponentCard({
           className={css({ alignItems: 'center', display: 'flex', gap: '2.5' })}
         >
           <StrengthPips selected={selected} strength={strength} />
-          <span className={css({ color: 'fg.muted', textStyle: 'sm' })}>
-            {level}
+          <span
+            className={css({
+              color: 'fg.muted',
+              fontVariantNumeric: 'tabular-nums',
+              textStyle: 'sm',
+            })}
+          >
+            強さ {strength}
           </span>
         </span>
       </span>
@@ -296,7 +301,7 @@ function OpponentCard({
   );
 }
 
-/** 手ごわさを 3 段の目盛りで示す。選んでいるカードでは目盛りも明るくする */
+/** 強さを 10 段の目盛りで示す。選んでいるカードでは目盛りも明るくする */
 function StrengthPips({
   selected,
   strength,
@@ -306,17 +311,20 @@ function StrengthPips({
 }) {
   return (
     <span aria-hidden="true" className={css({ display: 'flex', gap: '0.5' })}>
-      {[1, 2, 3].map((step) => (
-        <span
-          key={step}
-          className={css({
-            bg: step > strength ? 'gray.4' : selected ? 'fg.default' : 'gray.9',
-            borderRadius: 'xs',
-            h: '1.5',
-            w: '3.5',
-          })}
-        />
-      ))}
+      {Array.from({ length: maxStrength }, (_, index) => index + 1).map(
+        (step) => (
+          <span
+            key={step}
+            className={css({
+              bg:
+                step > strength ? 'gray.4' : selected ? 'fg.default' : 'gray.9',
+              borderRadius: 'xs',
+              h: '1.5',
+              w: '2.5',
+            })}
+          />
+        ),
+      )}
     </span>
   );
 }

@@ -128,6 +128,30 @@ test.each([
   client.clear();
 });
 
+test('強さを 10 段階の数字で示す', async () => {
+  vi.mocked(commands.getSoloTestStatus).mockResolvedValue({
+    status: 'ok',
+    data: idle,
+  });
+  const client = new QueryClient();
+  const screen = await render(
+    <QueryClientProvider client={client}>
+      <TestView />
+    </QueryClientProvider>,
+  );
+  await expect.element(screen.getByText('強さは10段階')).toBeInTheDocument();
+  for (const [label, strength] of [
+    ['クリボー', 1],
+    ['ノコノコ', 2],
+    ['カロン', 3],
+  ] as const) {
+    await expect
+      .element(screen.getByRole('radio', { name: label }))
+      .toHaveAccessibleName(`${label} 強さ ${strength}`);
+  }
+  client.clear();
+});
+
 test('通常対戦などがある間は開始しない', async () => {
   vi.mocked(commands.getSoloTestStatus).mockResolvedValue({
     status: 'ok',
