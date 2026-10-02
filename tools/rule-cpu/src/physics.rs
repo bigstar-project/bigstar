@@ -122,11 +122,30 @@ impl Default for ForecastOptions {
 }
 
 pub fn forecast_player(
+    s: Motion,
+    previous: i64,
+    inputs: &[i64],
+    occupied: &impl Fn(f64, f64) -> bool,
+    options: ForecastOptions,
+) -> (Vec<Point>, &'static str) {
+    forecast(s, previous, inputs, occupied, options, false)
+}
+pub fn forecast_upper(
+    s: Motion,
+    previous: i64,
+    inputs: &[i64],
+    occupied: &impl Fn(f64, f64) -> bool,
+    options: ForecastOptions,
+) -> (Vec<Point>, &'static str) {
+    forecast(s, previous, inputs, occupied, options, true)
+}
+fn forecast(
     mut s: Motion,
     mut previous: i64,
     inputs: &[i64],
     occupied: &impl Fn(f64, f64) -> bool,
     options: ForecastOptions,
+    ceiling_corner: bool,
 ) -> (Vec<Point>, &'static str) {
     let mut points = Vec::with_capacity(inputs.len());
     for &held in inputs {
@@ -208,9 +227,15 @@ pub fn forecast_player(
                 nd = s.depth - s.vy;
             }
             if s.vy > 0.0 {
+                let head = nd - options.height;
+                if ceiling_corner && [-2.0, 0.0, 1.0].iter().any(|f| occupied(s.x + f, head)) {
+                    nd = ((head / 16.0).floor() + 1.0) * 16.0 + options.height;
+                    s.vy = 0.0;
+                    contact = Some("ceiling");
+                }
                 let mut y = ((s.depth - options.height) / 16.0).floor() * 16.0;
                 let end = ((nd - options.height) / 16.0).ceil() * 16.0;
-                while y >= end {
+                while contact != Some("ceiling") && y >= end {
                     if [-2.0, 0.0, 1.0].iter().any(|f| occupied(s.x + f, y - 0.01)) {
                         nd = y + options.height;
                         s.vy = 0.0;

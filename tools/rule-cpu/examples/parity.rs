@@ -1,4 +1,5 @@
 //! Development-only JSON-lines adapter for comparison with the Python oracle.
+use bigstar_rule_cpu::development::DevelopmentRule;
 use bigstar_rule_cpu::development_base::DevelopmentBase;
 use bigstar_rule_cpu::{
     actors,
@@ -15,11 +16,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut rule = FrozenRule::new(1, 60, false)?;
     let mut development_base = DevelopmentBase::new(1, 60)?;
     let mut use_development_base = false;
+    let mut development = DevelopmentRule::new(1, 60)?;
+    let mut development_layer = 0;
     let mut out = io::BufWriter::new(io::stdout().lock());
     for line in io::stdin().lock().lines() {
         let request: Value = serde_json::from_str(&line?)?;
         let response = match text(&request["op"]) {
             "reset" => {
+                development_layer = int(&request["development_layer"]);
+                development = DevelopmentRule::new(
+                    int(&request["player"]) as usize,
+                    int(&request["period"]),
+                )?;
                 use_development_base = flag(&request["development_base"]);
                 development_base = DevelopmentBase::new(
                     int(&request["player"]) as usize,
@@ -33,6 +41,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 json!(true)
             }
             "act" => {
+                if development_layer > 0 {
+                    let held = development.act_through(
+                        &request["decision"],
+                        int(&request["frame"]),
+                        int(&request["previousHeld"]),
+                        development_layer as usize,
+                    );
+                    serde_json::to_writer(
+                        &mut out,
+                        &json!({"held":held,"trace":development.base.trace}),
+                    )?;
+                    writeln!(&mut out)?;
+                    out.flush()?;
+                    continue;
+                }
                 if use_development_base {
                     let held = development_base.act(
                         &request["decision"],

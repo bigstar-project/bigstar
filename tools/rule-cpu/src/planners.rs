@@ -272,6 +272,22 @@ pub fn ceiling_npc(
     {
         return None;
     }
+    observed_ceiling(initial, proposed, previous, delay, occupied, paths, horizon)
+}
+
+pub fn observed_ceiling(
+    initial: PlannerState,
+    proposed: i64,
+    previous: i64,
+    delay: i64,
+    occupied: &impl Fn(f64, f64) -> bool,
+    paths: &[Vec<EnemyPoint>],
+    horizon: usize,
+) -> Option<Value> {
+    let PlannerState { motion: s, height } = initial;
+    if s.grounded || s.vy > 0.0 || paths.is_empty() || !(0..=6).contains(&delay) {
+        return None;
+    }
     let predict = |held, counter_landing_turn| {
         forecast_player(
             s,

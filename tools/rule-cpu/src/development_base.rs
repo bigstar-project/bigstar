@@ -4,6 +4,7 @@ use crate::navigation::{GrassNavigator, Waypoint};
 use crate::observation::*;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+mod targets;
 
 #[derive(Clone)]
 pub struct Target {
@@ -36,7 +37,7 @@ pub struct DevelopmentBase {
     previous_x: Option<f64>,
     pub stuck_frames: i64,
     escape_until: i64,
-    wall_depart_until: i64,
+    pub wall_depart_until: i64,
     wall_depart_direction: i64,
     runup: Option<Runup>,
     ascent_attempts: HashMap<Option<(i64, i64)>, (i64, i64)>,
@@ -45,6 +46,12 @@ pub struct DevelopmentBase {
     item_escape_until: i64,
     ledge_return: i64,
     pub landing_support: Option<Value>,
+    pub target_layer: usize,
+    pub target_previous: i64,
+    unreachable_pit_active: bool,
+    unreachable_pit_navigator: GrassNavigator,
+    falling_mushroom_navigator: GrassNavigator,
+    pub falling_mushroom_excluded: Vec<Value>,
 }
 impl DevelopmentBase {
     pub fn new(player: usize, period: i64) -> Result<Self, String> {
@@ -75,6 +82,12 @@ impl DevelopmentBase {
             item_escape_until: -1,
             ledge_return: 0,
             landing_support: None,
+            target_layer: 0,
+            target_previous: 0,
+            unreachable_pit_active: false,
+            unreachable_pit_navigator: GrassNavigator::default(),
+            falling_mushroom_navigator: GrassNavigator::default(),
+            falling_mushroom_excluded: vec![],
         })
     }
     pub fn reset(&mut self) {
@@ -174,6 +187,12 @@ impl DevelopmentBase {
             }
         }
         choices.sort_by(|a, b| a.score.total_cmp(&b.score));
+        if self.target_layer >= 12 {
+            self.filter_pit_targets(d, &mut choices);
+        }
+        if self.target_layer >= 23 {
+            self.filter_mushroom_targets(d, &mut choices);
+        }
         choices
     }
     pub fn act(&mut self, d: &Value, frame: i64, previous: i64) -> i64 {
@@ -691,7 +710,11 @@ impl DevelopmentBase {
         {
             held |= 1024;
         }
-        self.trace = json!({"frame":frame,"player":self.player,"target":kind,"dx":tx,"dy":ty,"nav_dx":move_dx,"waypoint":nav,"gap":gap,"danger":danger,"grounded":grounded,"held":held,"stuck":self.stuck_frames,"recovery":recovery,"landing_avoid":landing_avoid,"item_avoid":item_avoid,"stomp_attempt":stomp_attempt});
+        let details = json!({"frame":frame,"player":self.player,"target":kind,"dx":tx,"dy":ty,"nav_dx":move_dx,"waypoint":nav,"gap":gap,"danger":danger,"grounded":grounded,"held":held,"stuck":self.stuck_frames,"recovery":recovery,"landing_avoid":landing_avoid,"item_avoid":item_avoid,"stomp_attempt":stomp_attempt});
+        self.trace
+            .as_object_mut()
+            .unwrap()
+            .extend(details.as_object().unwrap().clone());
         {
             let extras = json!({"in_shaft":in_shaft,"close_stomp":close_stomp,"ascent_run":ascent_run,"landing_brake":landing_brake,"overhead_evade":overhead_evade,"body_jump":body_jump,"body_avoid":body_avoid,"body_evade":body_evade,"ascent_retries":attempts,"runup":self.runup.as_ref().map(|r|json!({"back":r.back,"takeoff":r.takeoff,"toward":r.toward,"phase":if r.go {"go"}else{"back"},"expires":r.expires,"kind":r.kind}))});
             self.trace

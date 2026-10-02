@@ -29,6 +29,15 @@ impl Default for GrassNavigator {
     }
 }
 impl GrassNavigator {
+    pub fn signature(&self) -> Vec<(i64, i64)> {
+        let mut keys: Vec<_> = self
+            .tiles
+            .iter()
+            .filter_map(|&(key, mask)| solid(Some(mask)).then_some(key))
+            .collect();
+        keys.sort_unstable();
+        keys
+    }
     pub fn from_json(source: &str) -> Result<Self, serde_json::Error> {
         let spec: Value = serde_json::from_str(source)?;
         let mut nav = Self {

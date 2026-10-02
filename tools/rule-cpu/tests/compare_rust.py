@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 
-def compare(binary):
+def compare(binary, profiles=None):
     process = subprocess.Popen([str(binary)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                text=True, encoding='utf8', bufsize=1)
     def call(request):
@@ -33,11 +33,31 @@ def compare(binary):
     count = 0
     forecasts = 0
     try:
-        fixtures = sorted((ROOT/'tests/fixtures').glob('*.json.gz'))
-        for profile in ('beginner', 'combat_v2', 'development_base'):
+        fixtures = sorted(p for p in (ROOT/'tests/fixtures').glob('*.json.gz')
+                          if p.name != 'rust-layer-parity.json.gz')
+        stages = {'development_base': ('_OriginalRule', 0),
+                  'emergence': ('_LaunchBase', 1), 'launch': ('_AirBase', 2),
+                  'air': ('_CeilingNpcBase', 3), 'ceiling_npc': ('_WallExitFireBase', 4),
+                  'wall_exit_fire': ('_GroundAwayBase', 5), 'ground_away': ('_CeilingNpcBrakeBase', 6),
+                  'persistent_brake': ('_DefeatedGoombaBase', 7), 'defeated_goomba': ('_GroundCooldownBase', 8),
+                  'ground_cooldown': ('_ShaftContactBase', 9), 'shaft_contact': ('_ObservedCeilingKoopaBase', 10),
+                  'observed_ceiling': ('_UnreachablePitBase', 11), 'pit_targets': ('_ImminentWallEntryBase', 12),
+                  'imminent_wall': ('_MissedTakeoffBase', 13), 'missed_takeoff': ('_UpperNpcReleaseBase', 14),
+                  'upper_release': ('_SkidJumpBase', 15), 'skid_jump': ('_PredictiveRejumpBase', 16),
+                  'predictive_rejump': ('_RisingNpcReleaseBase', 17), 'rising_release': ('_ContestedMushroomBase', 18),
+                  'contested_hop': ('_ForwardNpcBase', 19), 'forward_npc': ('_ForwardNpcInvincibilityBase', 20),
+                  'forward_invincibility': ('_DescentKoopaShotBase', 21), 'descent_shot': ('_FallingMushroomBase', 22),
+                  'falling_mushroom': ('_OverheadPitBase', 23), 'overhead_pit': ('_RecoveryFinishBase', 24),
+                  'recovery_finish': ('_NpcLandingBase', 25), 'npc_landing': ('_WaitWallBase', 26),
+                  'wait_wall': ('_FallingGoombaBase', 27), 'falling_goomba': ('_WallShortBase', 28),
+                  'wall_short': ('_ShotRecoveryBase', 29), 'shot_recovery': ('_SpacingBoxBase', 30),
+                  'spacing_box': ('_DepartureBase', 31), 'development': ('RoutedHumanRule', 32)}
+        for profile in ('beginner', 'combat_v2', *stages):
+            if profiles and profile not in profiles:
+                continue
             combat = profile == 'combat_v2'
-            if profile == 'development_base':
-                cls = importlib.import_module('nsmb_mvl_rule_match_v2')._OriginalRule
+            if profile in stages:
+                cls = getattr(importlib.import_module('nsmb_mvl_rule_match_v2'), stages[profile][0])
             else:
                 cls = importlib.import_module(f'nsmb_mvl_rule_versions.{profile}_20260920').RoutedHumanRule
             for player in (0, 1):
@@ -47,7 +67,8 @@ def compare(binary):
                         continue
                     controller = cls(player, 60)
                     call(dict(op='reset', player=player, period=60, combat=combat,
-                              development_base=profile == 'development_base'))
+                              development_base=profile == 'development_base',
+                              development_layer=stages.get(profile, ('', 0))[1]))
                     previous = 0
                     for index, row in enumerate(rows):
                         frame = row.get('frame', row.get('episodeFrame', index*6))
@@ -158,4 +179,6 @@ def compare(binary):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, default=ROOT/'target/release/examples/parity.exe')
-    compare(parser.parse_args().binary)
+    parser.add_argument('--profiles', nargs='+')
+    args = parser.parse_args()
+    compare(args.binary, args.profiles)

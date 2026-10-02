@@ -6,28 +6,30 @@ GUIの対戦相手はクリボー (`beginner`)、ノコノコ (`combat_v2`)、�
 
 ## ビルド
 
-Windows x64、Python 3.10以上、MSVCの標準ライブラリを利用できるclang++が必要。
-Pythonはビルド時だけ使用し、利用者のPCには不要。
+Windows x64とRustのMSVCツールチェーンが必要。CIはRust 1.98.0を使用する。
+配布用のビルド・実行ともにPython、PyInstaller、探索用DLLは不要。
 
 ```powershell
-python -m venv .venv-rule-build
-.venv-rule-build/Scripts/python.exe -m pip install -r tools/rule-cpu/requirements-build.txt
-./tools/rule-cpu/build.ps1 -Python "$PWD/.venv-rule-build/Scripts/python.exe" -Compiler 'C:/Program Files/LLVM/bin/clang++.exe'
+./tools/rule-cpu/build.ps1
 cmake --build build/release-windows-x86_64 --config Release
 cd tools/bigstar
 corepack pnpm build:local:insiders
 ```
 
-`build/rule-cpu/bigstar-rule-cpu.exe` はPython、地形、3種類の制御、探索用DLLを
-内包する。GUIのsidecar同期とインストーラーに含まれる。起動前の `--check` は
-全プロフィールを初期化し、保存版と高速化DLLの整合性を検査する。
-DLL欠落・不一致時は低速な代替へ黙って切り替えず、対戦開始前に失敗を通知する。
+`build/rule-cpu/bigstar-rule-cpu.exe` はRust製の単独実行ファイル。
+地形をコンパイル時に埋め込み、3種類の制御・移動予測・アイテム探索を実行する。
+GUIのsidecar同期とインストーラーは従来と同じファイル名を使用する。
+起動前の `--check` は全プロフィールと地形を初期化する。未知のプロフィールや
+未対応のロールバック入力はエラーにし、Pythonへフォールバックしない。
 
 ## 移植範囲
 
-元は `codex/rl-runtime-feasibility-20260911` の `9ee7acc0` 時点。
-カロンの制御本体は採用済みソース由来（移植前SHA256:
-`2aeb6a1f763daefa256f953865dd777d64dc465f4c60ff6af7363c32b159fee6`）。
+Rust移植の比較元は `codex/rule-ai-basics-20261001` の採用済みPython版。
+`bddac846` に参照実装と回帰検証を保護した。カロンの制御本体のLF改行でのSHA256は
+`5e397cc116ff6882254a7dd07f23d0b0ec03b36175e360777544e3a8f3c109e4`。
+PythonファイルとC++探索コードはオフラインで比較するための参照として残す。
+今後のルール変更は `src/development/` と予測・経路のRustモジュールで行い、
+保存済みの弱い2種類 (`src/frozen.rs`) へ一括適用しない。
 2026-09-29の改善ブランチでは、近接戦を保護しつつ壁キック後の着地を完了する
 限定修正を追加。検証範囲と未解決の弱点は `docs/nsmb-mvl-rule-ai-improvements-20260929.md`。
 2026-10-01の改善ブランチでは、登場・土管退出中の横移動不能を詰まりと誤判定し、
@@ -53,6 +55,27 @@ DLL欠落・不一致時は低速な代替へ黙って切り替えず、対戦�
 初期化は従来の手動対戦と同じ。IPCの標準出力はREADYまたはframe/heldだけに限定。
 オンライン対戦のゲーム更新境界で入力を固定するmainの修正は維持する。
 
+## 研究・学習からの呼び出し
+
+`nsmb_mvl_rust_rule.py` の `RoutedHumanRule(player, period)` は既存の
+`act(decision, frame, previous_held)`、`reset()`、`trace` を提供する薄い接続層。
+操作判断はGUIと同じRust実行ファイルが行う。`NSMB_RULE_CPU_EXE` で実行ファイルを
+明示でき、`executable_sha256` で使用した版を記録できる。利用後は `close()`、または
+`with` で終了する。エラー時に別のPython方策へ切り替えない。
+
+Rustの `--research --player 0|1 --profile development --period 60` は
+READYの後、JSON行の `op: act`（decision、frame、previousHeld）を受け取り、
+held、trace、decisionNanosを返す。`op: reset` は制御状態を初期化する。
+研究側で操作周期を管理するので、この入口では6フレームの間引きを重ねない。
+通常のGUI入口は従来どおり6フレーム周期で判断し、その間は入力を維持する。
+
+既存の研究ハーネスを使う場合は `run_research_match.py` に `--harness-root <研究環境>`、
+`--output <未作成の出力先> --exe <検証用melonDS> --frames 1200 --maps 45` を渡す。
+両側をカロン・周期60で動かし、判断は6フレームごと、観測は毎フレーム保存する。
+実行ファイルを開始時に固定し、Rust実行ファイル・接続層・ハーネスのハッシュを
+`rust-runtime.json` に残す。ハーネスの依存確認用にコピーするPython参照ファイルは、
+Rustの判断には使用しない。研究ハーネスそのものはこの配布用パッケージに含めない。
+
 ## 任意の詳細記録
 
 `MELONDS_NSML_RULE_CAPTURE` に未作成の `.jsonl.gz` ファイルの絶対パスを指定すると、
@@ -67,6 +90,21 @@ CPUへ渡った全フレームの観測、直前入力、選択入力、最後�
 
 ## 検証
 
+- CPU: `tools/rule-cpu` で `cargo fmt`、`cargo clippy-all`、`cargo test`。
+  実機由来の35ケースで計画・判断理由をPython参照と比較し、接地の数値フラグ、
+  近接相手・欠落した時計・被弾時の中止、壁キックの着地などを検査する。
+- `cargo build --release --example parity` 後、Pythonで `tests/compare_rust.py` を実行すると、
+  保存記録を順番に入力して操作・判断理由・予測座標を参照と照合する。
+  `tests/compare_worker.py <全フレーム記録.jsonl.gz>` は配布用と同じRustバイナリを照合する。
+- 回帰用の期待値は `tests/generate_layer_fixtures.py` で保存したPython参照から生成する。
+  新しい方策の結果をそのまま正解として上書きする用途には使わない。
+- 2026-10-02のRust移植検証: 3プロフィールの順序付き操作・判断理由1,194件、
+  移動・アイテム・敵・計画の比較1,094件で差0。4本の連続記録を両側で照合した
+  3,656判断でも差0。35ケースの局所回帰とGUI用プロトコルも通過。
+  3種類を各40秒、GUIと同じ起動経路で2回実行し、操作と片側終了時の両側停止を確認した。
+  単独再測定の試合中1,320フレームではカロン平均59.93fps、最長41.53ms、
+  33ms超は1フレーム。無停止・全フレーム16.7msを保証する結果ではない。
+  研究ハーネスでもRust同士の1,200フレームを完走し、両側の星取得、攻防、軌跡保存を確認。
 - GUI: `tools/bigstar` の `corepack pnpm run ci`。
 - Rust: `tools/bigstar/src-tauri` の `cargo test`、`cargo clippy-all`。
 - 実機: `solo_test::tests::real_cpu_profiles_and_peer_cleanup` を必要なROM・worker・ログ先の

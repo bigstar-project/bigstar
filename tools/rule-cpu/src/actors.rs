@@ -10,6 +10,60 @@ pub struct EnemyPoint {
     pub vx: f64,
 }
 #[derive(Clone, Debug, Serialize)]
+pub struct FallingEnemyPoint {
+    pub x: f64,
+    pub depth: f64,
+    pub vx: f64,
+    pub vy: f64,
+}
+pub fn short_goomba(
+    e: &Value,
+    occupied: &impl Fn(f64, f64) -> bool,
+    frames: usize,
+) -> (Vec<FallingEnemyPoint>, &'static str) {
+    if int(&e["objectId"]) != 83
+        || int(&e["goombaBehaviorFunctionRaw"]) != 0x020e1538
+        || e["entityUpdateStateFound"].as_i64() != Some(1)
+        || e["entityUpdateStateRaw"].as_i64() != Some(0)
+    {
+        return (vec![], "unsupported_state");
+    }
+    let mut x = num(&e["pos"]["x"]) / 4096.0;
+    let mut depth = -num(&e["pos"]["y"]) / 4096.0;
+    let vx = num(&e["vel"]["x"]) / 4096.0;
+    let mut vy = num(&e["vel"]["y"]) / 4096.0;
+    if vx.abs() != 0.5 || !(-4.0..=0.0).contains(&vy) {
+        return (vec![], "unsupported_velocity");
+    }
+    let mut points = vec![];
+    for _ in 0..frames {
+        let nx = x + vx;
+        if occupied(nx + if vx > 0.0 { 7.0 } else { -8.0 }, depth - 8.0) {
+            return (points, "side_contact");
+        }
+        let supported = vy == 0.0 && depth.rem_euclid(16.0) == 0.0 && occupied(nx, depth + 0.01);
+        let mut ny = depth;
+        if !supported {
+            vy = (vy - 0.1875).max(-4.0);
+            ny = depth - vy;
+            let mut floor = (depth / 16.0).ceil() * 16.0;
+            let end = (ny / 16.0).floor() * 16.0;
+            while floor <= end {
+                if occupied(nx, floor + 0.01) {
+                    ny = floor;
+                    vy = 0.0;
+                    break;
+                }
+                floor += 16.0;
+            }
+        }
+        x = nx;
+        depth = ny;
+        points.push(FallingEnemyPoint { x, depth, vx, vy });
+    }
+    (points, "horizon")
+}
+#[derive(Clone, Debug, Serialize)]
 pub struct ItemPoint {
     pub frame: usize,
     pub x: f64,
