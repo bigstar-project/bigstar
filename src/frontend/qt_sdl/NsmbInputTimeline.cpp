@@ -388,6 +388,17 @@ std::optional<melonDS::u32> PredictionRuntime::PendingRollbackObservedFrame() co
     return PendingRollbackObservedFrame_;
 }
 
+melonDS::u32 PredictionRuntime::ConfirmedSampleLimit(melonDS::u32 contiguousInput) const
+{
+    // A pre-input sample F depends only on inputs through F - 1.
+    auto limit = contiguousInput + 1;
+    if (PendingRollbackFrame_)
+        limit = std::min(limit, *PendingRollbackFrame_);
+    if (!PredictionProbeConfirmations_.empty())
+        limit = std::min(limit, PredictionProbeConfirmations_.begin()->first);
+    return limit;
+}
+
 void PredictionRuntime::ClearPendingRollbackFrame()
 {
     PendingRollbackFrame_.reset();
@@ -419,6 +430,7 @@ void Runtime::ResetForRestart(melonDS::u32 noFrameLimit)
     LocalInputs.clear();
     RemoteInputs.clear();
     RollbackInputs.ResetForRestart();
+    NextRomLoopInputFrame.reset();
     LastReceivedInputFrame = noFrameLimit;
     LastSentInputFrame = noFrameLimit;
     LastTracedSentInputFrame = noFrameLimit;
@@ -447,7 +459,7 @@ RemoteInputStoreResult Runtime::StoreRemote(
     RemoteInputStoreResult result;
     result.PreviousLastReceived = LastReceivedInputFrame;
     if (confirmPrediction)
-        result.Confirmation = RollbackInputs.Confirm(frame, input, localFrame);
+        result.Confirmation = RollbackInputs.Confirm(frame, input, NextRomLoopInputFrame ? NextRomLoopInputFrame : localFrame);
     RemoteInputs[frame] = input;
     if (LastReceivedInputFrame == noFrameLimit || LastReceivedInputFrame < frame)
         LastReceivedInputFrame = frame;
@@ -469,6 +481,7 @@ void Runtime::PrimeEpoch(
 {
     PruneHistory(startFrame);
     const melonDS::u32 firstInputFrame = startFrame + delay;
+    NextRomLoopInputFrame.reset();
     RemoteInputEpochStartFrame_ = startFrame;
     HighestContiguousRemoteFrame_.reset();
     for (melonDS::u32 frame = startFrame; frame < firstInputFrame; frame++)

@@ -49,12 +49,6 @@ static bool SelfLoopFastPathEnabled()
     return value && value[0] && value[0] != '0';
 }
 
-static bool GameRAMRollbackEnabled()
-{
-    const char* value = std::getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_GAME_RAM_ROLLBACK");
-    return value && value[0] && value[0] != '0';
-}
-
 static void ApplyPendingGameRAMRestore(ARM* cpu)
 {
     cpu->NDS.ApplyNSMLPendingGameRAMRestore();
@@ -808,8 +802,8 @@ JitBlockEntry Compiler::CompileBlock(ARM* cpu, bool thumb, FetchedInstr instrs[]
             }
         }
 
-        if (GameRAMRollbackEnabled() && Num == 0 && !Thumb &&
-            CurInstr.Addr == 0x02004EC8)
+        if (CurInstr.Addr == NSMLGameRAMRollback::LoopStartAddress && Num == 0 && !Thumb &&
+            NSMLGameRAMRollback::HasJitInputGate())
         {
             RegCache.Flush();
             PushRegs(true, true);

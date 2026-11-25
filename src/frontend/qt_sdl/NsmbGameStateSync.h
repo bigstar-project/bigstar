@@ -53,6 +53,12 @@ void Trace(Context context, int instanceID, melonDS::u32 frame,
            melonDS::NDS *nds);
 void TraceWorld(Context context, int instanceID, melonDS::u32 frame,
                 melonDS::NDS *nds);
+bool ShouldSync(Context context, melonDS::u32 frame);
+GameStateModel::GameStateSyncHashes ReadSyncHashes(
+    Context context, melonDS::NDS *nds, const GameStateModel::GameStateSample &sample);
+void Publish(Context context, const Hooks &hooks, int instanceID, melonDS::u32 frame,
+             const GameStateModel::GameStateSample &sample,
+             const GameStateModel::GameStateSyncHashes &hashes);
 void Sync(Context context, const Hooks &hooks, int instanceID,
           melonDS::u32 frame, melonDS::NDS *nds);
 

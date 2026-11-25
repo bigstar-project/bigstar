@@ -656,6 +656,12 @@ void ARMJIT::CompileBlock(ARM* cpu) noexcept
         nextInstrAddr[1] = r15;
         JIT_DEBUGPRINT("instr %08x %x\n", instrs[i].Instr & (thumb ? 0xFFFF : ~0), instrs[i].Addr);
 
+        // Building a block executes the guest instructions once in the interpreter.
+        // The first traversal and later native dispatches must consume identical gates.
+        if (instrs[i].Addr == NSMLGameRAMRollback::LoopStartAddress && cpu->Num == 0 &&
+            !thumb && NSMLGameRAMRollback::HasJitInputGate())
+            cpu->NDS.ApplyNSMLPendingGameRAMRestore();
+
         instrValues[numInstrs++] = instrs[i].Instr;
 
         u32 translatedAddr = LocaliseCodeAddress(cpu->Num, instrs[i].Addr);

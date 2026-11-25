@@ -347,17 +347,14 @@ void TraceWorld(Context context, int instanceID, melonDS::u32 frame,
   TraceEffects(context, instanceID, frame, nds);
 }
 
-void Sync(Context context, const Hooks &hooks, int instanceID,
-          melonDS::u32 frame, melonDS::NDS *nds) {
-  if (!context.Enabled || !context.StateSync.GameEnabled ||
-      !context.SessionReady || !nds ||
-      instanceID < 0 || instanceID >= 16 ||
-      frame < context.Connection.SharedLogicalEpoch ||
-      frame % static_cast<melonDS::u32>(context.StateSync.GameInterval) != 0)
-    return;
+bool ShouldSync(Context context, melonDS::u32 frame) {
+  return context.Enabled && context.StateSync.GameEnabled && context.SessionReady &&
+         frame >= context.Connection.SharedLogicalEpoch &&
+         frame % static_cast<melonDS::u32>(context.StateSync.GameInterval) == 0;
+}
 
-  const GameStateModel::GameStateSample sample =
-      ReadSample(nds, context.StageSceneSettings);
+GameStateModel::GameStateSyncHashes ReadSyncHashes(
+    Context context, melonDS::NDS *nds, const GameStateModel::GameStateSample &sample) {
   GameStateModel::GameStateSyncHashes hashes;
   hashes.Basic = sample.Hash;
   if (context.StateSync.GameExtended) {
@@ -369,6 +366,12 @@ void Sync(Context context, const Hooks &hooks, int instanceID,
         nds, kGameCandidateRenderBlockAddr, 0x240);
   }
 
+  return hashes;
+}
+
+void Publish(Context context, const Hooks &hooks, int instanceID, melonDS::u32 frame,
+             const GameStateModel::GameStateSample &sample,
+             const GameStateModel::GameStateSyncHashes &hashes) {
   std::lock_guard<std::mutex> lock(context.Mutex);
   if (!context.Runtime.BeginGameStateSync(instanceID, frame))
     return;
@@ -385,6 +388,14 @@ void Sync(Context context, const Hooks &hooks, int instanceID,
           sample, hashes);
   context.Transport.Send(&packet, sizeof(packet), ENET_PACKET_FLAG_RELIABLE,
                          false);
+}
+
+void Sync(Context context, const Hooks &hooks, int instanceID,
+          melonDS::u32 frame, melonDS::NDS *nds) {
+  if (!nds || instanceID < 0 || instanceID >= 16 || !ShouldSync(context, frame))
+    return;
+  const auto sample = ReadSample(nds, context.StageSceneSettings);
+  Publish(context, hooks, instanceID, frame, sample, ReadSyncHashes(context, nds, sample));
 }
 
 } // namespace NsmbMvlNetplay::GameStateSync

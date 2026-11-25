@@ -867,18 +867,34 @@ bool RollbackResimulateIfNeeded(int instanceID, melonDS::u32 frame, melonDS::NDS
 std::array<PacketBridge::GameTickInputQueue, 16> GameTickInputs;
 std::array<GameStateTraceWriter, 16> GameTickTraces;
 
+struct RollbackTickSample {
+    GameStateSample State;
+    std::optional<GameStateModel::GameStateSyncHashes> SyncHashes;
+};
+
 struct RollbackTickTrace {
     melonDS::u32 Generation = 0xFFFFFFFF;
     melonDS::u32 WrittenThrough = 0;
-    std::map<melonDS::u32, GameStateSample> Pending;
+    std::map<melonDS::u32, RollbackTickSample> Pending;
     GameStateTraceWriter Writer;
 };
 std::array<RollbackTickTrace, 16> RollbackTickTraces;
 
+bool UseRomLoopTickInputs(melonDS::NDS* nds)
+{
+    if (!nds || (nds->IsJITEnabled() && !melonDS::NSMLGameRAMRollback::HasJitInputGate()))
+        return false;
+    return G.Enabled && G.Input.NetplayOnly && G.Rollback.Enabled
+        && G.Rollback.Backend == Config::RollbackBackend::RomLoop
+        && G.RuntimePatch.PacketBridgeJitHelperPatchEnabled
+        && nds->ARM9Read32(0x02001AC8) == 0x32505447;
+}
+
 void PrepareRollbackTickTrace(int instanceID, melonDS::NDS* nds)
 {
     const char* path = std::getenv("MELONDS_NSML_GAME_TICK_TRACE");
-    if (!path || !*path || !G.Enabled || !G.Ready || !G.Rollback.Enabled ||
+    const bool writeTrace = path && *path;
+    if ((!writeTrace && !G.StateSync.GameEnabled) || !G.Enabled || !G.Ready || !G.Rollback.Enabled ||
         !G.NetplaySession.Handshake.LogicalEpochEstablished() ||
         !G.NetplaySession.Handshake.WaitedForPeerAtStart() ||
         G.Rollback.Backend != Config::RollbackBackend::RomLoop)
@@ -891,16 +907,27 @@ void PrepareRollbackTickTrace(int instanceID, melonDS::NDS* nds)
         trace.WrittenThrough = 0;
         trace.Pending.clear();
         trace.Writer.Close();
-        const auto output = std::string(path) + "-g" + std::to_string(generation) + ".csv";
-        if (!trace.Writer.Open(output, false))
-            std::fprintf(stderr, "NSMB RollbackTickTrace: cannot open %s\n", output.c_str());
+        if (writeTrace)
+        {
+            const auto output = std::string(path) + "-g" + std::to_string(generation) + ".csv";
+            if (!trace.Writer.Open(output, false))
+                std::fprintf(stderr, "NSMB RollbackTickTrace: cannot open %s\n", output.c_str());
+        }
         nds->NSMLGameRAMCheckpointCallback = [instanceID, nds, generation](melonDS::u32 frame) {
             auto& current = RollbackTickTraces[instanceID];
             if (G.NetplaySession.Handshake.Generation() != generation ||
                 frame <= current.WrittenThrough)
                 return;
             // Replay replaces speculative samples at exactly the same gate.
-            current.Pending[frame] = ReadGameStateSample(nds);
+            const auto context = GameStateSyncContext();
+            const bool sync = nds->NSMLGameStageCallback && frame > G.Connection.SharedLogicalEpoch
+                && GameStateSync::ShouldSync(context, frame - 1);
+            if (!current.Writer.IsOpen() && !sync)
+                return;
+            auto& sample = current.Pending[frame];
+            sample.State = ReadGameStateSample(nds);
+            if (sync)
+                sample.SyncHashes = GameStateSync::ReadSyncHashes(context, nds, sample.State);
         };
     }
 }
@@ -908,7 +935,7 @@ void PrepareRollbackTickTrace(int instanceID, melonDS::NDS* nds)
 void FlushRollbackTickTrace(int instanceID, melonDS::NDS* nds)
 {
     auto& trace = RollbackTickTraces[instanceID];
-    if (!trace.Writer.IsOpen() ||
+    if (trace.Pending.empty() ||
         trace.Generation != G.NetplaySession.Handshake.Generation() ||
         nds->IsNSMLGameRAMRollbackTransactionInFlight())
         return;
@@ -917,16 +944,16 @@ void FlushRollbackTickTrace(int instanceID, melonDS::NDS* nds)
         std::lock_guard<std::mutex> lock(G.Mutex);
         const auto confirmed = G.InputRuntime.HighestContiguousRemoteFrame();
         if (!confirmed) return;
-        // A pre-input sample F only depends on inputs through F-1. A queued
-        // correction at M invalidates samples after M until replay completes.
-        through = *confirmed + 1;
-        if (const auto mismatch = G.InputRuntime.RollbackInputs.PendingRollbackFrame())
-            through = std::min(through, *mismatch);
+        through = G.InputRuntime.RollbackInputs.ConfirmedSampleLimit(*confirmed);
     }
     auto it = trace.Pending.begin();
     while (it != trace.Pending.end() && it->first <= through)
     {
-        trace.Writer.Write(instanceID, it->first, it->second, nullptr);
+        if (trace.Writer.IsOpen())
+            trace.Writer.Write(instanceID, it->first, it->second.State, nullptr);
+        if (it->second.SyncHashes)
+            GameStateSync::Publish(GameStateSyncContext(), GameStateSyncHooks(),
+                instanceID, it->first - 1, it->second.State, *it->second.SyncHashes);
         trace.WrittenThrough = it->first;
         it = trace.Pending.erase(it);
     }
@@ -995,6 +1022,51 @@ void QueueGameTickInputs(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     };
 }
 
+void QueueRomLoopInput(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
+    int localPlayer, const InputState& local)
+{
+    auto& queue = GameTickInputs[instanceID];
+    const auto generation = G.NetplaySession.Handshake.Generation();
+    if (queue.Generation() != generation || !nds->NSMLGameStageCallback)
+    {
+        queue.Reset(generation);
+        nds->NSMLGameStageCallback = [instanceID, nds, localPlayer, generation](melonDS::u32 marker) {
+            if (generation != G.NetplaySession.Handshake.Generation() ||
+                marker != melonDS::NSMLGameRAMRollback::NormalInputGate)
+                return;
+            const auto input = GameTickInputs[instanceID].Consume();
+            if (!input)
+                FailGameTickInputs(instanceID, "rollback-input-queue-underflow");
+            const auto tick = input->Frame;
+            {
+                std::lock_guard<std::mutex> lock(G.Mutex);
+                G.InputRuntime.NextRomLoopInputFrame = tick + 1;
+            }
+            RollbackRuntime::SaveCheckpointIfNeeded(RollbackContext(), instanceID, tick, nds);
+            if (RollbackResimulateIfNeeded(instanceID, tick, nds))
+            {
+                auto& pending = RollbackTickTraces[instanceID].Pending;
+                pending.erase(pending.upper_bound(nds->NSMLGameRAMReplayDisplayStartFrame),
+                              pending.end());
+                return;
+            }
+            InputState remote;
+            bool predicted;
+            {
+                std::unique_lock<std::mutex> lock(G.Mutex);
+                if (G.InputRuntime.RemoteInputs.find(tick) == G.InputRuntime.RemoteInputs.end())
+                    NetplaySession::TryWaitForRollbackRemoteInputLocked(NetplaySessionContext(),
+                        NetplaySessionHooks(), lock, nds, tick, tick, remote);
+                RollbackRuntime::ResolveRemoteInputLocked(RollbackContext(), tick, remote, predicted);
+            }
+            PacketBridge::WriteJitScratchInputs(PacketBridgeContext(), PacketBridgeHooks(),
+                instanceID, tick, nds, localPlayer, input->Local, remote, true, predicted);
+        };
+    }
+    if (!queue.Enqueue({frame, local, {}, false}))
+        FailGameTickInputs(instanceID, "noncontiguous-rollback-input-or-backlog-limit");
+}
+
 void WritePacketBridgeJitScratchIfNeeded(
     int instanceID,
     melonDS::u32 frame,
@@ -1048,6 +1120,7 @@ void WritePacketBridgeJitScratchIfNeeded(
         }
     }
 
+    const bool romLoopInputs = UseRomLoopTickInputs(nds);
     InputState effectiveLocalInput = localInput;
     InputState remoteInput = NeutralInput();
     bool hasRemoteInput = false;
@@ -1105,7 +1178,7 @@ void WritePacketBridgeJitScratchIfNeeded(
         const auto resolveStart = std::chrono::steady_clock::now();
         {
             std::unique_lock<std::mutex> lock(G.Mutex);
-            if (rollbackInputActive)
+            if (rollbackInputActive && !romLoopInputs)
             {
                 auto it = G.InputRuntime.RemoteInputs.find(logicalFrame);
                 if (it == G.InputRuntime.RemoteInputs.end())
@@ -1121,7 +1194,7 @@ void WritePacketBridgeJitScratchIfNeeded(
                     RollbackContext(), logicalFrame, remoteInput,
                     predictedRemoteInput);
             }
-            else
+            else if (!rollbackInputActive)
             {
                 hasRemoteInput = NetplaySession::TryGetRemoteInputLocked(
                     NetplaySessionContext(), logicalFrame, remoteInput);
@@ -1164,7 +1237,9 @@ void WritePacketBridgeJitScratchIfNeeded(
     if (writeScratch)
     {
         const auto writeStart = std::chrono::steady_clock::now();
-        if (UseGameTickInputs(nds))
+        if (romLoopInputs)
+            QueueRomLoopInput(instanceID, logicalFrame, nds, localPlayer, effectiveLocalInput);
+        else if (UseGameTickInputs(nds))
             QueueGameTickInputs(instanceID, logicalFrame, nds, localPlayer,
                 effectiveLocalInput, remoteInput, hasRemoteInput);
         else
@@ -1705,7 +1780,8 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
         instanceID >= 0 && instanceID < 16 && nds)
         PrepareRollbackTickTrace(instanceID, nds);
 
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
+    const bool romLoopInputs = UseRomLoopTickInputs(nds);
+    if (!romLoopInputs && (G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         RollbackRuntime::SaveCheckpointIfNeeded(
             RollbackContext(), instanceID, rollbackFrame, nds);
     phaseTrace.Mark(BeforeHookPhaseTrace::Phase::Checkpoint);
@@ -1713,7 +1789,7 @@ InputState BeforeRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds,
     if (!pauseInputNetplayForRestart
         && (G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds)
         WritePacketBridgeJitScratchIfNeeded(instanceID, syncFrame, nds, testInput);
-    if ((G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds
+    if (!romLoopInputs && (G.TestEnabled || G.Enabled) && instanceID >= 0 && instanceID < 16 && nds
         && G.Rollback.Backend == Config::RollbackBackend::RomLoop)
     {
         RollbackResimulateIfNeeded(instanceID, rollbackFrame, nds);
@@ -2081,7 +2157,7 @@ void AfterRunFrame(int instanceID, melonDS::u32 frame, melonDS::NDS* nds)
         AIObservationContext(), AIObservationHooks(), instanceID, logFrame, nds);
     const auto afterTrace = std::chrono::steady_clock::now();
     TraceHangPhase("begin", "sync-game", instanceID, logFrame, logFrame, logFrame);
-    if (!UseGameTickInputs(nds))
+    if (!UseGameTickInputs(nds) && !UseRomLoopTickInputs(nds))
         GameStateSync::Sync(
             GameStateSyncContext(), GameStateSyncHooks(), instanceID,
             logicalFrame, nds);

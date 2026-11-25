@@ -2490,6 +2490,10 @@ void NDS::CaptureNSMLGameTickProbeSchedulerState(NSMLGameTickProbeSchedulerState
 
 void NDS::ApplyNSMLPendingGameRAMRestore()
 {
+    // A normal gate can arm a correction for this very update. The replay
+    // gates below use their recorded inputs and must not consume fresh ones.
+    if (NSMLGameStageCallback && !IsNSMLGameRAMRollbackTransactionInFlight())
+        NSMLGameStageCallback(NSMLGameRAMRollback::NormalInputGate);
     if (!NSMLGameRAMRestorePending)
     {
         constexpr u32 historyEnabledAddr = 0x02001ACC;

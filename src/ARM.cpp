@@ -232,9 +232,9 @@ static u64 HashNSMLGameTickProbeMainRAM(NDS& nds)
     return hash;
 }
 
-static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
+static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr, bool jitDispatch = false)
 {
-    constexpr u32 loopStart = 0x02004EC8;
+    constexpr u32 loopStart = NSMLGameRAMRollback::LoopStartAddress;
     constexpr u32 loopGateAfterCounter = 0x020019C0;
     constexpr u32 requestAddr = 0x02001AC0;
     constexpr u32 activeAddr = 0x02001AC4;
@@ -252,7 +252,7 @@ static bool HandleNSMLRomGameTickProbe(ARM* cpu, u32 instrAddr)
     constexpr u32 historyAddr = 0x023C1300;
     constexpr u32 historyEntrySize = 16;
 
-    if (instrAddr == loopStart)
+    if (instrAddr == loopStart && !(jitDispatch && NSMLGameRAMRollback::HasJitInputGate()))
         cpu->NDS.ApplyNSMLPendingGameRAMRestore();
     if (instrAddr != loopStart && instrAddr != loopGateAfterCounter)
         return false;
@@ -3810,7 +3810,7 @@ void ARMv5::Execute()
             u32 instrAddr = R[15] - ((CPSR&0x20)?2:4);
             if (nsmlRuntimeHooksEnabled)
             {
-                HandleNSMLRomGameTickProbe(this, instrAddr);
+                HandleNSMLRomGameTickProbe(this, instrAddr, true);
                 if (HandleNSMLGameTickProbe(this, instrAddr))
                 {
                     NDS.ARM9Timestamp++;

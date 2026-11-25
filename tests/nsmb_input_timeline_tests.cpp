@@ -217,6 +217,7 @@ void TestPredictionProbeAndPrune()
         12, forcedConfirmed, neutral, forcedProbe);
     CHECK(forced.Predicted);
     CHECK(forced.Input.KeyMask == 0xFFA);
+    CHECK(forcedTimeline.ConfirmedSampleLimit(20) == 12);
     const auto forcedConfirmation =
         forcedTimeline.TakePredictionProbeConfirmation(12);
     CHECK(forcedConfirmation.has_value());
@@ -319,6 +320,22 @@ void TestReplayFrameInputResolution()
     CHECK(predicted && predicted->RemotePredicted);
     CHECK(!ResolveReplayFrameInputs(runtime, 40, -1, neutral));
     CHECK(!ResolveReplayFrameInputs(runtime, 40, 2, neutral));
+}
+
+void TestRollbackConfirmationUsesConsumedGameTick()
+{
+    NsmbMvlNetplay::InputTimeline::Runtime runtime;
+    const auto neutral = Input(0xFFF);
+    runtime.PrimeEpoch(840, 2, neutral, 0);
+    runtime.RollbackInputs.Resolve(7267, runtime.RemoteInputs, neutral, {});
+    runtime.NextRomLoopInputFrame = 7268;
+    const auto arrival = runtime.StoreRemote(7267, Input(0xFEF), 100, true, 0);
+    CHECK(arrival.Confirmation.FrameAlreadySimulated);
+    CHECK(runtime.RollbackInputs.PendingRollbackObservedFrame() == 7268);
+    CHECK(runtime.RollbackInputs.ConfirmedSampleLimit(7300) == 7267);
+    runtime.ResetForRestart(0);
+    CHECK(!runtime.NextRomLoopInputFrame);
+    CHECK(runtime.RollbackInputs.ConfirmedSampleLimit(840) == 841);
 }
 
 void TestRuntimeRestartContractAndStatistics()
@@ -516,6 +533,7 @@ int main()
     TestPredictionProbeAndPrune();
     TestRuntimeRemoteStorePrimeAndPrune();
     TestReplayFrameInputResolution();
+    TestRollbackConfirmationUsesConsumedGameTick();
     TestRuntimeRestartContractAndStatistics();
     TestButtonAndMaskParsing();
     TestTimelineTargetsTouchAndFirstMatch();

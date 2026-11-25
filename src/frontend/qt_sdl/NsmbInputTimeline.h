@@ -77,6 +77,7 @@ public:
     const InputMap& Predictions() const;
     std::optional<melonDS::u32> PendingRollbackFrame() const;
     std::optional<melonDS::u32> PendingRollbackObservedFrame() const;
+    melonDS::u32 ConfirmedSampleLimit(melonDS::u32 contiguousInput) const;
     void ClearPendingRollbackFrame();
     void ClearPendingRollback();
 
@@ -133,6 +134,9 @@ public:
     void RecordRemoteInputWait(unsigned long long elapsedUs, unsigned long long loops);
     void RecordFrameLeadThrottle(unsigned long long elapsedUs, unsigned long long loops);
 
+    // Written under the session mutex when a normal ROM-loop gate consumes input.
+    // Packet reception can also run on the pump thread between display frames.
+    std::optional<melonDS::u32> NextRomLoopInputFrame;
     PredictionRuntime RollbackInputs;
     InputMap LocalInputs;
     InputMap RemoteInputs;

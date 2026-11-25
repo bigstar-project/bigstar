@@ -3,8 +3,27 @@
 
 #include "types.h"
 
+#include <cstdlib>
+
 namespace melonDS::NSMLGameRAMRollback
 {
+
+// Core notification before a normal game-loop checkpoint, outside replay history.
+constexpr u32 NormalInputGate = 0x102;
+constexpr u32 LoopStartAddress = 0x02004EC8;
+
+inline bool HasJitInputGate()
+{
+#if defined(JIT_ENABLED) && defined(__x86_64__)
+    static const bool enabled = [] {
+        const char* value = std::getenv("MELONDS_NSML_ROM_GAME_TICK_PROBE_GAME_RAM_ROLLBACK");
+        return value && *value && *value != '0';
+    }();
+    return enabled;
+#else
+    return false;
+#endif
+}
 
 constexpr u32 RequiredHistoryCount(u32 restoreFrame, u32 currentFrame)
 {
