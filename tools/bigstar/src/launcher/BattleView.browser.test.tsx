@@ -2,9 +2,9 @@ import { describe, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
 import * as Tabs from '@/components/ui/tabs';
 import {
+  defaultInputDelayFrames,
+  defaultInputMaxFrameLead,
   initialForm,
-  rollbackInputDelayFrames,
-  rollbackInputMaxFrameLead,
 } from '../form';
 import { BattleView } from './BattleView';
 import type {
@@ -554,14 +554,8 @@ describe('対戦ビュー', () => {
     expect(updateField).toHaveBeenCalledWith('courseStages', [0, 4, 2, 3, 4]);
   });
 
-  test('ロールバック時は先行フレーム上限の代わりに予測フレーム7を表示する', async () => {
-    const { screen } = await renderBattleView({
-      formOverride: {
-        inputDelayFrames: 2,
-        inputMaxFrameLead: 0,
-        rollbackEnabled: true,
-      },
-    });
+  test('部屋作成の初期状態ではロールバックが有効で予測フレーム7を表示する', async () => {
+    const { screen } = await renderBattleView();
 
     await screen.getByRole('button', { name: '部屋を作る' }).click();
     const details = screen.getByRole('button', { name: /通信の詳細設定/ });
@@ -583,23 +577,23 @@ describe('対戦ビュー', () => {
       .toBeChecked();
   });
 
-  test('ロールバックを切り替えると遅延と先行フレームを推奨値に戻す', async () => {
+  test('ロールバックを無効にすると遅延と先行フレームを通常値に戻す', async () => {
     const { screen, updateField } = await renderBattleView();
 
     await screen.getByRole('button', { name: '部屋を作る' }).click();
     await screen.getByRole('button', { name: /通信の詳細設定/ }).click();
     const rollback = screen.getByRole('switch', { name: 'ロールバック' });
-    await expect.element(rollback).not.toBeChecked();
+    await expect.element(rollback).toBeChecked();
     await rollback.click();
 
-    expect(updateField).toHaveBeenCalledWith('rollbackEnabled', true);
+    expect(updateField).toHaveBeenCalledWith('rollbackEnabled', false);
     expect(updateField).toHaveBeenCalledWith(
       'inputDelayFrames',
-      rollbackInputDelayFrames,
+      defaultInputDelayFrames,
     );
     expect(updateField).toHaveBeenCalledWith(
       'inputMaxFrameLead',
-      rollbackInputMaxFrameLead,
+      defaultInputMaxFrameLead,
     );
   });
 

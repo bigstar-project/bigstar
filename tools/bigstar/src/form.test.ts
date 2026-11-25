@@ -27,12 +27,9 @@ describe('フォーム補助関数', () => {
         bigStars: 10,
         courseMode: 'select',
         courseStages: [4, 3, 2, 1, 0],
-        inputDelayFrames: 2,
-        inputMaxFrameLead: 0,
         lives: '5',
         matchSeed: ' 0x0e ',
         rngSeeds: ['0x0e', '2', '3', '4', '5'],
-        rollbackEnabled: true,
         wins: 3,
       }),
     ).toEqual({

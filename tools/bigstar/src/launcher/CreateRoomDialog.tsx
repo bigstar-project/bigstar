@@ -1,7 +1,6 @@
 import { CaretRight } from '@phosphor-icons/react';
 import { type ReactNode, useId } from 'react';
 import { css, cx } from 'styled-system/css';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import * as Collapsible from '@/components/ui/collapsible';
 import * as Dialog from '@/components/ui/dialog';
@@ -434,16 +433,8 @@ function RollbackRow({
   return (
     <Switch.Label className={rowClass}>
       <span className={rowTextClass}>
-        <span
-          className={cx(
-            rowLabelClass,
-            css({ alignItems: 'center', display: 'flex', gap: '2' }),
-          )}
-        >
-          <span id={labelId}>ロールバック</span>
-          <Badge colorPalette="gray" size="sm" variant="subtle">
-            試験機能
-          </Badge>
+        <span className={rowLabelClass} id={labelId}>
+          ロールバック
         </span>
         <span className={rowDescriptionClass} id={descriptionId}>
           遅延を隠す代わりに画面が巻き戻ることがあります
